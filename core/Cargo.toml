@@ -1,0 +1,15 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+db = { workspace = true }
+
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+mavspec = { workspace = true }
+maviola = { workspace = true }

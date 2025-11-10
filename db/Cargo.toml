@@ -1,0 +1,19 @@
+[package]
+name = "db"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+macros = { workspace = true }
+
+chrono = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+
+mavspec = { workspace = true }
+maviola = { workspace = true }
+mavinspect = { version = "0.6.6" }

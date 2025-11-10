@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "gui",
+    "db",
+    "macros",
+]
+default-members = ["gui"]
+
+# We specify dependencies we use in multiple places here, so we can make sure
+# every crate uses the same version.
+[workspace.dependencies]
+macros = { path = "macros" }
+db = { path = "db" }
+core = { path = "core" }
+gui = { path = "gui" }
+
+chrono = "0.4.42"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
+thiserror = "2.0.17"
+
+mavspec = { version = "0.6.7", features = ["definitions", "metadata", "std"] }
+maviola = { version = "0.3.0", features = ["async", "dlct-standard", "dlct-common", "dlct-ardupilotmega"] }
+
+egui = { version = "0.32" }
+egui-wgpu = { version = "0.32" }
+egui-winit = { version = "0.32" }
+eframe = { version = "0.32" }
+egui_plot = "0.33"
+egui_extras = { version = "0.32", features = ["image"] }
+
+## serialization & communication
+#bitvec = { version = "1.0.1", default-features = false, features = ["atomic"] }
+#heapless = { version = "0.8.0", features = ["serde"] }
+#serde = { version = "1", default-features = false, features = ["derive"] }
+#serde_json = "1.0.89"
+#postcard = "1.0"
+#siphasher = { version = "0.3", default-features = false }
+#crc = "3"
+## misc
+#chrono = "0.4"
+#rand = { version = "0.8", default-features = false }

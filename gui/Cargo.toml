@@ -1,0 +1,28 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+core = { workspace = true }
+
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+mavspec = { workspace = true }
+maviola = { workspace = true }
+
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }
+eframe = { workspace = true }
+egui_plot = { workspace = true }
+egui_extras = { workspace = true }
+egui_tiles = "0.13"
+#egui_tracing = { git = "https://github.com/maxjoehnk/egui_tracing", branch = "feature/egui-0.31" }
+egui_tracing = { path = "../../../egui_tracing/egui-tracing" }
+walkers = "0.44"
