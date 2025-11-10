@@ -23,6 +23,5 @@ eframe = { workspace = true }
 egui_plot = { workspace = true }
 egui_extras = { workspace = true }
 egui_tiles = "0.13"
-#egui_tracing = { git = "https://github.com/maxjoehnk/egui_tracing", branch = "feature/egui-0.31" }
-egui_tracing = { path = "../../../egui_tracing/egui-tracing" }
+egui_tracing = { git = "https://github.com/KoffeinFlummi/egui_tracing", branch = "egui0.32" }
 walkers = "0.44"

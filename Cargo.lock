@@ -1182,6 +1182,7 @@ dependencies = [
 [[package]]
 name = "egui_tracing"
 version = "0.2.6"
+source = "git+https://github.com/KoffeinFlummi/egui_tracing?branch=egui0.32#51ae8ca35f044f747537085796032acd5a8e0ff1"
 dependencies = [
  "chrono",
  "egui",
