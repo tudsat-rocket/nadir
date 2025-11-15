@@ -1,5 +1,6 @@
 //! A widget for plotting telemetry data and the corresponding state.
 
+use chrono::TimeDelta;
 use eframe::egui;
 use eframe::egui::PointerButton;
 use egui::Color32;
@@ -26,7 +27,7 @@ impl SharedPlotState {
             start: 0.0,
             end: 1.0,
             attached_to_edge: true,
-            view_width: 120.0,
+            view_width: 30.0,
             box_dragging: false,
         }
     }
@@ -86,6 +87,9 @@ impl<'a> Plot<'a> {
 
 impl<'a> egui::Widget for Plot<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        #[cfg(feature = "profiling")]
+        puffin::profile_function!();
+
         let legend = Legend::default()
             .background_alpha(0.5)
             .position(Corner::LeftTop);
@@ -135,6 +139,13 @@ impl<'a> egui::Widget for Plot<'a> {
             //    plot_ui.set_auto_bounds(egui::Vec2b::new(true, true));
             //}
 
+            let last_bounds = plot_ui.plot_bounds();
+            let min_x = *last_bounds.range_x().start();
+            let max_x = *last_bounds.range_x().end();
+
+            let since = self.core.plot_origin + TimeDelta::seconds(min_x as i64 - 5);
+            let _before = self.core.plot_origin + TimeDelta::seconds(max_x as i64 + 5);
+
             for line in self.lines {
                 let id = format!("{}.{}", line.message_name, line.field_name);
                 let name = line.alias.unwrap_or(id);
@@ -143,6 +154,8 @@ impl<'a> egui::Widget for Plot<'a> {
                     &line.message_name,
                     &line.field_name,
                     (line.system_id, line.component_id),
+                    Some(since),
+                    None,
                 ) {
                     Ok(timeseries) => timeseries,
                     Err(e) => {

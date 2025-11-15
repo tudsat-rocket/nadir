@@ -377,7 +377,9 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                 &self,
                 msg_name: &str,
                 field_name: &str,
-                system_and_component_ids: (u8, u8)
+                system_and_component_ids: (u8, u8),
+                since: Option<chrono::DateTime<chrono::Utc>>,
+                until: Option<chrono::DateTime<chrono::Utc>>,
             ) -> Result<Vec<(chrono::DateTime<chrono::Utc>, f64)>, DbError> {{
                 use chrono::TimeZone;
 
@@ -386,15 +388,18 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                 let component_id = system_and_component_ids.1;
                 let lower_case = msg_name.to_lowercase();
 
+                let since = since.unwrap_or_default();
+
                 // Look Ma, SQL injection
                 let query = format!(\"SELECT received_at, {{field_name}} FROM messages_{{lower_case}}
-                    WHERE system_id=:system_id AND component_id=:component_id
+                    WHERE system_id=?1 AND component_id=?2 AND received_at >= ?3
                     ORDER BY received_at ASC\");
 
                 let mut stmt = conn.prepare(&query)?;
-                let mut rows = stmt.query_map(&[
-                    (\":system_id\", &system_id),
-                    (\":component_id\", &component_id)
+                let mut rows = stmt.query_map(rusqlite::params![
+                    &system_id,
+                    &component_id,
+                    &since
                 ], |row| {{
                     let timestamp: chrono::DateTime<chrono::Utc> = row.get(0)?;
                     let value: f64 = row.get(1)?;

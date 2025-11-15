@@ -47,6 +47,9 @@ impl SensorsPane {
     }
 
     pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+        #[cfg(feature = "profiling")]
+        puffin::profile_function!();
+
         let View::System(system_id) = behavior.active_view else {
             return;
         };

@@ -1,3 +1,5 @@
+mod can;
+mod commands;
 mod map;
 mod messages;
 mod plot;
@@ -6,6 +8,8 @@ mod status;
 
 use core::Core;
 
+pub use can::CanProbePane;
+pub use commands::CommandsPane;
 pub use map::MapPane;
 pub use messages::MessagesPane;
 pub use plot::PlotPane;
@@ -27,6 +31,8 @@ pub enum Pane {
     Sensors(SensorsPane),
     Plot(PlotPane),
     Messages(MessagesPane),
+    Commands(CommandsPane),
+    CanProbePane(CanProbePane),
     Placeholder(String),
 }
 
@@ -37,7 +43,9 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             Pane::Status(_) => "Status".into(),
             Pane::Sensors(_) => "Sensors".into(),
             Pane::Plot(_) => "Plot".into(),
-            Pane::Messages(_) => "MAVLink Messages".into(),
+            Pane::Messages(_) => "Messages".into(),
+            Pane::Commands(_) => "Commands".into(),
+            Pane::CanProbePane(_) => "CAN Probe".into(),
             Pane::Placeholder(s) => s.into(),
         }
     }
@@ -54,6 +62,8 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             Pane::Sensors(p) => p.pane_ui(ui, self),
             Pane::Plot(p) => p.pane_ui(ui, self),
             Pane::Messages(p) => p.pane_ui(ui, self),
+            Pane::Commands(p) => p.pane_ui(ui, self),
+            Pane::CanProbePane(p) => p.pane_ui(ui, self),
             Pane::Placeholder(_) => {}
         }
 

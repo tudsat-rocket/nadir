@@ -23,5 +23,14 @@ eframe = { workspace = true }
 egui_plot = { workspace = true }
 egui_extras = { workspace = true }
 egui_tiles = "0.13"
+egui-notify = "0.20"
 egui_tracing = { git = "https://github.com/KoffeinFlummi/egui_tracing", branch = "egui0.32" }
-walkers = "0.44"
+walkers = "0.46"
+
+# profiling feature
+puffin = { git = "https://github.com/EmbarkStudios/puffin", optional = true }
+puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true }
+
+[features]
+default = []
+profiling = ["dep:puffin", "dep:puffin_egui"]

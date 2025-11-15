@@ -3,24 +3,15 @@
 #![allow(dead_code)]
 #![allow(unused)]
 
-//use directories::ProjectDirs;
-//use nalgebra::{Quaternion, UnitQuaternion, Vector3};
-
 use eframe::egui;
 use egui::{Color32, Stroke, Style, Ui, Widget};
-//use egui::{Color32, Frame, Layout, Rect, Stroke, Ui, Vec2, Widget};
-//use transform_gizmo_egui::math::{DMat4, DVec3, Transform};
-//use transform_gizmo_egui::{Gizmo, GizmoConfig, GizmoExt, GizmoMode, GizmoVisuals};
-//use walkers::extras::{Place, Places, Style};
+use mavspec::rust::dialects::common::enums::MavCmd;
 use walkers::{
-    HttpOptions, HttpTiles, MapMemory, Plugin, Position,
+    HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol},
 };
 
 use crate::{panes::TreeBehavior, views::View};
-
-//use shared_types::telemetry::FlightMode;
-//use telemetry::{Dim, Metric};
 
 pub struct MapPane {
     osm_tiles: HttpTiles,
@@ -34,6 +25,30 @@ pub struct MapPane {
     //estimated_positions: Vec<(Position, (f64, Vector3<f32>, FlightMode, f32))>,
     //gps_positions: Vec<(Position, (f64, Vector3<f32>, FlightMode, f32))>,
     cached_state: Option<(f64, usize)>,
+}
+
+struct NavigationPlugin {
+    system: core::System,
+}
+
+impl walkers::Plugin for NavigationPlugin {
+    fn run(
+        self: Box<Self>,
+        ui: &mut Ui,
+        response: &egui::Response,
+        projector: &Projector,
+        map_memory: &MapMemory,
+    ) {
+        if let Some(screen_pos) = response.interact_pointer_pos()
+            && response.secondary_clicked()
+        {
+            let world_pos = projector.unproject(egui::Vec2::new(screen_pos.x, screen_pos.y));
+
+            // TODO: get the altitude from somewhere, make reference frame selectable.
+            self.system
+                .do_reposition(world_pos.y(), world_pos.x(), 50.0);
+        }
+    }
 }
 
 impl MapPane {
@@ -182,7 +197,7 @@ impl MapPane {
         let center_position = Position::new(-8.292362108248733, 39.394546258787685);
 
         let system_ids = behavior.core.known_system_ids();
-        let systems = system_ids.iter().map(|id| behavior.core.system(*id));
+        let systems = system_ids.iter().filter_map(|id| behavior.core.system(*id));
         let active_system_id = if let View::System(s_id) = behavior.active_view {
             Some(s_id)
         } else {
@@ -224,8 +239,16 @@ impl MapPane {
             .collect();
 
         let mut map = walkers::Map::new(Some(tiles), &mut self.memory, center_position)
+            //.with_plugin(PathPlugin::new(vec![vis_plugin]))
             .with_plugin(Places::new(places));
-        //.with_plugin(PathPlugin::new(vec![vis_plugin]))
+
+        let active_system = active_system_id
+            .map(|system_id| behavior.core.system(system_id))
+            .flatten();
+
+        if let Some(system) = active_system {
+            map = map.with_plugin(NavigationPlugin { system })
+        }
 
         //if !self.state.show_gizmos {
         //    if let Some((position, (alt_agl, _att, _fm, hdop))) =

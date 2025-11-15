@@ -9,7 +9,9 @@ edition = "2024"
 db = { workspace = true }
 
 chrono = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 
 mavspec = { workspace = true }
 maviola = { workspace = true }
+socketcan = "3.5.0"

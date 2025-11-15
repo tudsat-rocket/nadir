@@ -1,31 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::sync::Arc;
+
 use eframe::egui;
+use egui::FontFamily;
 use tracing_subscriber::prelude::*;
 
 mod app;
 mod panes;
 mod views;
 mod widgets;
-
-fn ui_main(core: core::Core, collector: egui_tracing::EventCollector) -> Result<(), eframe::Error> {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "rapid-control",
-        options,
-        Box::new(|cc| {
-            // This gives us image support:
-            egui_extras::install_image_loaders(&cc.egui_ctx);
-
-            let app = app::App::new(core, collector, &cc.egui_ctx);
-            Ok(Box::new(app))
-        }),
-    )
-}
 
 fn main() -> Result<(), eframe::Error> {
     let collector = egui_tracing::EventCollector::default();
@@ -40,15 +24,46 @@ fn main() -> Result<(), eframe::Error> {
         .with(collector.clone())
         .init();
 
-    let core = core::Core::init();
-    let c = core.clone();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
+        ..Default::default()
+    };
 
-    let join_handle =
-        std::thread::spawn(|| tokio::runtime::Runtime::new().unwrap().block_on(c.run()));
+    #[cfg(feature = "profiling")]
+    puffin::set_scopes_on(true);
 
-    ui_main(core, collector)?;
+    eframe::run_native(
+        "rapid-control",
+        options,
+        Box::new(|cc| {
+            // This gives us image support:
+            egui_extras::install_image_loaders(&cc.egui_ctx);
 
-    join_handle.join().unwrap();
+            let mut fonts = egui::FontDefinitions::default();
+            let b612 =
+                egui::FontData::from_static(include_bytes!("../assets/fonts/B612-Regular.ttf"));
+            let b612_mono =
+                egui::FontData::from_static(include_bytes!("../assets/fonts/B612Mono-Regular.ttf"));
 
-    Ok(())
+            fonts.font_data.insert("B612".to_owned(), Arc::new(b612));
+            fonts
+                .font_data
+                .insert("B612 Mono".to_owned(), Arc::new(b612_mono));
+
+            fonts
+                .families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .insert(0, "B612".to_owned());
+            fonts
+                .families
+                .entry(FontFamily::Monospace)
+                .or_default()
+                .insert(0, "B612 Mono".to_owned());
+            cc.egui_ctx.set_fonts(fonts);
+
+            let app = app::App::new(collector, &cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
+    )
 }
