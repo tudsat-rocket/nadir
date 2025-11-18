@@ -10,8 +10,9 @@ db = { workspace = true }
 
 chrono = { workspace = true }
 tokio = { workspace = true }
+async-channel = { workspace = true }
 tracing = { workspace = true }
 
 mavspec = { workspace = true }
 maviola = { workspace = true }
-socketcan = "3.5.0"
+socketcan = { workspace = true }

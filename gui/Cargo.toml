@@ -26,6 +26,8 @@ egui_tiles = "0.13"
 egui-notify = "0.20"
 egui_tracing = { git = "https://github.com/KoffeinFlummi/egui_tracing", branch = "egui0.32" }
 walkers = "0.46"
+async-channel = { workspace = true }
+socketcan = { workspace = true }
 
 # profiling feature
 puffin = { git = "https://github.com/EmbarkStudios/puffin", optional = true }

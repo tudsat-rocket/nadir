@@ -104,7 +104,12 @@ impl System {
             .unwrap()
             .build();
 
+        tracing::info!("fn send_massage: callback");
         connection.callback.send(&frame).unwrap();
+    }
+
+    pub fn send_can_message(&self, can_frame: CanFrame) {
+        self.send_message(&can_frame);
     }
 
     pub fn do_reposition(&self, lat: f64, lng: f64, altitude_msl: f32) {

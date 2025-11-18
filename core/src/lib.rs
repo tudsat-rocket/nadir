@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use can_proxy::spawn_can_proxy;
 use maviola::asnc::prelude::*;
 use maviola::prelude::*;
 use maviola::protocol::Peer;
@@ -10,10 +11,12 @@ use maviola::protocol::dialects::Common;
 use mavspec::rust::dialects::common::enums::MavSeverity;
 use mavspec::rust::dialects::common::messages::CommandAck;
 
-use socketcan::{CanAddr, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket, StandardId};
+use async_channel::{Receiver, Sender};
+use socketcan::{CanAddr, CanFrame, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket, StandardId};
 
 use db::Db;
 
+pub mod can_proxy;
 mod discovery;
 mod interface;
 mod system;
@@ -33,6 +36,7 @@ pub struct Core {
     pub systems: Arc<Mutex<HashMap<SystemId, System>>>,
     pub on_ack: Arc<Option<Box<dyn Fn(&CommandAck) + Send + Sync>>>,
     pub on_event: Arc<Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>>,
+    pub can_proxy: Option<(Sender<CanFrame>, Receiver<CanFrame>)>,
 }
 
 impl Core {
@@ -44,13 +48,18 @@ impl Core {
             systems: Arc::new(Mutex::new(HashMap::new())),
             interfaces: Arc::new(Mutex::new(vec![
                 //Interface::TcpClient("127.0.0.1:5760".to_owned()),
-                Interface::TcpClient("127.0.0.1:5761".to_owned()),
-                Interface::TcpClient("127.0.0.1:5762".to_owned()),
+                // Interface::TcpClient("127.0.0.1:5761".to_owned()),
+                // Interface::TcpClient("127.0.0.1:5762".to_owned()),
                 Interface::UdpServer("0.0.0.0:14550".to_owned()),
             ])),
             on_ack: Arc::new(None),
             on_event: Arc::new(None),
+            can_proxy: None,
         }
+    }
+    pub fn set_can_proxy(mut self, sender: Sender<CanFrame>, receiver: Receiver<CanFrame>) -> Self {
+        self.can_proxy = Some((sender, receiver));
+        self
     }
 
     pub fn on_ack(mut self, cb: Box<dyn Fn(&CommandAck) + Send + Sync>) -> Self {
@@ -86,10 +95,6 @@ impl Core {
             .build()
             .await
             .unwrap();
-
-        let socket = CanAddr::from_iface("vcan0")
-            .map(|addr| CanSocket::open_addr(&addr))
-            .flatten();
 
         let mut events = node.events().unwrap();
         while let Some(event) = events.next().await {
@@ -131,20 +136,25 @@ impl Core {
                                     cb(ack);
                                 }
                             }
-                            Common::CanFrame(can_frame) => {
-                                if let Ok(s) = &socket {
-                                    let id = if can_frame.id > 0b111_1111_1111 {
-                                        Id::Extended(ExtendedId::new(can_frame.id).unwrap())
-                                    } else {
-                                        Id::Standard(StandardId::new(can_frame.id as u16).unwrap())
+                            Common::CanFrame(can_frame) => 'canframe: {
+                                // tracing::info!("received can_frame from mavlink system");
+                                if let Some((ref can_sender, _)) = self.can_proxy {
+                                    let id = match can_frame.id {
+                                        0..0b111_1111_1111 => Id::Standard(
+                                            StandardId::new(can_frame.id as u16).unwrap(),
+                                        ),
+                                        _ if can_frame.id < 0x1FFF_FFFF => {
+                                            Id::Extended(ExtendedId::new(can_frame.id).unwrap())
+                                        }
+                                        _ => break 'canframe,
                                     };
-
                                     let frame = socketcan::CanFrame::new(
                                         id,
                                         &can_frame.data[..(can_frame.len as usize)],
                                     )
                                     .unwrap();
-                                    let _ = s.write_frame(&frame);
+                                    // NOTE: ignore rare channel errors
+                                    let _ = can_sender.send(frame).await;
                                 }
                             }
                             _ => {}
@@ -215,7 +225,7 @@ impl Core {
         system_ids
     }
 
-    pub fn system<'a>(&'a self, id: SystemId) -> Option<System> {
-        self.systems.lock().unwrap().get(&id).map(|s| s.clone())
+    pub fn system(&self, id: SystemId) -> Option<System> {
+        self.systems.lock().unwrap().get(&id).cloned()
     }
 }

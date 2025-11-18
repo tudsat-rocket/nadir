@@ -79,7 +79,6 @@ macro_rules! define_message_tables {
         }
     };
 }
-
 impl Db {
     pub fn init() -> Self {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -97,6 +96,8 @@ impl Db {
     }
 
     // TODO: replace with macro-generated get-all methods
+
+    // get can frames to display for system
     pub fn can_frames_for_system(
         &self,
         system_and_component_ids: (u8, u8),

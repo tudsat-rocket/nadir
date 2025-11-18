@@ -1,9 +1,11 @@
 use std::time::Duration;
 
+use async_channel::{Receiver, Sender};
 use egui::{Align, Key, Layout, Margin};
 use egui_tiles::LinearDir;
 use mavspec::rust::dialects::common::enums::MavResult;
 use mavspec::rust::dialects::common::messages::CommandAck;
+use socketcan::CanFrame;
 
 use crate::panes::*;
 use crate::views::View;
@@ -27,16 +29,34 @@ impl App {
     ) -> Self {
         let (ack_tx, ack_rx) = std::sync::mpsc::channel::<CommandAck>();
         let ctx2 = ctx.clone();
+
+        let (tx_to_proxy, rx_to_proxy) = async_channel::bounded::<CanFrame>(16);
+        let (tx_from_proxy, rx_from_proxy) = async_channel::bounded::<CanFrame>(16);
+
         let core = core::Core::init()
             .on_ack(Box::new(move |ack| {
                 ack_tx.send(ack.clone()).unwrap();
             }))
             .on_event(Box::new(move |_event| {
                 ctx2.request_repaint();
-            }));
+            }))
+            .set_can_proxy(tx_to_proxy, rx_from_proxy);
 
         let c = core.clone();
-        std::thread::spawn(|| tokio::runtime::Runtime::new().unwrap().block_on(c.run()));
+        std::thread::spawn(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+
+            // can socket
+            let co = c.clone();
+            rt.spawn(async move {
+                // NOTE: ignore errors for now
+                let _ = core::can_proxy::spawn_can_proxy(rx_to_proxy, tx_from_proxy, co).await;
+            });
+
+            rt.block_on(c.run());
+
+            // tokio::runtime::Runtime::new().unwrap().block_on(c.run())
+        });
 
         let mut tiles = egui_tiles::Tiles::default();
 
