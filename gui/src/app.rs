@@ -16,6 +16,7 @@ pub struct App {
     shared_plot_state: SharedPlotState,
     active_view: View,
     sidebar_collapsed: bool,
+    logs_shown: bool,
 }
 
 impl App {
@@ -74,6 +75,7 @@ impl App {
             shared_plot_state: SharedPlotState::new(),
             active_view: View::System(0x01),
             sidebar_collapsed: true,
+            logs_shown: false,
         }
     }
 }
@@ -169,21 +171,24 @@ impl eframe::App for App {
                             self.sidebar_collapsed = true;
                         }
                         ui.separator();
-                        ui.selectable_value(&mut self.active_view, View::Settings, "🔧 Settings");
+                        ui.toggle_value(&mut self.logs_shown, "📃 Show Debug Logs");
+                        ui.separator();
                         ui.selectable_value(&mut self.active_view, View::Overview, "🖧 Overview");
                     });
                 });
         }
 
-        egui::TopBottomPanel::bottom("bottombar")
-            .resizable(true)
-            .height_range(20.0..=1000.0)
-            .default_height(200.0)
-            .show(ctx, |ui| {
-                ui.set_height(ui.available_height());
-                ui.add_space(5.0);
-                ui.add(egui_tracing::ui::Logs::new(self.log_collector.clone()));
-            });
+        if self.logs_shown {
+            egui::TopBottomPanel::bottom("bottombar")
+                .resizable(true)
+                .height_range(20.0..=1000.0)
+                .default_height(200.0)
+                .show(ctx, |ui| {
+                    ui.set_height(ui.available_height());
+                    ui.add_space(5.0);
+                    ui.add(egui_tracing::ui::Logs::new(self.log_collector.clone()));
+                });
+        }
 
         ctx.input(|input| {
             if input.key_down(Key::Num0) {
