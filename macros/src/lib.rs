@@ -258,13 +258,18 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                             | "STORAGE_USAGE_FLAG"
                             | "UTM_DATA_AVAIL_FLAGS"
                             | "VIDEO_STREAM_STATUS_FLAGS"
-                            | "VIDEO_STREMA_STATUS_FLAGS")) => {
-                            format!("{varname}: Default::default()")
+                            )) => {
+                            let enum_name = f.r#enum();
+                            let enum_type: String = enum_name.unwrap().split("_").map(|n| {
+                                let (h, t) = n.split_at(1);
+                                format!("{}{}", h, t.to_lowercase())
+                            }).collect();
+                            format!("{varname}: maviola::protocol::dialects::common::enums::{enum_type}::from_bits(row.get::<usize, _>({i})?).unwrap()")
                         }
                         (_, Some("MAV_CMD")) => {
                             format!("{varname}: row.get::<usize, u16>({i})?.try_into().unwrap()")
                         }
-                        (_, Some(enum_name)) => {
+                        (_, Some(_enum_name)) => {
                             format!("{varname}: row.get::<usize, u8>({i})?.try_into().unwrap()")
                         }
                         _ => format!("{varname}: row.get({i})?")
