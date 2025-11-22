@@ -7,7 +7,7 @@ use maviola::protocol::Peer;
 use maviola::protocol::SystemId;
 use maviola::protocol::dialects::Ardupilotmega;
 use maviola::protocol::dialects::Common;
-use mavspec::rust::dialects::common::enums::MavSeverity;
+use mavspec::rust::dialects::common::enums::{MavCmd, MavSeverity};
 use mavspec::rust::dialects::common::messages::CommandAck;
 
 use socketcan::{CanAddr, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket, StandardId};
@@ -127,7 +127,10 @@ impl Core {
                                 ),
                             },
                             Common::CommandAck(ack) => {
-                                if let Some(cb) = self.on_ack.as_ref() {
+                                if let Some(cb) = self.on_ack.as_ref()
+                                    && ack.command != MavCmd::RequestMessage
+                                    && ack.command != MavCmd::SetMessageInterval
+                                {
                                     cb(ack);
                                 }
                             }
