@@ -102,6 +102,7 @@ impl System {
 
         // TODO: dialects
         let (message_sender, receiver) = tokio::sync::broadcast::channel::<Common>(5);
+        let receiver2 = message_sender.subscribe();
 
         let system = System {
             system_id,
@@ -119,6 +120,11 @@ impl System {
             system.clone(),
             0x01,
             receiver,
+        ));
+
+        let _ = tokio::spawn(crate::discovery::request_message_intervals(
+            system.clone(),
+            receiver2,
         ));
 
         system
