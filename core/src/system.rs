@@ -1,26 +1,90 @@
 use core::f32;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use maviola::asnc::node::Callback;
+use maviola::core::io::{ChannelId, ChannelInfo};
 use maviola::prelude::CallbackApi;
 use maviola::prelude::Frame;
 use maviola::prelude::Message;
 use maviola::prelude::V2;
 use maviola::protocol::SystemId;
-use mavspec::rust::dialects::common::enums::MavCmd;
-use mavspec::rust::dialects::common::enums::MavFrame;
-use mavspec::rust::dialects::common::enums::MavType;
-use mavspec::rust::dialects::common::messages::Heartbeat;
-use mavspec::rust::dialects::common::messages::{CanFrame, CommandInt};
-use mavspec::rust::dialects::common::messages::{CommandLong, GlobalPositionInt};
+use mavspec::rust::dialects::common::enums::{
+    MavCmd, MavFrame, MavModeFlag, MavStandardMode, MavType,
+};
+use mavspec::rust::dialects::common::messages::{
+    Attitude, AvailableModes, CommandInt, CommandLong, GlobalPositionInt,
+};
+use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
 use db::{Db, DbError};
 use mavspec::rust::dialects::Common;
 
+#[derive(Clone, Debug, Default)]
+pub struct ChannelStats {
+    last_1s: VecDeque<(Instant, u8, usize)>,
+}
+
+impl ChannelStats {
+    pub fn packet_loss(&mut self) -> f32 {
+        self.truncate_to_1s();
+
+        let Some(mut p) = self.last_1s.front() else {
+            return 0.0;
+        };
+
+        let mut missed: u64 = 0;
+        let mut total: u64 = 0;
+        for p2 in self.last_1s.iter().skip(1) {
+            let diff = p2.1.wrapping_sub(p.1);
+            missed += (diff - 1) as u64;
+            total += diff as u64;
+            p = p2;
+        }
+
+        (missed as f32) / (total as f32)
+    }
+
+    pub fn incoming_packet_rate(&mut self) -> f32 {
+        self.truncate_to_1s();
+        self.last_1s.iter().count() as f32
+    }
+
+    pub fn incoming_data_rate(&mut self) -> f32 {
+        self.truncate_to_1s();
+        self.last_1s.iter().map(|p| p.2).sum::<usize>() as f32
+    }
+
+    pub fn outgoing_packet_rate(&mut self) -> f32 {
+        0.0
+    }
+
+    pub fn outgoing_data_rate(&mut self) -> f32 {
+        0.0
+    }
+
+    fn truncate_to_1s(&mut self) {
+        while self
+            .last_1s
+            .front()
+            .map(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
+            .unwrap_or(false)
+        {
+            let _ = self.last_1s.pop_front();
+        }
+    }
+
+    pub fn push(&mut self, seq: u8, len: usize) {
+        self.last_1s.push_back((Instant::now(), seq, len));
+        self.truncate_to_1s();
+    }
+}
+
 pub struct SystemConnection {
     pub seq: u8,
     pub callback: Callback<V2>,
+    pub channels: HashMap<ChannelId, (ChannelInfo, ChannelStats)>,
 }
 
 #[derive(Clone)]
@@ -29,13 +93,12 @@ pub struct System {
     pub db: Db,
     pub message_sender: tokio::sync::broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
-    // TODO: replace with proper type, include all the mode flags and stuff
-    pub custom_modes: Arc<Mutex<Option<HashMap<u32, String>>>>,
+    pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
 }
 
 impl System {
     pub fn new(system_id: SystemId, db: Db, callback: Callback<V2>) -> Self {
-        let custom_modes = Arc::new(Mutex::new(None));
+        let available_modes = Arc::new(Mutex::new(None));
 
         // TODO: dialects
         let (message_sender, receiver) = tokio::sync::broadcast::channel::<Common>(5);
@@ -47,8 +110,9 @@ impl System {
             conn: Arc::new(Mutex::new(SystemConnection {
                 seq: 0,
                 callback: callback.clone(),
+                channels: HashMap::new(),
             })),
-            custom_modes,
+            available_modes,
         };
 
         let _ = tokio::spawn(crate::discovery::discover_available_modes(
@@ -139,11 +203,81 @@ impl System {
         self.send_message(&cmd);
     }
 
-    pub fn notify_of_message(&mut self, message: Common) {
+    pub fn notify_of_message(
+        &mut self,
+        message: Common,
+        frame: &Frame<V2>,
+        callback: &Callback<V2>,
+    ) {
         let _ = self.message_sender.send(message);
+
+        let mut conninfo = self.conn.lock().unwrap();
+        let (_channel_info, channel_stats) = conninfo
+            .channels
+            .entry(callback.channel_id())
+            .or_insert_with(|| (callback.info().clone(), ChannelStats::default()));
+
+        channel_stats.push(frame.sequence(), frame.body_length());
     }
 
-    pub fn custom_modes(&self) -> Option<HashMap<u32, String>> {
-        self.custom_modes.lock().unwrap().clone()
+    pub fn channels(&self) -> Vec<(ChannelInfo, ChannelStats)> {
+        let conninfo = self.conn.lock().unwrap();
+        conninfo.channels.values().cloned().collect()
+    }
+
+    pub fn available_modes(&self) -> Option<Vec<AvailableModes>> {
+        self.available_modes.lock().unwrap().clone()
+    }
+
+    pub fn custom_mode_info(&self, custom_mode: u32) -> Option<AvailableModes> {
+        self.available_modes()
+            .map(|modes| {
+                modes
+                    .iter()
+                    .find(|mode| {
+                        //mode.standard_mode == MavStandardMode::NonStandard
+                        mode.custom_mode == custom_mode
+                    })
+                    .cloned()
+            })
+            .flatten()
+    }
+
+    fn standard_mode_info(&self, standard_mode: MavStandardMode) -> Option<AvailableModes> {
+        self.available_modes()
+            .map(|modes| {
+                modes
+                    .iter()
+                    .find(|mode| mode.standard_mode == standard_mode)
+                    .cloned()
+            })
+            .flatten()
+    }
+
+    pub fn current_mode_info(&self) -> Option<AvailableModes> {
+        let Some(heartbeat) = self.last_heartbeat().ok().flatten() else {
+            return None;
+        };
+
+        if heartbeat
+            .base_mode
+            .contains(MavModeFlag::CUSTOM_MODE_ENABLED)
+        {
+            self.custom_mode_info(heartbeat.custom_mode)
+        } else {
+            // TODO: explain
+            self.custom_mode_info(heartbeat.custom_mode)
+        }
+    }
+
+    // TODO: refactor, replace available modes with our own type, implement these on there.
+    pub fn current_mode_name(&self) -> Option<String> {
+        self.current_mode_info().map(|mode_info| {
+            if mode_info.standard_mode == MavStandardMode::NonStandard {
+                String::from_utf8_lossy(&mode_info.mode_name).to_string()
+            } else {
+                format!("{:?}", mode_info.standard_mode)
+            }
+        })
     }
 }

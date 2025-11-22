@@ -21,7 +21,7 @@ mod system;
 use interface::*;
 pub use system::*;
 
-pub const GROUND_STATION_SYSTEM_ID: u8 = 250;
+pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
 
 #[derive(Clone)]
@@ -166,12 +166,7 @@ impl Core {
                             System::new(system_id, self.db.clone(), callback.clone())
                         });
 
-                        system.notify_of_message(message);
-
-                        // self.callbacks
-                        //     .lock()
-                        //     .unwrap()
-                        //     .insert(frame.system_id(), callback);
+                        system.notify_of_message(message, frame, callback);
                     } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
                         match message {
                             Ardupilotmega::Ahrs(_) => {}

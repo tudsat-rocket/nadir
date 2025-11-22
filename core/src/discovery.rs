@@ -1,11 +1,13 @@
-use std::collections::HashMap;
+use std::time::Duration;
 
-use maviola::{prelude::V2, protocol::ComponentId};
+use maviola::protocol::ComponentId;
 use mavspec::rust::dialects::{
     Common,
     common::{
-        enums::MavCmd,
-        messages::{AvailableModes, CommandLong},
+        enums::{MavCmd, MavResult},
+        messages::{
+            Attitude, AvailableModes, CommandLong, GlobalPositionInt, LocalPositionNed, VfrHud,
+        },
     },
 };
 
@@ -29,18 +31,17 @@ pub async fn discover_available_modes(
     });
 
     let mut number_modes: Option<usize> = None;
-    let mut modes = HashMap::new();
+    let mut modes = Vec::new();
 
     while number_modes.map(|num| modes.len() < num).unwrap_or(true) {
         match message_rx.recv().await.unwrap() {
             Common::AvailableModes(mode_info) => {
                 number_modes = Some(mode_info.number_modes as usize);
-                let name = String::from_utf8_lossy(&mode_info.mode_name);
-                modes.insert(mode_info.custom_mode, name.to_string());
+                modes.push(mode_info);
             }
             _ => {}
         }
     }
 
-    *system.custom_modes.lock().unwrap() = Some(modes);
+    *system.available_modes.lock().unwrap() = Some(modes);
 }
