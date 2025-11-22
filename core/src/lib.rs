@@ -44,8 +44,8 @@ impl Core {
             systems: Arc::new(Mutex::new(HashMap::new())),
             interfaces: Arc::new(Mutex::new(vec![
                 //Interface::TcpClient("127.0.0.1:5760".to_owned()),
-                Interface::TcpClient("127.0.0.1:5761".to_owned()),
-                Interface::TcpClient("127.0.0.1:5762".to_owned()),
+                //Interface::TcpClient("127.0.0.1:5761".to_owned()),
+                //Interface::TcpClient("127.0.0.1:5762".to_owned()),
                 Interface::UdpServer("0.0.0.0:14550".to_owned()),
             ])),
             on_ack: Arc::new(None),

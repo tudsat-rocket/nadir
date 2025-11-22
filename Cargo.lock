@@ -1936,7 +1936,6 @@ dependencies = [
  "egui_plot",
  "egui_tiles",
  "egui_tracing",
- "epaint",
  "maviola",
  "mavspec",
  "nalgebra",
