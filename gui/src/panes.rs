@@ -1,19 +1,25 @@
 mod can;
 mod commands;
+mod links;
 mod map;
 mod messages;
 mod plot;
 mod sensors;
+mod state_estimator;
 mod status;
 
 use core::Core;
 
 pub use can::CanProbePane;
 pub use commands::CommandsPane;
+use egui::{Color32, Stroke};
+use egui_tiles::SimplificationOptions;
+pub use links::LinksPane;
 pub use map::MapPane;
 pub use messages::MessagesPane;
 pub use plot::PlotPane;
 pub use sensors::SensorsPane;
+pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
 
 use crate::views::View;
@@ -28,24 +34,54 @@ pub struct TreeBehavior<'a> {
 pub enum Pane {
     Map(MapPane),
     Status(StatusPane),
+    StateEstimator(StateEstimatorPane),
     Sensors(SensorsPane),
     Plot(PlotPane),
     Messages(MessagesPane),
     Commands(CommandsPane),
-    CanProbePane(CanProbePane),
+    CanProbe(CanProbePane),
+    Links(LinksPane),
     Placeholder(String),
 }
 
 impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
+    fn tab_bar_color(&self, visuals: &egui::Visuals) -> egui::Color32 {
+        visuals
+            .extreme_bg_color
+            .lerp_to_gamma(visuals.faint_bg_color, 0.25)
+    }
+
+    fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
+        30.0
+    }
+
+    fn gap_width(&self, _style: &egui::Style) -> f32 {
+        2.0
+    }
+
+    fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
+        SimplificationOptions {
+            all_panes_must_have_tabs: true,
+            join_nested_linear_containers: true,
+            prune_empty_containers: true,
+            prune_empty_tabs: true,
+            prune_single_child_containers: true,
+            prune_single_child_tabs: true,
+            //..SimplificationOptions::OFF
+        }
+    }
+
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         match pane {
             Pane::Map(_) => "Map".into(),
             Pane::Status(_) => "Status".into(),
+            Pane::StateEstimator(_) => "State Estimator".into(),
             Pane::Sensors(_) => "Sensors".into(),
             Pane::Plot(_) => "Plot".into(),
             Pane::Messages(_) => "Messages".into(),
             Pane::Commands(_) => "Commands".into(),
-            Pane::CanProbePane(_) => "CAN Probe".into(),
+            Pane::CanProbe(_) => "CAN Probe".into(),
+            Pane::Links(_) => "Links".into(),
             Pane::Placeholder(s) => s.into(),
         }
     }
@@ -59,11 +95,13 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         match pane {
             Pane::Map(p) => p.pane_ui(ui, self),
             Pane::Status(p) => p.pane_ui(ui, self),
+            Pane::StateEstimator(p) => p.pane_ui(ui, self),
             Pane::Sensors(p) => p.pane_ui(ui, self),
             Pane::Plot(p) => p.pane_ui(ui, self),
             Pane::Messages(p) => p.pane_ui(ui, self),
             Pane::Commands(p) => p.pane_ui(ui, self),
-            Pane::CanProbePane(p) => p.pane_ui(ui, self),
+            Pane::CanProbe(p) => p.pane_ui(ui, self),
+            Pane::Links(p) => p.pane_ui(ui, self),
             Pane::Placeholder(_) => {}
         }
 

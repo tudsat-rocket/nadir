@@ -4,14 +4,14 @@
 #![allow(unused)]
 
 use eframe::egui;
-use egui::{Color32, Stroke, Style, Ui, Widget};
+use egui::{Color32, CornerRadius, Frame, Rect, Stroke, Style, Ui, Vec2, Widget};
 use mavspec::rust::dialects::common::enums::MavCmd;
 use walkers::{
     HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol},
 };
 
-use crate::{panes::TreeBehavior, views::View};
+use crate::{panes::TreeBehavior, views::View, widgets::FalseHorizon};
 
 pub struct MapPane {
     osm_tiles: HttpTiles,
@@ -135,6 +135,8 @@ impl MapPane {
 
         let detached_pos = self.memory.detached();
 
+        let rect = ui.clip_rect();
+
         //let position = self
         //    .vehicle_position
         //    .map(|(pos, ..)| pos)
@@ -204,6 +206,10 @@ impl MapPane {
             None
         };
 
+        let active_system = active_system_id
+            .map(|system_id| behavior.core.system(system_id))
+            .flatten();
+
         let places = systems
             .filter_map(|s| {
                 s.last_global_position_int().unwrap_or_default().map(|gps| {
@@ -240,65 +246,25 @@ impl MapPane {
 
         let mut map = walkers::Map::new(Some(tiles), &mut self.memory, center_position)
             //.with_plugin(PathPlugin::new(vec![vis_plugin]))
+            // TODO: configurable GCS position
+            .with_plugin(Places::new(vec![LabeledSymbol {
+                position: Position::new(-8.292362108248733, 39.394546258787685),
+                symbol: Some(Symbol::Circle("📡".to_string())),
+                label: "".to_string(),
+                style: LabeledSymbolStyle {
+                    symbol_size: 20.0,
+                    symbol_color: Color32::WHITE,
+                    symbol_background: Color32::BLACK,
+                    ..Default::default()
+                },
+            }]))
             .with_plugin(Places::new(places));
 
-        let active_system = active_system_id
-            .map(|system_id| behavior.core.system(system_id))
-            .flatten();
-
-        if let Some(system) = active_system {
-            map = map.with_plugin(NavigationPlugin { system })
+        if let Some(system) = &active_system {
+            map = map.with_plugin(NavigationPlugin {
+                system: system.clone(),
+            })
         }
-
-        //if !self.state.show_gizmos {
-        //    if let Some((position, (alt_agl, _att, _fm, hdop))) =
-        //        self.vehicle_positions.last().as_ref().copied()
-        //    {
-        //        map = map.with_plugin(Places::new(vec![Place {
-        //            position: *position,
-        //            label: format!(
-        //                "{:.6}, {:.6}\nAGL: {:.1}m\nHDOP: {:.2}",
-        //                position.y(),
-        //                position.x(),
-        //                alt_agl,
-        //                hdop
-        //            ),
-        //            symbol: '🚀',
-        //            style: Style::default(),
-        //        }]));
-        //    }
-        //}
-
-        //let (gcs_lat, gcs_lon) = self.settings.ground_station_position.unwrap_or_default();
-        //let gcs_position = Position::new(gcs_lon, gcs_lat);
-        //let attitude_text = if let Some((position, (alt_agl, _att, _fm, _hdop))) =
-        //    self.vehicle_positions.last().as_ref().copied()
-        //{
-        //    let (rel_lng, rel_lat) = (
-        //        position.x() - gcs_position.x(),
-        //        position.y() - gcs_position.y(),
-        //    );
-        //    let (rel_x, rel_y) = (
-        //        rel_lng * 111_111.0 * gcs_position.y().to_radians().cos(),
-        //        rel_lat * 111_111.0,
-        //    );
-        //    let ground_dist = (rel_x.powi(2) + rel_y.powi(2)).sqrt();
-        //    let azimuth = rel_x.atan2(rel_y).to_degrees();
-        //    let elevation = alt_agl.atan2(ground_dist).to_degrees();
-        //    Some(format!(
-        //        "\nAzim.: {:.1}°\nElev.: {:.1}°",
-        //        azimuth, elevation
-        //    ))
-        //} else {
-        //    None
-        //};
-
-        //map = map.with_plugin(Places::new(vec![Place {
-        //    position: gcs_position,
-        //    label: format!("GCS{}", attitude_text.unwrap_or_default()),
-        //    symbol: '📡',
-        //    style: Style::default(),
-        //}]));
 
         let response = ui.add(map);
 
@@ -351,23 +317,25 @@ impl MapPane {
         //    }
         //}
 
-        //// Panel for selecting map type
-        //let map_type_rect = Rect::from_two_pos(
-        //    rect.left_bottom() + Vec2::new(10.0, -10.0),
-        //    rect.left_bottom() + Vec2::new(100.0, -40.0),
-        //);
-        //ui.put(map_type_rect, |ui: &mut egui::Ui| {
-        //    Frame::window(ui.style())
-        //        .show(ui, |ui| {
-        //            ui.horizontal(|ui| {
-        //                ui.selectable_value(&mut self.state.satellite, false, "🗺");
-        //                ui.add_enabled_ui(self.state.mapbox_tiles.is_some(), |ui| {
-        //                    ui.selectable_value(&mut self.state.satellite, true, "🌍")
-        //                });
-        //            });
-        //        })
-        //        .response
-        //});
+        let horizon_w = f32::max(150.0, f32::min(350.0, rect.width() / 6.0));
+        let horizon_rect = Rect::from_two_pos(
+            rect.left_top() + Vec2::new(10.0, 10.0),
+            rect.left_top() + Vec2::new(10.0 + horizon_w, 10.0 + horizon_w + 50.0),
+        );
+        if let Some(system) = &active_system {
+            ui.place(horizon_rect, |ui: &mut egui::Ui| {
+                Frame::dark_canvas(ui.style())
+                    .corner_radius(CornerRadius::ZERO.at_least(10))
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(horizon_rect.width());
+                            ui.set_height(horizon_rect.height());
+                            ui.add_sized(horizon_rect.size(), FalseHorizon::new(system));
+                        });
+                    })
+                    .response
+            });
+        }
 
         //// Panel for resetting map to vehicle position
         //let reset_rect = Rect::from_two_pos(

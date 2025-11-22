@@ -139,6 +139,15 @@ impl System {
             .last_global_position_int_for_system((self.system_id, 0x1))
     }
 
+    pub fn last_local_position_ned(&self) -> Result<Option<LocalPositionNed>, DbError> {
+        self.db
+            .last_local_position_ned_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_attitude(&self) -> Result<Option<Attitude>, DbError> {
+        self.db.last_attitude_for_system((self.system_id, 0x1))
+    }
+
     pub fn mav_type(&self) -> MavType {
         match self.last_heartbeat().unwrap_or(None).map(|hb| hb.type_) {
             Some(mt) => mt,
@@ -192,6 +201,46 @@ impl System {
             x: (lat * 10_000_000.0) as i32,
             y: (lng * 10_000_000.0) as i32,
             z: altitude_msl,
+        };
+
+        self.send_message(&cmd);
+    }
+
+    // TODO: consider standard modes. test with PX4
+    pub fn do_arm(&self, arm: bool, force: bool) {
+        let cmd = CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: MavCmd::ComponentArmDisarm,
+            param1: (arm as u8) as f32,
+            param2: (if force { 21196 } else { 0 }) as f32,
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
+    // TODO: consider standard modes. test with PX4
+    pub fn do_set_custom_mode(&self, custom_mode: u32) {
+        let cmd = CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: MavCmd::DoSetMode,
+            param1: 0x01 as f32,
+            param2: custom_mode as f32,
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
+    pub fn do_set_standard_mode(&self, standard_mode: MavStandardMode) {
+        let cmd = CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: MavCmd::DoSetStandardMode,
+            param1: (standard_mode as u16) as f32,
+            ..Default::default()
         };
 
         self.send_message(&cmd);

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use egui::{Align, Key, Layout, Margin};
 use egui_tiles::LinearDir;
 use mavspec::rust::dialects::common::enums::MavResult;
@@ -44,36 +42,25 @@ impl App {
 
         let status = tiles.insert_pane(Pane::Status(StatusPane::new(ctx)));
         let components = tiles.insert_pane(Pane::Placeholder("Info".to_owned()));
-        let top_left_tabs = tiles.insert_tab_tile(vec![status, components]);
-
-        let link = tiles.insert_pane(Pane::Placeholder("Link".to_owned()));
-        let cameras = tiles.insert_pane(Pane::Placeholder("Cameras".to_owned()));
-        let top_right_tabs = tiles.insert_tab_tile(vec![link, cameras]);
+        let link = tiles.insert_pane(Pane::Links(LinksPane::new(ctx)));
+        let top_tabs = tiles.insert_tab_tile(vec![status, components, link]);
 
         let system = tiles.insert_pane(Pane::Placeholder("System Overview".to_owned()));
-        let state = tiles.insert_pane(Pane::Placeholder("State Estimate".to_owned()));
+        let state = tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx)));
         let sensors = tiles.insert_pane(Pane::Sensors(SensorsPane::new(ctx)));
         let plot = tiles.insert_pane(Pane::Plot(PlotPane::new(ctx)));
         let messages = tiles.insert_pane(Pane::Messages(MessagesPane::new(ctx)));
         let commands = tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx)));
-        let can = tiles.insert_pane(Pane::CanProbePane(CanProbePane::new(ctx)));
+        let can = tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx)));
         let bottom_tabs =
             tiles.insert_tab_tile(vec![system, state, sensors, plot, messages, commands, can]);
 
-        let top_split = tiles.insert_new(egui_tiles::Tile::Container(
-            egui_tiles::Container::Linear(egui_tiles::Linear::new_binary(
-                LinearDir::Horizontal,
-                [top_left_tabs, top_right_tabs],
-                0.5,
-            )),
-        ));
-
         let side = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Vertical, [top_split, bottom_tabs], 0.33),
+            egui_tiles::Linear::new_binary(LinearDir::Vertical, [top_tabs, bottom_tabs], 0.35),
         )));
 
         let root = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [map, side], 0.45),
+            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.4),
         )));
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);

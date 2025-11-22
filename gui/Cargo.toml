@@ -30,6 +30,7 @@ walkers = "0.46"
 # profiling feature
 puffin = { git = "https://github.com/EmbarkStudios/puffin", optional = true }
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true }
+nalgebra = "0.34.1"
 
 [features]
 default = []
