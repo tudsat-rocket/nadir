@@ -70,7 +70,7 @@ impl App {
             core,
             ack_rx,
             log_collector,
-            toasts: egui_notify::Toasts::default(),
+            toasts: egui_notify::Toasts::default().with_anchor(egui_notify::Anchor::BottomRight),
             tiles_tree,
             shared_plot_state: SharedPlotState::new(),
             active_view: View::System(0x01),
