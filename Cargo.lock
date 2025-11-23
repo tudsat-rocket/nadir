@@ -810,6 +810,7 @@ dependencies = [
  "mavspec",
  "socketcan",
  "tokio",
+ "tokio-serial",
  "tracing",
 ]
 

@@ -32,6 +32,9 @@ impl LinksPane {
                     server_addr,
                     peer_addr,
                 } => format!("udp:{server_addr} (peer: {peer_addr})"),
+                ChannelDetails::SerialPort { path, baud_rate } => {
+                    format!("serial:{path} (baud rate: {baud_rate})")
+                }
                 _ => {
                     tracing::warn!("unimplemented channelinfo");
                     "".to_owned()
@@ -54,18 +57,18 @@ impl LinksPane {
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
                 ui.weak("⏬");
-                ui.monospace(format!("{:>3.0}", stats.incoming_packet_rate()));
+                ui.monospace(format!("{:>3.0}", stats.received_packet_rate()));
                 ui.label("pkt/s ");
-                ui.monospace(format!("{:>5.2}", stats.incoming_data_rate() / 1024.0));
+                ui.monospace(format!("{:>5.2}", stats.received_data_rate() / 1024.0));
                 ui.label("KiB/s");
             });
 
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
                 ui.weak("⏫");
-                ui.monospace(format!("{:>3.0}", stats.outgoing_packet_rate()));
+                ui.monospace(format!("{:>3.0}", stats.sent_packet_rate()));
                 ui.label("pkt/s ");
-                ui.monospace(format!("{:>5.2}", stats.outgoing_data_rate() / 1024.0));
+                ui.monospace(format!("{:>5.2}", stats.sent_data_rate() / 1024.0));
                 ui.label("KiB/s");
             });
         }

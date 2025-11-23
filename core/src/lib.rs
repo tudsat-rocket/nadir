@@ -1,98 +1,134 @@
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+
+use socketcan::{CanAddr, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket, StandardId};
+use tokio::sync::mpsc::Receiver;
 
 use maviola::asnc::prelude::*;
 use maviola::prelude::*;
-use maviola::protocol::Peer;
 use maviola::protocol::SystemId;
 use maviola::protocol::dialects::Ardupilotmega;
 use maviola::protocol::dialects::Common;
 use mavspec::rust::dialects::common::enums::{MavCmd, MavSeverity};
 use mavspec::rust::dialects::common::messages::CommandAck;
 
-use socketcan::{CanAddr, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket, StandardId};
-
 use db::Db;
 
-mod discovery;
-mod interface;
+mod links;
+mod protocols;
+mod stats;
 mod system;
 
-use interface::*;
+pub use links::*;
 pub use system::*;
+
+use crate::stats::LinkStats;
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
 
 #[derive(Clone)]
 pub struct Core {
-    pub plot_origin: chrono::DateTime<chrono::Utc>,
+    event_sender: tokio::sync::mpsc::Sender<(LinkId, Event<V2>)>,
     pub db: Db,
-    pub peers: Arc<Mutex<Vec<Peer>>>,
-    pub interfaces: Arc<Mutex<Vec<Interface>>>,
     pub systems: Arc<Mutex<HashMap<SystemId, System>>>,
-    pub on_ack: Arc<Option<Box<dyn Fn(&CommandAck) + Send + Sync>>>,
-    pub on_event: Arc<Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>>,
+    pub links: Arc<Mutex<HashMap<LinkId, Link>>>,
+    pub plot_origin: chrono::DateTime<chrono::Utc>,
 }
 
-impl Core {
-    pub fn init() -> Self {
-        Self {
-            plot_origin: chrono::Utc::now(),
-            db: Db::init(),
-            peers: Arc::new(Mutex::new(vec![])),
-            systems: Arc::new(Mutex::new(HashMap::new())),
-            interfaces: Arc::new(Mutex::new(vec![
-                //Interface::TcpClient("127.0.0.1:5760".to_owned()),
-                //Interface::TcpClient("127.0.0.1:5761".to_owned()),
-                //Interface::TcpClient("127.0.0.1:5762".to_owned()),
-                Interface::UdpServer("0.0.0.0:14550".to_owned()),
-            ])),
-            on_ack: Arc::new(None),
-            on_event: Arc::new(None),
-        }
+#[derive(Default)]
+pub struct CoreBuilder {
+    pub links: Vec<LinkId>,
+    pub autoconnect_usb: bool,
+    pub on_ack: Option<Box<dyn Fn(&CommandAck) + Send + Sync>>,
+    pub on_event: Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>,
+}
+
+impl CoreBuilder {
+    pub fn udp_server(mut self, addr: SocketAddr) -> Self {
+        self.links.push(LinkId::UdpServer(addr));
+        self
+    }
+
+    pub fn tcp_client(mut self, addr: SocketAddr) -> Self {
+        self.links.push(LinkId::TcpClient(addr));
+        self
+    }
+
+    pub fn autoconnect_to_usb(mut self) -> Self {
+        self.autoconnect_usb = true;
+        self
     }
 
     pub fn on_ack(mut self, cb: Box<dyn Fn(&CommandAck) + Send + Sync>) -> Self {
-        self.on_ack = Arc::new(Some(cb));
+        self.on_ack = Some(cb);
         self
     }
 
     pub fn on_event(mut self, cb: Box<dyn Fn(&Event<V2>) + Send + Sync>) -> Self {
-        self.on_event = Arc::new(Some(cb));
+        self.on_event = Some(cb);
         self
     }
 
-    pub async fn run(self) {
-        let mut network =
-            Network::asnc().retry(RetryStrategy::Always(std::time::Duration::from_millis(500)));
-        for interface in self.interfaces.lock().unwrap().iter() {
-            match interface {
-                Interface::TcpClient(s) => {
-                    network = network.add_connection(TcpClient::new(s).unwrap())
-                }
-                Interface::UdpServer(s) => {
-                    network = network.add_connection(UdpServer::new(s).unwrap())
-                }
-            }
+    pub fn spawn(self) -> Core {
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+
+        let core = Core {
+            event_sender: tx,
+            plot_origin: chrono::Utc::now(),
+            db: Db::init(),
+            systems: Arc::new(Mutex::new(HashMap::new())),
+            links: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let c = core.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(c.run(
+                self.links,
+                self.autoconnect_usb,
+                rx,
+                self.on_ack,
+                self.on_event,
+            ));
+        });
+
+        core
+    }
+}
+
+impl Core {
+    pub fn builder() -> CoreBuilder {
+        CoreBuilder::default()
+    }
+
+    pub fn add_link(&self, id: LinkId) {
+        let link = id.spawn(self.event_sender.clone());
+        self.links.lock().unwrap().insert(id, link);
+    }
+
+    pub(crate) async fn run(
+        self,
+        initial_links: Vec<LinkId>,
+        autoconnect_usb: bool,
+        mut event_receiver: Receiver<(LinkId, Event<V2>)>,
+        on_ack: Option<Box<dyn Fn(&CommandAck) + Send + Sync>>,
+        on_event: Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>,
+    ) {
+        for id in initial_links {
+            self.add_link(id);
         }
 
-        let node = Node::asnc::<V2>()
-            .id(MavLinkId::new(
-                GROUND_STATION_SYSTEM_ID,
-                GROUND_STATION_COMPONENT_ID,
-            ))
-            .connection(network)
-            .build()
-            .await
-            .unwrap();
+        if autoconnect_usb {
+            tokio::spawn(links::usb::autoconnect(self.clone()));
+        }
 
         let socket = CanAddr::from_iface("vcan0")
             .map(|addr| CanSocket::open_addr(&addr))
             .flatten();
 
-        let mut events = node.events().unwrap();
-        while let Some(event) = events.next().await {
+        while let Some((link, event)) = event_receiver.recv().await {
             match &event {
                 Event::Frame(frame, callback) => {
                     if let Ok(message) = frame.decode::<Common>() {
@@ -127,7 +163,7 @@ impl Core {
                                 ),
                             },
                             Common::CommandAck(ack) => {
-                                if let Some(cb) = self.on_ack.as_ref()
+                                if let Some(cb) = on_ack.as_ref()
                                     && ack.command != MavCmd::RequestMessage
                                     && ack.command != MavCmd::SetMessageInterval
                                 {
@@ -170,6 +206,13 @@ impl Core {
                         });
 
                         system.notify_of_message(message, frame, callback);
+                        self.links
+                            .lock()
+                            .unwrap()
+                            .get_mut(&link)
+                            .unwrap()
+                            .stats
+                            .push_received(frame.body_length());
                     } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
                         match message {
                             Ardupilotmega::Ahrs(_) => {}
@@ -187,27 +230,20 @@ impl Core {
                 Event::Invalid(_frame, _frame_error, _callback) => {}
                 Event::NewPeer(peer) => {
                     tracing::info!("New Peer: {peer:?}");
-                    self.peers.lock().unwrap().push(peer.clone());
                 }
                 Event::PeerLost(peer) => {
                     tracing::warn!("Peer Lost: {peer:?}");
                 }
             }
 
-            if let Some(cb) = self.on_event.as_ref() {
+            if let Some(cb) = on_event.as_ref() {
                 cb(&event);
             }
         }
     }
 
     pub fn known_system_ids(&self) -> Vec<SystemId> {
-        let mut system_ids: Vec<SystemId> = self
-            .peers
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|p| p.system_id())
-            .collect();
+        let mut system_ids: Vec<SystemId> = self.systems.lock().unwrap().keys().cloned().collect();
         system_ids.sort();
         system_ids.dedup();
         system_ids
@@ -215,5 +251,14 @@ impl Core {
 
     pub fn system<'a>(&'a self, id: SystemId) -> Option<System> {
         self.systems.lock().unwrap().get(&id).map(|s| s.clone())
+    }
+
+    pub fn links(&self) -> Vec<Link> {
+        self.links
+            .lock()
+            .unwrap()
+            .values()
+            .map(|l| l.clone())
+            .collect()
     }
 }

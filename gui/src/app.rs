@@ -1,3 +1,5 @@
+use core::LinkId;
+
 use egui::{Align, Key, Layout, Margin};
 use egui_tiles::LinearDir;
 use mavspec::rust::dialects::common::enums::MavResult;
@@ -26,16 +28,20 @@ impl App {
     ) -> Self {
         let (ack_tx, ack_rx) = std::sync::mpsc::channel::<CommandAck>();
         let ctx2 = ctx.clone();
-        let core = core::Core::init()
+
+        let core = core::Core::builder()
+            .udp_server("0.0.0.0:14550".parse().unwrap())
+            .tcp_client("127.0.0.1:5760".parse().unwrap())
+            .tcp_client("127.0.0.1:5761".parse().unwrap())
+            .tcp_client("127.0.0.1:5762".parse().unwrap())
+            .autoconnect_to_usb()
             .on_ack(Box::new(move |ack| {
                 ack_tx.send(ack.clone()).unwrap();
             }))
             .on_event(Box::new(move |_event| {
                 ctx2.request_repaint();
-            }));
-
-        let c = core.clone();
-        std::thread::spawn(|| tokio::runtime::Runtime::new().unwrap().block_on(c.run()));
+            }))
+            .spawn();
 
         let mut tiles = egui_tiles::Tiles::default();
 
@@ -73,7 +79,7 @@ impl App {
             toasts: egui_notify::Toasts::default().with_anchor(egui_notify::Anchor::BottomRight),
             tiles_tree,
             shared_plot_state: SharedPlotState::new(),
-            active_view: View::System(0x01),
+            active_view: View::Overview,
             sidebar_collapsed: true,
             logs_shown: false,
         }
@@ -87,6 +93,8 @@ impl eframe::App for App {
 
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
+
+        ctx.set_zoom_factor(1.25);
 
         while let Ok(ack) = self.ack_rx.try_recv() {
             match ack.result {
@@ -104,51 +112,29 @@ impl eframe::App for App {
             }
         }
 
-        // TODO
-        if self.sidebar_collapsed {
-            egui::SidePanel::left("sidepanel")
-                .resizable(false)
-                .exact_width(37.0)
-                .show(ctx, |ui| {
-                    ui.set_width(ui.available_width());
+        let clps = self.sidebar_collapsed;
+        egui::SidePanel::left("sidepanel")
+            .resizable(false)
+            .exact_width(if clps { 37.0 } else { 300.0 })
+            .show(ctx, |ui| {
+                ui.set_width(ui.available_width());
 
-                    ui.selectable_value(&mut self.active_view, View::System(1), "🚁");
-                    ui.selectable_value(&mut self.active_view, View::System(2), "✈");
-                    ui.selectable_value(&mut self.active_view, View::System(3), "🚀");
-
-                    ui.with_layout(egui::Layout::bottom_up(Align::LEFT), |ui| {
-                        ui.add_space(5.0);
-                        if ui.button("➡").clicked() {
-                            self.sidebar_collapsed = false;
-                        }
+                for (i, system_id) in self.core.known_system_ids().iter().enumerate() {
+                    if i != 0 && !self.sidebar_collapsed {
                         ui.separator();
-                        ui.selectable_value(&mut self.active_view, View::Settings, "🔧");
+                    }
 
-                        #[cfg(feature = "profiling")]
-                        {
-                            let mut profiling_on = puffin::are_scopes_on();
-                            ui.selectable_value(&mut profiling_on, true, "⏱");
-                            puffin::set_scopes_on(profiling_on);
-                        }
-                    });
-                });
-        } else {
-            egui::SidePanel::left("sidepanel")
-                .resizable(true)
-                .width_range(100.0..=1000.0)
-                .default_width(800.0)
-                .show(ctx, |ui| {
-                    ui.set_width(ui.available_width());
+                    let Some(system) = self.core.system(*system_id) else {
+                        continue;
+                    };
 
-                    for (i, system_id) in self.core.known_system_ids().iter().enumerate() {
-                        if i != 0 {
-                            ui.separator();
-                        }
-
-                        let Some(system) = self.core.system(*system_id) else {
-                            continue;
-                        };
-
+                    if self.sidebar_collapsed {
+                        ui.selectable_value(
+                            &mut self.active_view,
+                            View::System(*system_id),
+                            system.icon(),
+                        );
+                    } else {
                         ui.horizontal(|ui| {
                             ui.monospace(format!("0x{:02x}", system_id));
                             ui.heading(system.icon());
@@ -164,19 +150,46 @@ impl eframe::App for App {
                             );
                         });
                     }
+                }
 
-                    ui.with_layout(egui::Layout::bottom_up(Align::LEFT), |ui| {
-                        ui.add_space(5.0);
-                        if ui.button("⬅  Collapse").clicked() {
-                            self.sidebar_collapsed = true;
-                        }
-                        ui.separator();
-                        ui.toggle_value(&mut self.logs_shown, "📃 Show Debug Logs");
-                        ui.separator();
-                        ui.selectable_value(&mut self.active_view, View::Overview, "🖧 Overview");
-                    });
+                ui.with_layout(egui::Layout::bottom_up(Align::LEFT), |ui| {
+                    ui.add_space(5.0);
+                    if ui.button(if clps { "➡" } else { "⬅  Collapse" }).clicked() {
+                        self.sidebar_collapsed = false;
+                    }
+                    ui.separator();
+
+                    #[cfg(feature = "profiling")]
+                    {
+                        let mut profiling_on = puffin::are_scopes_on();
+                        ui.selectable_value(
+                            &mut profiling_on,
+                            true,
+                            if clps { "⏱" } else { "⏱ Profiling" },
+                        );
+                        puffin::set_scopes_on(profiling_on);
+                    }
+
+                    ui.toggle_value(
+                        &mut self.logs_shown,
+                        if clps { "📃" } else { "📃 Show Debug Logs" },
+                    );
+
+                    ui.separator();
+
+                    ui.selectable_value(
+                        &mut self.active_view,
+                        View::Settings,
+                        if clps { "🔧" } else { "🔧 Preferences" },
+                    );
+
+                    ui.selectable_value(
+                        &mut self.active_view,
+                        View::Overview,
+                        if clps { "🖧" } else { "🖧 Overview" },
+                    );
                 });
-        }
+            });
 
         if self.logs_shown {
             egui::TopBottomPanel::bottom("bottombar")
@@ -223,6 +236,30 @@ impl eframe::App for App {
             .show(ctx, |ui| match self.active_view {
                 View::Overview => {
                     ui.label("No system selected. TODO: put a map here as well.");
+
+                    for link in self.core.links() {
+                        let mut stats = link.stats;
+                        let info_string = match link.id {
+                            LinkId::UdpServer(addr) => format!("udp:{addr}"),
+                            LinkId::TcpClient(addr) => format!("tcp:{addr}"),
+                            LinkId::SerialPort(port) => format!("serial:{port}"),
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.add_space(5.0);
+                            ui.weak("🖧");
+                            ui.label(info_string);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.add_space(5.0);
+                            ui.weak("⏬");
+                            ui.monospace(format!("{:>3.0}", stats.received_packet_rate()));
+                            ui.label("pkt/s ");
+                            ui.monospace(format!("{:>5.2}", stats.received_data_rate() / 1024.0));
+                            ui.label("KiB/s");
+                        });
+                    }
                 }
                 View::Settings => {
                     ui.label("TODO");

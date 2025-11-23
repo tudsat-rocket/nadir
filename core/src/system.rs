@@ -1,7 +1,6 @@
 use core::f32;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use maviola::asnc::node::Callback;
 use maviola::core::io::{ChannelId, ChannelInfo};
@@ -21,65 +20,7 @@ use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 use db::{Db, DbError};
 use mavspec::rust::dialects::Common;
 
-#[derive(Clone, Debug, Default)]
-pub struct ChannelStats {
-    last_1s: VecDeque<(Instant, u8, usize)>,
-}
-
-impl ChannelStats {
-    pub fn packet_loss(&mut self) -> f32 {
-        self.truncate_to_1s();
-
-        let Some(mut p) = self.last_1s.front() else {
-            return 0.0;
-        };
-
-        let mut missed: u64 = 0;
-        let mut total: u64 = 0;
-        for p2 in self.last_1s.iter().skip(1) {
-            let diff = p2.1.wrapping_sub(p.1);
-            missed += (diff - 1) as u64;
-            total += diff as u64;
-            p = p2;
-        }
-
-        (missed as f32) / (total as f32)
-    }
-
-    pub fn incoming_packet_rate(&mut self) -> f32 {
-        self.truncate_to_1s();
-        self.last_1s.iter().count() as f32
-    }
-
-    pub fn incoming_data_rate(&mut self) -> f32 {
-        self.truncate_to_1s();
-        self.last_1s.iter().map(|p| p.2).sum::<usize>() as f32
-    }
-
-    pub fn outgoing_packet_rate(&mut self) -> f32 {
-        0.0
-    }
-
-    pub fn outgoing_data_rate(&mut self) -> f32 {
-        0.0
-    }
-
-    fn truncate_to_1s(&mut self) {
-        while self
-            .last_1s
-            .front()
-            .map(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
-            .unwrap_or(false)
-        {
-            let _ = self.last_1s.pop_front();
-        }
-    }
-
-    pub fn push(&mut self, seq: u8, len: usize) {
-        self.last_1s.push_back((Instant::now(), seq, len));
-        self.truncate_to_1s();
-    }
-}
+use crate::stats::ChannelStats;
 
 pub struct SystemConnection {
     pub seq: u8,
@@ -116,13 +57,13 @@ impl System {
             available_modes,
         };
 
-        let _ = tokio::spawn(crate::discovery::discover_available_modes(
+        let _ = tokio::spawn(crate::protocols::modes::discover_available_modes(
             system.clone(),
             0x01,
             receiver,
         ));
 
-        let _ = tokio::spawn(crate::discovery::request_message_intervals(
+        let _ = tokio::spawn(crate::protocols::intervals::request_message_intervals(
             system.clone(),
             receiver2,
         ));
@@ -174,6 +115,7 @@ impl System {
     pub fn send_message(&self, message: &dyn Message) {
         let mut connection = self.conn.lock().unwrap();
         connection.seq = connection.seq.wrapping_add(1);
+
         let frame = Frame::builder()
             .version(V2)
             .system_id(0xfe)
@@ -183,7 +125,14 @@ impl System {
             .unwrap()
             .build();
 
-        connection.callback.send(&frame).unwrap();
+        let channel_id = connection.callback.channel_id();
+        if let Some((_, stats)) = connection.channels.get_mut(&channel_id) {
+            stats.push_sent(frame.body_length());
+        }
+
+        if let Err(e) = connection.callback.send(&frame) {
+            tracing::error!(system_id = self.system_id, "Failed to send message: {e:?}")
+        }
     }
 
     pub fn do_reposition(&self, lat: f64, lng: f64, altitude_msl: f32) {
@@ -267,12 +216,14 @@ impl System {
         let _ = self.message_sender.send(message);
 
         let mut conninfo = self.conn.lock().unwrap();
+
+        conninfo.callback = callback.clone();
         let (_channel_info, channel_stats) = conninfo
             .channels
             .entry(callback.channel_id())
             .or_insert_with(|| (callback.info().clone(), ChannelStats::default()));
 
-        channel_stats.push(frame.sequence(), frame.body_length());
+        channel_stats.push_received(frame.sequence(), frame.body_length());
     }
 
     pub fn channels(&self) -> Vec<(ChannelInfo, ChannelStats)> {
