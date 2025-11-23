@@ -1,13 +1,15 @@
 use core::LinkId;
 
-use egui::{Align, Key, Layout, Margin};
+use egui::{Align, Color32, Key, Layout, Margin, RichText};
 use egui_tiles::LinearDir;
 use mavspec::rust::dialects::common::enums::MavResult;
 use mavspec::rust::dialects::common::messages::CommandAck;
 
 use crate::panes::*;
 use crate::views::View;
-use crate::widgets::SharedPlotState;
+use crate::widgets::{
+    ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, SharedPlotState,
+};
 
 pub struct App {
     core: core::Core,
@@ -80,7 +82,7 @@ impl App {
             tiles_tree,
             shared_plot_state: SharedPlotState::new(),
             active_view: View::Overview,
-            sidebar_collapsed: true,
+            sidebar_collapsed: false,
             logs_shown: false,
         }
     }
@@ -134,14 +136,51 @@ impl eframe::App for App {
                             View::System(*system_id),
                             system.icon(),
                         );
-                    } else {
+                    } else if let Some(heartbeat) = system.last_heartbeat().ok().flatten() {
                         ui.horizontal(|ui| {
                             ui.monospace(format!("0x{:02x}", system_id));
-                            ui.heading(system.icon());
-                            ui.label("Copter");
-                            ui.monospace("AP v123");
+                            ui.label(system.icon());
+
+                            ui.add(ArmedIndicator(heartbeat.base_mode));
+
+                            ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
+                                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                                    ui.add_space(5.0);
+                                    ui.add(AutopilotLogo(heartbeat.autopilot, heartbeat.type_));
+                                })
+                                .response
+                            });
                         });
 
+                        ui.horizontal(|ui| {
+                            ui.add(ModeDisplay::new(system.clone()));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("🔋 98%").color(Color32::from_rgb(78, 154, 6)));
+                            ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
+                                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                                    ui.selectable_value(
+                                        &mut self.active_view,
+                                        View::System(*system_id),
+                                        "Select ➡",
+                                    );
+
+                                    let total_data_rate = system
+                                        .channels()
+                                        .iter_mut()
+                                        .map(|(_, s)| s.received_data_rate())
+                                        .sum::<f32>()
+                                        / 1024.0;
+                                    ui.label("KiB/s");
+                                    ui.monospace(format!("{:>5.2}", total_data_rate));
+                                    ui.weak("⏬");
+                                })
+                                .response
+                            });
+                        });
+                    } else {
+                        ui.monospace(format!("0x{:02x}", system_id));
                         ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
                             ui.selectable_value(
                                 &mut self.active_view,
@@ -155,7 +194,7 @@ impl eframe::App for App {
                 ui.with_layout(egui::Layout::bottom_up(Align::LEFT), |ui| {
                     ui.add_space(5.0);
                     if ui.button(if clps { "➡" } else { "⬅  Collapse" }).clicked() {
-                        self.sidebar_collapsed = false;
+                        self.sidebar_collapsed = !self.sidebar_collapsed;
                     }
                     ui.separator();
 

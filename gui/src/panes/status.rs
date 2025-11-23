@@ -42,18 +42,6 @@ impl StatusPane {
         };
 
         let icon = system.icon();
-        let autopilot_logo = match (autopilot, mav_type) {
-            (MavAutopilot::Ardupilotmega, _) => {
-                Some(egui::include_image!("../../assets/logos/ardupilot.png"))
-            }
-            (MavAutopilot::Px4, _) => {
-                Some(egui::include_image!("../../assets/logos/px4_white.svg"))
-            }
-            (MavAutopilot::Generic, MavType::Rocket) => {
-                Some(egui::include_image!("../../assets/logos/rapid_dark.png"))
-            }
-            _ => None,
-        };
 
         ui.add_space(5.0);
 
@@ -61,39 +49,19 @@ impl StatusPane {
             ui.add_space(5.0);
 
             ui.vertical(|ui| {
-                if let Some(logo) = autopilot_logo {
-                    ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
-                        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                            ui.add_space(5.0);
-                            let image = egui::Image::new(logo).maintain_aspect_ratio(true);
-                            ui.add(image);
-                        })
-                        .response
-                    });
-                }
+                ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
+                    ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                        ui.add_space(5.0);
+                        ui.add(AutopilotLogo(autopilot, mav_type));
+                    })
+                    .response
+                });
 
                 ui.horizontal(|ui| {
                     ui.weak("System");
                     ui.monospace(format!("0x{system_id:02}"));
-
                     ui.add_space(5.0);
-
-                    let color = match system_status {
-                        MavState::Boot | MavState::Uninit | MavState::Calibrating => {
-                            ui.visuals().text_color()
-                        }
-                        MavState::Standby => Color32::from_rgb(114, 159, 207),
-                        MavState::Active => Color32::from_rgb(78, 154, 6),
-                        MavState::FlightTermination => Color32::from_rgb(196, 160, 0),
-                        MavState::Critical | MavState::Emergency | MavState::Poweroff => {
-                            Color32::from_rgb(204, 0, 0)
-                        }
-                    };
-
-                    ui.label(
-                        RichText::new(format!("{:?}", system_status).to_uppercase()).color(color),
-                    );
-
+                    ui.add(MavStateIndicator(system_status));
                     ui.add_space(5.0);
                     ui.label(format!("{icon} {mav_type:?}"));
                     ui.add_space(5.0);
@@ -151,22 +119,8 @@ impl StatusPane {
 
                 ui.vertical(|ui| {
                     ui.weak("⎈ Mode");
-
                     ui.add_space(5.0);
-
-                    if let Some(name) = system.current_mode_name() {
-                        ui.label(RichText::new(name).strong().size(24.0));
-                    } else if base_mode.contains(MavModeFlag::CUSTOM_MODE_ENABLED) {
-                        ui.label(
-                            RichText::new(format!("0x{custom_mode:02}"))
-                                .strong()
-                                .monospace()
-                                .size(24.0),
-                        );
-                    } else {
-                        // TODO
-                    }
-
+                    ui.add(ModeDisplay::new(system.clone()).font_size(24.0));
                     ui.add_space(20.0);
                 });
 
