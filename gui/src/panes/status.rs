@@ -1,15 +1,14 @@
-use mavspec::rust::default_dialect::messages::AvailableModes;
 use mavspec::rust::dialects::ardupilotmega::enums::PlaneMode;
 use mavspec::rust::dialects::common::enums::{
-    MavAutopilot, MavModeFlag, MavModeProperty, MavStandardMode, MavState, MavType,
+    MavAutopilot, MavModeFlag, MavStandardMode, MavState, MavType,
 };
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
 use eframe::egui;
-use egui::{Align, Button, Color32, Frame, Grid, Layout, Rect, RichText, Separator, Stroke, Vec2};
+use egui::{Align, Button, Color32, Frame, Layout, RichText, Separator, Vec2};
 
-use crate::widgets::ModeDropdown;
-use crate::{panes::TreeBehavior, views::View, widgets};
+use crate::widgets::{AutopilotLogo, MavStateIndicator, ModeDisplay, ModeDropdown};
+use crate::{panes::TreeBehavior, views::View};
 
 pub struct StatusPane {}
 
@@ -223,53 +222,5 @@ impl StatusPane {
             });
 
         ui.add(Separator::default().spacing(0.01));
-
-        let fs = f32::max(14.0, f32::min(52.0, ui.available_height() / 6.0));
-
-        egui::Grid::new("hero_gauges")
-            .min_row_height(ui.available_height() / 2.0)
-            .min_col_width(ui.available_width() / 3.0)
-            .max_col_width(ui.available_width() / 3.0)
-            .show(ui, |ui| {
-                ui.vertical_centered_justified(|ui| {
-                    ui.weak(RichText::new("Alt. AGL [m]").size(10.0));
-                    if let Some(z) = local_position.as_ref().map(|lp| lp.z * -1.0) {
-                        ui.strong(RichText::new(format!("{:.1}", z)).monospace().size(fs));
-                    } else {
-                        ui.weak(RichText::new("N/A").monospace().size(fs));
-                    }
-                });
-
-                ui.vertical_centered_justified(|ui| {
-                    ui.weak(RichText::new("Downrange [m]").size(10.0));
-                    ui.label(RichText::new("1235").monospace().size(fs));
-                });
-
-                ui.vertical_centered_justified(|ui| {
-                    ui.weak(RichText::new("Heading [°]").size(10.0));
-                    ui.label(RichText::new("167").monospace().size(fs));
-                });
-
-                ui.end_row();
-
-                ui.vertical_centered_justified(|ui| {
-                    ui.weak(RichText::new("Vario [m/s]").size(10.0));
-                    if let Some(vz) = local_position.as_ref().map(|lp| lp.vz * -1.0) {
-                        ui.strong(RichText::new(format!("{:.1}", vz)).monospace().size(fs));
-                    } else {
-                        ui.weak(RichText::new("N/A").monospace().size(fs));
-                    }
-                });
-
-                ui.vertical_centered_justified(|ui| {
-                    ui.weak(RichText::new("Groundspeed [m/s]").size(10.0));
-                    ui.label(RichText::new(" 058").monospace().size(fs));
-                });
-
-                ui.vertical_centered_justified(|ui| {
-                    ui.weak(RichText::new("Bearing [°]").size(10.0));
-                    ui.label(RichText::new("146").monospace().size(fs));
-                });
-            });
     }
 }

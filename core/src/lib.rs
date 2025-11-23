@@ -10,8 +10,7 @@ use maviola::prelude::*;
 use maviola::protocol::SystemId;
 use maviola::protocol::dialects::Ardupilotmega;
 use maviola::protocol::dialects::Common;
-use mavspec::rust::dialects::common::enums::{MavCmd, MavSeverity};
-use mavspec::rust::dialects::common::messages::CommandAck;
+use mavspec::rust::dialects::common::enums::MavSeverity;
 
 use db::Db;
 
@@ -22,8 +21,6 @@ mod system;
 
 pub use links::*;
 pub use system::*;
-
-use crate::stats::LinkStats;
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
@@ -41,7 +38,6 @@ pub struct Core {
 pub struct CoreBuilder {
     pub links: Vec<LinkId>,
     pub autoconnect_usb: bool,
-    pub on_ack: Option<Box<dyn Fn(&CommandAck) + Send + Sync>>,
     pub on_event: Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>,
 }
 
@@ -58,11 +54,6 @@ impl CoreBuilder {
 
     pub fn autoconnect_to_usb(mut self) -> Self {
         self.autoconnect_usb = true;
-        self
-    }
-
-    pub fn on_ack(mut self, cb: Box<dyn Fn(&CommandAck) + Send + Sync>) -> Self {
-        self.on_ack = Some(cb);
         self
     }
 
@@ -85,13 +76,7 @@ impl CoreBuilder {
         let c = core.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(c.run(
-                self.links,
-                self.autoconnect_usb,
-                rx,
-                self.on_ack,
-                self.on_event,
-            ));
+            rt.block_on(c.run(self.links, self.autoconnect_usb, rx, self.on_event));
         });
 
         core
@@ -113,7 +98,6 @@ impl Core {
         initial_links: Vec<LinkId>,
         autoconnect_usb: bool,
         mut event_receiver: Receiver<(LinkId, Event<V2>)>,
-        on_ack: Option<Box<dyn Fn(&CommandAck) + Send + Sync>>,
         on_event: Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>,
     ) {
         for id in initial_links {
@@ -162,14 +146,6 @@ impl Core {
                                     &String::from_utf8_lossy(&inner.text),
                                 ),
                             },
-                            Common::CommandAck(ack) => {
-                                if let Some(cb) = on_ack.as_ref()
-                                    && ack.command != MavCmd::RequestMessage
-                                    && ack.command != MavCmd::SetMessageInterval
-                                {
-                                    cb(ack);
-                                }
-                            }
                             Common::CanFrame(can_frame) => {
                                 if let Ok(s) = &socket {
                                     let id = if can_frame.id > 0b111_1111_1111 {

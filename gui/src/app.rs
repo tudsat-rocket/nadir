@@ -2,23 +2,24 @@ use core::LinkId;
 
 use egui::{Align, Color32, Key, Layout, Margin, RichText};
 use egui_tiles::LinearDir;
-use mavspec::rust::dialects::common::enums::MavResult;
-use mavspec::rust::dialects::common::messages::CommandAck;
+use maviola::asnc::node::Event;
+use maviola::prelude::V2;
+use mavspec::rust::dialects::Common;
+use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 
 use crate::panes::*;
 use crate::views::View;
-use crate::widgets::{
-    ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, SharedPlotState,
-};
+use crate::widgets::{ArmedIndicator, AutopilotLogo, ModeDisplay, SharedPlotState};
 
 pub struct App {
     core: core::Core,
-    ack_rx: std::sync::mpsc::Receiver<CommandAck>,
+    event_rx: std::sync::mpsc::Receiver<Event<V2>>,
     log_collector: egui_tracing::tracing::collector::EventCollector,
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
     shared_plot_state: SharedPlotState,
     active_view: View,
+    never_connected: bool,
     sidebar_collapsed: bool,
     logs_shown: bool,
 }
@@ -28,7 +29,7 @@ impl App {
         log_collector: egui_tracing::tracing::collector::EventCollector,
         ctx: &egui::Context,
     ) -> Self {
-        let (ack_tx, ack_rx) = std::sync::mpsc::channel::<CommandAck>();
+        let (event_tx, event_rx) = std::sync::mpsc::channel::<Event<V2>>();
         let ctx2 = ctx.clone();
 
         let core = core::Core::builder()
@@ -37,10 +38,8 @@ impl App {
             .tcp_client("127.0.0.1:5761".parse().unwrap())
             .tcp_client("127.0.0.1:5762".parse().unwrap())
             .autoconnect_to_usb()
-            .on_ack(Box::new(move |ack| {
-                ack_tx.send(ack.clone()).unwrap();
-            }))
-            .on_event(Box::new(move |_event| {
+            .on_event(Box::new(move |event| {
+                let _ = event_tx.send(event.clone());
                 ctx2.request_repaint();
             }))
             .spawn();
@@ -76,12 +75,13 @@ impl App {
 
         Self {
             core,
-            ack_rx,
+            event_rx,
             log_collector,
             toasts: egui_notify::Toasts::default().with_anchor(egui_notify::Anchor::BottomRight),
             tiles_tree,
             shared_plot_state: SharedPlotState::new(),
             active_view: View::Overview,
+            never_connected: true,
             sidebar_collapsed: false,
             logs_shown: false,
         }
@@ -98,19 +98,44 @@ impl eframe::App for App {
 
         ctx.set_zoom_factor(1.25);
 
-        while let Ok(ack) = self.ack_rx.try_recv() {
-            match ack.result {
-                MavResult::Accepted => {
+        while let Ok(event) = self.event_rx.try_recv() {
+            match event {
+                Event::Frame(frame, _callback) => {
+                    if let Ok(Common::CommandAck(ack)) = frame.decode() {
+                        if ack.command == MavCmd::RequestMessage
+                            || ack.command == MavCmd::SetMessageInterval
+                        {
+                            continue;
+                        }
+
+                        match ack.result {
+                            MavResult::Accepted => {
+                                self.toasts
+                                    .success(format!("Command {:?} executed.", ack.command));
+                            }
+                            MavResult::InProgress => {}
+                            _ => {
+                                self.toasts.error(format!(
+                                    "Command {:?} failed: {:?}.",
+                                    ack.command, ack.result
+                                ));
+                            }
+                        }
+                    }
+                }
+                Event::NewPeer(peer) => {
+                    if self.never_connected && self.active_view == View::Overview {
+                        self.active_view = View::System(peer.system_id());
+                    }
+
                     self.toasts
-                        .success(format!("Command {:?} executed.", ack.command));
+                        .success(format!("System 0x{:02x} connected.", peer.system_id()));
                 }
-                MavResult::InProgress => {}
-                _ => {
-                    self.toasts.error(format!(
-                        "Command {:?} failed: {:?}.",
-                        ack.command, ack.result
-                    ));
+                Event::PeerLost(peer) => {
+                    self.toasts
+                        .warning(format!("System 0x{:02x} lost.", peer.system_id()));
                 }
+                _ => {}
             }
         }
 
