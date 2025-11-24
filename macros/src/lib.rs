@@ -1,4 +1,5 @@
 extern crate proc_macro;
+
 use mavinspect::protocol::MavType;
 use proc_macro::TokenStream;
 
@@ -438,4 +439,116 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
 
     let output = format!("impl Db {{\n{methods}\n}}");
     output.parse().unwrap()
+}
+
+struct QuantityInformation {}
+
+fn generate_quantity_information(
+    field: &mavinspect::protocol::MessageField,
+) -> proc_macro2::TokenStream {
+    let value_type = match field.r#type() {
+        MavType::UInt8 => quote::format_ident!("u8"),
+        MavType::UInt16 => quote::format_ident!("u16"),
+        MavType::UInt32 => quote::format_ident!("u32"),
+        MavType::UInt64 => quote::format_ident!("u64"),
+        MavType::Int8 => quote::format_ident!("i8"),
+        MavType::Int16 => quote::format_ident!("i16"),
+        MavType::Int32 => quote::format_ident!("i32"),
+        MavType::Int64 => quote::format_ident!("i64"),
+        MavType::Float => quote::format_ident!("f32"),
+        MavType::Double => quote::format_ident!("f64"),
+        MavType::Char => quote::format_ident!("char"),
+        MavType::UInt8MavlinkVersion => quote::format_ident!("u8"), //TODO Hans: How to handle this?
+        MavType::Array(_mav_type, _size) => quote::format_ident!("u8"), //TODO Hans: Handle this
+    };
+    return quote::quote!(crate::metrics::Unquantified<#value_type>);
+}
+
+#[proc_macro]
+pub fn metric(input: TokenStream) -> TokenStream {
+    //let ty = parse_macro_input!(input as Type);
+
+    // Generate the fully qualified trait syntax
+    let expanded = quote::quote! {
+         <crate::metrics::heartbeat::Message as metrics::Heartbeat>::Type
+    };
+
+    TokenStream::from(expanded)
+}
+
+#[proc_macro]
+pub fn generate_metrics(_item: TokenStream) -> TokenStream {
+    let protocol = mavspec::definitions::protocol();
+    let dialect = protocol.get_dialect_by_name("common").unwrap();
+
+    dialect
+        .messages()
+        .into_iter()
+        .map(|msg| {
+            let msg_trait = quote::format_ident!(
+                "{}",
+                convert_case::Casing::to_case(&msg.name().to_string(), convert_case::Case::Pascal)
+            );
+            let msg_mod = quote::format_ident!(
+                "{}",
+                convert_case::Casing::to_case(&msg.name().to_string(), convert_case::Case::Snake)
+            );
+            let msg_members = msg
+                .fields()
+                .iter()
+                .map(|f| {
+                    quote::format_ident!(
+                        "{}",
+                        convert_case::Casing::to_case(
+                            &format!("{}", f.name()),
+                            convert_case::Case::Pascal,
+                        )
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            let quantities = msg
+                .fields()
+                .iter()
+                .map(|f| generate_quantity_information(f))
+                .collect::<Vec<_>>();
+
+            let names = msg_members
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>();
+
+            quote::quote!(
+
+                pub trait #msg_trait : Message {
+                    #(type #msg_members /* : FieldOf<Self>*/;)*
+                }
+
+                pub mod #msg_mod {
+                    pub struct Message {}
+                    impl crate::metrics::sealed::Sealed for Message {}
+                    impl crate::metrics::Message for Message {}
+                    impl crate::metrics::#msg_trait for Message {
+                        #(type #msg_members = fields::#msg_members;)*
+                    }
+
+                    mod fields {
+                        #(pub struct #msg_members {})*
+
+                        //#(impl FieldOf<#msg_struct> for #field_structs {})*
+
+                        #(impl crate::metrics::sealed::Sealed for #msg_members {})*
+
+                        #(impl crate::metrics::Metric for #msg_members {
+                            type Quantity = #quantities;
+                            fn name() -> &'static str {
+                                return #names;
+                            }
+                        })*
+                    }
+                }
+            )
+        })
+        .collect::<proc_macro2::TokenStream>()
+        .into()
 }

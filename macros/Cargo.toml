@@ -13,3 +13,6 @@ tracing = { workspace = true }
 
 mavspec = { workspace = true }
 mavinspect = { version = "0.6.6" }
+convert_case = "0.9.0"
+quote = "1.0.42"
+proc-macro2 = "1.0.103"

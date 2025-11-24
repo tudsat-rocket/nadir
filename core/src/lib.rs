@@ -1,10 +1,13 @@
 use std::sync::{Arc, Mutex};
 
+//mod constraints;
 mod interface;
+mod metrics;
 mod system;
 
 use db::Db;
 use interface::*;
+use macros::metric;
 use system::*;
 
 use maviola::asnc::prelude::*;
@@ -13,6 +16,10 @@ use maviola::protocol::Peer;
 use maviola::protocol::SystemId;
 use maviola::protocol::dialects::Ardupilotmega;
 use maviola::protocol::dialects::Common;
+
+use crate::metrics::Metric;
+use crate::metrics::Quantity;
+use crate::metrics::heartbeat;
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 250;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
@@ -25,8 +32,18 @@ pub struct Core {
     pub interfaces: Arc<Mutex<Vec<Interface>>>,
 }
 
+fn test<F>() {
+    println!("Test");
+}
+
 impl Core {
     pub fn init() -> Self {
+        //Heartbeat::MavlinkVersion::Quantity
+        //<<heartbeat::Message as metrics::Heartbeat>::MavlinkVersion as Metric>::Quantity::test();
+        todo!(
+            "{}",
+            <heartbeat::Message as metrics::Heartbeat>::Autopilot::name() //<<heartbeat::Message as metrics::Heartbeat>::MavlinkVersion as Metric>::Quantity::test( )
+        );
         Self {
             plot_origin: chrono::Utc::now(),
             db: Db::init(),

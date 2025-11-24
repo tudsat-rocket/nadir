@@ -7,9 +7,12 @@ edition = "2024"
 
 [dependencies]
 db = { workspace = true }
+macros = { workspace = true }
 
 chrono = { workspace = true }
 tracing = { workspace = true }
 
 mavspec = { workspace = true }
 maviola = { workspace = true }
+uom = "0.37.0"
+camelpaste = "0.1.0"
