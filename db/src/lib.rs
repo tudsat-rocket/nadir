@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use mavspec::rust::dialects::common::messages::CanFrame;
 
 #[derive(Clone)]
@@ -100,24 +101,27 @@ impl Db {
     pub fn can_frames_for_system(
         &self,
         system_and_component_ids: (u8, u8),
-    ) -> Result<Vec<CanFrame>, DbError> {
+    ) -> Result<Vec<(DateTime<Utc>, CanFrame)>, DbError> {
         let system_id = system_and_component_ids.0;
-        let component_id = system_and_component_ids.0;
+        let component_id = system_and_component_ids.1;
 
         let conn = self.conn();
         let mut stmt = conn.prepare(&"SELECT received_at, bus, id, len, data FROM messages_can_frame WHERE system_id=?1 AND component_id=?2")?;
         let rows = stmt.query_map(rusqlite::params![&system_id, &component_id,], |row| {
-            Ok(CanFrame {
-                target_system: 0xff,
-                target_component: 0xff,
-                bus: row.get(1)?,
-                id: row.get(2)?,
-                len: row.get(3)?,
-                data: row.get(4)?,
-            })
+            Ok((
+                row.get(0)?,
+                CanFrame {
+                    target_system: 0xff,
+                    target_component: 0xff,
+                    bus: row.get(1)?,
+                    id: row.get(2)?,
+                    len: row.get(3)?,
+                    data: row.get(4)?,
+                },
+            ))
         })?;
 
-        Ok(rows.filter_map(|frame| frame.ok()).collect())
+        Ok(rows.filter_map(|row| row.ok()).collect())
     }
 }
 
