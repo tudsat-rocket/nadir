@@ -20,6 +20,7 @@ mod stats;
 mod system;
 
 pub use links::*;
+pub use protocols::params::{Param, ParamId, ParamProgress};
 pub use system::*;
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;

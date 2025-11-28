@@ -10,16 +10,17 @@ use maviola::prelude::Message;
 use maviola::prelude::V2;
 use maviola::protocol::SystemId;
 use mavspec::rust::dialects::common::enums::{
-    MavCmd, MavFrame, MavModeFlag, MavStandardMode, MavType,
+    MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
 };
 use mavspec::rust::dialects::common::messages::{
-    Attitude, AvailableModes, CommandInt, CommandLong, GlobalPositionInt, VfrHud,
+    Attitude, AvailableModes, CommandInt, CommandLong, GlobalPositionInt, ParamSet, VfrHud,
 };
 use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
 use db::{Db, DbError};
 use mavspec::rust::dialects::Common;
 
+use crate::protocols::params::ParamProgress;
 use crate::stats::ChannelStats;
 
 pub struct SystemConnection {
@@ -35,15 +36,18 @@ pub struct System {
     pub message_sender: tokio::sync::broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
+    pub params: Arc<Mutex<ParamProgress>>,
 }
 
 impl System {
     pub fn new(system_id: SystemId, db: Db, callback: Callback<V2>) -> Self {
         let available_modes = Arc::new(Mutex::new(None));
+        let params = Arc::new(Mutex::new(ParamProgress::Unknown));
 
         // TODO: dialects
         let (message_sender, receiver) = tokio::sync::broadcast::channel::<Common>(5);
         let receiver2 = message_sender.subscribe();
+        let receiver3 = message_sender.subscribe();
 
         let system = System {
             system_id,
@@ -55,6 +59,7 @@ impl System {
                 channels: HashMap::new(),
             })),
             available_modes,
+            params,
         };
 
         let _ = tokio::spawn(crate::protocols::modes::discover_available_modes(
@@ -66,6 +71,12 @@ impl System {
         let _ = tokio::spawn(crate::protocols::intervals::request_message_intervals(
             system.clone(),
             receiver2,
+        ));
+
+        let _ = tokio::spawn(crate::protocols::params::download_params(
+            system.clone(),
+            0x01,
+            receiver3,
         ));
 
         system
@@ -204,6 +215,21 @@ impl System {
             command: MavCmd::CanForward,
             param1: (enable as u8) as f32,
             ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
+    pub fn set_param(&self, param_id: &str, param_type: MavParamType, param_value: f32) {
+        let mut param_id_bytes = [0; 16];
+        param_id_bytes.copy_from_slice(param_id.as_bytes());
+
+        let cmd = ParamSet {
+            target_system: self.system_id,
+            target_component: 0x01,
+            param_id: param_id_bytes,
+            param_type,
+            param_value,
         };
 
         self.send_message(&cmd);

@@ -8,6 +8,7 @@ mod horizon;
 mod links;
 mod map;
 mod messages;
+mod params;
 mod plot;
 mod sensors;
 mod state_estimator;
@@ -19,6 +20,7 @@ pub use horizon::HorizonPane;
 pub use links::LinksPane;
 pub use map::MapPane;
 pub use messages::MessagesPane;
+pub use params::ParamsPane;
 pub use plot::PlotPane;
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
@@ -44,6 +46,7 @@ pub enum Pane {
     CanProbe(CanProbePane),
     Links(LinksPane),
     Horizon(HorizonPane),
+    Params(ParamsPane),
     Placeholder(String),
 }
 
@@ -86,6 +89,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             Pane::CanProbe(_) => "CAN Probe".into(),
             Pane::Links(_) => "Links".into(),
             Pane::Horizon(_) => "Horizon".into(),
+            Pane::Params(_) => "Params".into(),
             Pane::Placeholder(s) => s.into(),
         }
     }
@@ -107,6 +111,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             Pane::CanProbe(p) => p.pane_ui(ui, self),
             Pane::Links(p) => p.pane_ui(ui, self),
             Pane::Horizon(p) => p.pane_ui(ui, self),
+            Pane::Params(p) => p.pane_ui(ui, self),
             Pane::Placeholder(_) => {}
         }
 
