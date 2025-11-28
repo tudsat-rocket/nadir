@@ -126,20 +126,24 @@ impl StatusPane {
                 ui.separator();
 
                 ui.horizontal(|ui| {
+                    let s = 18.0;
+                    let button_h = s + 5.0;
+
                     ui.vertical(|ui| {
                         let armed = base_mode.contains(MavModeFlag::SAFETY_ARMED);
-                        let size = Vec2::new(75.0, 24.0);
+                        let size = Vec2::new(100.0, button_h);
 
                         let arm_button = if armed {
-                            Button::selectable(true, "ARMED").fill(Color32::from_rgb(204, 0, 0))
+                            Button::selectable(true, RichText::new("ARMED").size(s))
+                                .fill(Color32::from_rgb(204, 0, 0))
                         } else {
-                            Button::selectable(false, "ARM")
+                            Button::selectable(false, RichText::new("ARM").size(s))
                         };
 
                         let disarm_button = if !armed {
-                            Button::selectable(true, "DISARMED")
+                            Button::selectable(true, RichText::new("DISARMED").size(s))
                         } else {
-                            Button::selectable(false, "DISARM")
+                            Button::selectable(false, RichText::new("DISARM").size(s))
                         };
 
                         if ui.add_sized(size, arm_button).clicked() {
@@ -159,7 +163,7 @@ impl StatusPane {
 
                     ui.vertical(|ui| {
                         let w = ui.available_width() / 5.0;
-                        let size = Vec2::new(w, 24.0);
+                        let size = Vec2::new(w, button_h);
 
                         let favourites = match (autopilot, mav_type) {
                             (MavAutopilot::Ardupilotmega, MavType::FixedWing) => Some((
@@ -192,7 +196,10 @@ impl StatusPane {
                                         };
 
                                         let name = String::from_utf8_lossy(&mode_info.mode_name);
-                                        let button = Button::selectable(custom_mode == *cm, name);
+                                        let button = Button::selectable(
+                                            custom_mode == *cm,
+                                            RichText::new(name).size(s),
+                                        );
 
                                         if ui.add_sized(size, button).clicked() {
                                             if mode_info.standard_mode

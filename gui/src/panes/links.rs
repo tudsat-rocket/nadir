@@ -6,7 +6,7 @@ use crate::{panes::TreeBehavior, views::View};
 pub struct LinksPane {}
 
 impl LinksPane {
-    pub fn new(ctx: &egui::Context) -> Self {
+    pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
 

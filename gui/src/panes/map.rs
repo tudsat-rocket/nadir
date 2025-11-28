@@ -11,7 +11,7 @@ use walkers::{
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol},
 };
 
-use crate::{panes::TreeBehavior, views::View, widgets::FalseHorizon};
+use crate::{panes::TreeBehavior, views::View};
 
 pub struct MapPane {
     osm_tiles: HttpTiles,
@@ -316,26 +316,6 @@ impl MapPane {
         //        Gizmo::new(config).interact(ui, &[transform]);
         //    }
         //}
-
-        let horizon_w = f32::max(150.0, f32::min(350.0, rect.width() / 6.0));
-        let horizon_rect = Rect::from_two_pos(
-            rect.left_top() + Vec2::new(10.0, 10.0),
-            rect.left_top() + Vec2::new(10.0 + horizon_w, 10.0 + horizon_w + 50.0),
-        );
-        if let Some(system) = &active_system {
-            ui.place(horizon_rect, |ui: &mut egui::Ui| {
-                Frame::dark_canvas(ui.style())
-                    .corner_radius(CornerRadius::ZERO.at_least(10))
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(horizon_rect.width());
-                            ui.set_height(horizon_rect.height());
-                            ui.add_sized(horizon_rect.size(), FalseHorizon::new(system));
-                        });
-                    })
-                    .response
-            });
-        }
 
         //// Panel for resetting map to vehicle position
         //let reset_rect = Rect::from_two_pos(

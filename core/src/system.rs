@@ -13,7 +13,7 @@ use mavspec::rust::dialects::common::enums::{
     MavCmd, MavFrame, MavModeFlag, MavStandardMode, MavType,
 };
 use mavspec::rust::dialects::common::messages::{
-    Attitude, AvailableModes, CommandInt, CommandLong, GlobalPositionInt,
+    Attitude, AvailableModes, CommandInt, CommandLong, GlobalPositionInt, VfrHud,
 };
 use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
@@ -89,6 +89,10 @@ impl System {
         self.db.last_attitude_for_system((self.system_id, 0x1))
     }
 
+    pub fn last_vfr_hud(&self) -> Result<Option<VfrHud>, DbError> {
+        self.db.last_vfr_hud_for_system((self.system_id, 0x1))
+    }
+
     pub fn mav_type(&self) -> MavType {
         match self.last_heartbeat().unwrap_or(None).map(|hb| hb.type_) {
             Some(mt) => mt,
@@ -107,7 +111,7 @@ impl System {
             MavType::Coaxial => "🚁",
             MavType::FixedWing => "✈",
             MavType::GroundRover => "🚗",
-            MavType::Gcs => "📡",
+            MavType::Gcs | MavType::AntennaTracker => "📡",
             _ => "?",
         }
     }
@@ -155,7 +159,6 @@ impl System {
         self.send_message(&cmd);
     }
 
-    // TODO: consider standard modes. test with PX4
     pub fn do_arm(&self, arm: bool, force: bool) {
         let cmd = CommandLong {
             target_system: self.system_id,
@@ -169,7 +172,6 @@ impl System {
         self.send_message(&cmd);
     }
 
-    // TODO: consider standard modes. test with PX4
     pub fn do_set_custom_mode(&self, custom_mode: u32) {
         let cmd = CommandLong {
             target_system: self.system_id,

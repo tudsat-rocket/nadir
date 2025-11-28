@@ -48,10 +48,14 @@ impl App {
 
         let map = tiles.insert_pane(Pane::Map(MapPane::new(ctx, None)));
 
+        let horizon = tiles.insert_pane(Pane::Horizon(HorizonPane::new(ctx)));
+
         let status = tiles.insert_pane(Pane::Status(StatusPane::new(ctx)));
         let components = tiles.insert_pane(Pane::Placeholder("Info".to_owned()));
+        let info_top_tabs = tiles.insert_tab_tile(vec![status, components]);
+
         let link = tiles.insert_pane(Pane::Links(LinksPane::new(ctx)));
-        let top_tabs = tiles.insert_tab_tile(vec![status, components, link]);
+        let info_bottom_tabs = tiles.insert_tab_tile(vec![link]);
 
         let system = tiles.insert_pane(Pane::Placeholder("System Overview".to_owned()));
         let state = tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx)));
@@ -59,16 +63,36 @@ impl App {
         let plot = tiles.insert_pane(Pane::Plot(PlotPane::new(ctx)));
         let messages = tiles.insert_pane(Pane::Messages(MessagesPane::new(ctx)));
         let commands = tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx)));
+        let params = tiles.insert_pane(Pane::Params(ParamsPane::new(ctx)));
         let can = tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx)));
-        let bottom_tabs =
-            tiles.insert_tab_tile(vec![system, state, sensors, plot, messages, commands, can]);
+
+        let main_tabs = tiles.insert_tab_tile(vec![
+            system, state, sensors, plot, messages, commands, params, can,
+        ]);
+
+        let info = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
+            egui_tiles::Linear::new_binary(
+                LinearDir::Vertical,
+                [info_top_tabs, info_bottom_tabs],
+                0.5,
+            ),
+        )));
+
+        let horizon_and_info =
+            tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
+                egui_tiles::Linear::new_binary(LinearDir::Horizontal, [horizon, info], 0.35),
+            )));
 
         let side = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Vertical, [top_tabs, bottom_tabs], 0.35),
+            egui_tiles::Linear::new_binary(
+                LinearDir::Vertical,
+                [horizon_and_info, main_tabs],
+                0.25,
+            ),
         )));
 
         let root = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.4),
+            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.45),
         )));
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
@@ -126,6 +150,8 @@ impl eframe::App for App {
                 Event::NewPeer(peer) => {
                     if self.never_connected && self.active_view == View::Overview {
                         self.active_view = View::System(peer.system_id());
+                        self.never_connected = false;
+                        self.sidebar_collapsed = true;
                     }
 
                     self.toasts

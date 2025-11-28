@@ -1,5 +1,10 @@
+use egui_tiles::SimplificationOptions;
+
+use core::Core;
+
 mod can;
 mod commands;
+mod horizon;
 mod links;
 mod map;
 mod messages;
@@ -8,12 +13,9 @@ mod sensors;
 mod state_estimator;
 mod status;
 
-use core::Core;
-
 pub use can::CanProbePane;
 pub use commands::CommandsPane;
-use egui::{Color32, Stroke};
-use egui_tiles::SimplificationOptions;
+pub use horizon::HorizonPane;
 pub use links::LinksPane;
 pub use map::MapPane;
 pub use messages::MessagesPane;
@@ -41,6 +43,7 @@ pub enum Pane {
     Commands(CommandsPane),
     CanProbe(CanProbePane),
     Links(LinksPane),
+    Horizon(HorizonPane),
     Placeholder(String),
 }
 
@@ -82,6 +85,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             Pane::Commands(_) => "Commands".into(),
             Pane::CanProbe(_) => "CAN Probe".into(),
             Pane::Links(_) => "Links".into(),
+            Pane::Horizon(_) => "Horizon".into(),
             Pane::Placeholder(s) => s.into(),
         }
     }
@@ -102,6 +106,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             Pane::Commands(p) => p.pane_ui(ui, self),
             Pane::CanProbe(p) => p.pane_ui(ui, self),
             Pane::Links(p) => p.pane_ui(ui, self),
+            Pane::Horizon(p) => p.pane_ui(ui, self),
             Pane::Placeholder(_) => {}
         }
 

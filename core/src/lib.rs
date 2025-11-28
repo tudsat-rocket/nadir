@@ -173,22 +173,13 @@ impl Core {
                             tracing::error!("Failed to process common message: {e:?}");
                         }
 
-                        let system_id = frame.system_id();
-
                         let mut systems = self.systems.lock().unwrap();
-
+                        let system_id = frame.system_id();
                         let system = systems.entry(system_id).or_insert_with(|| {
                             System::new(system_id, self.db.clone(), callback.clone())
                         });
 
                         system.notify_of_message(message, frame, callback);
-                        self.links
-                            .lock()
-                            .unwrap()
-                            .get_mut(&link)
-                            .unwrap()
-                            .stats
-                            .push_received(frame.body_length());
                     } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
                         match message {
                             Ardupilotmega::Ahrs(_) => {}
@@ -202,6 +193,10 @@ impl Core {
                             msg => tracing::info!("{:?}", msg),
                         }
                     }
+
+                    let mut links = self.links.lock().unwrap();
+                    let link = links.get_mut(&link).unwrap();
+                    link.stats.push_received(frame.body_length());
                 }
                 Event::Invalid(_frame, _frame_error, _callback) => {}
                 Event::NewPeer(peer) => {
