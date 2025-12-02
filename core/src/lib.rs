@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use socketcan::{CanAddr, CanSocket, EmbeddedFrame, ExtendedId, Id, Socket, StandardId};
-use tokio::sync::mpsc::Receiver;
+use socketcan::{EmbeddedFrame, ExtendedId, Id, StandardId};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use maviola::asnc::prelude::*;
 use maviola::prelude::*;
@@ -14,6 +14,7 @@ use mavspec::rust::dialects::common::enums::MavSeverity;
 
 use db::Db;
 
+mod can_proxy;
 mod links;
 mod protocols;
 mod stats;
@@ -22,6 +23,7 @@ mod system;
 pub use links::*;
 pub use protocols::params::{Param, ParamId, ParamProgress};
 pub use system::*;
+use tracing::{trace, warn};
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
@@ -33,6 +35,7 @@ pub struct Core {
     pub systems: Arc<Mutex<HashMap<SystemId, System>>>,
     pub links: Arc<Mutex<HashMap<LinkId, Link>>>,
     pub plot_origin: chrono::DateTime<chrono::Utc>,
+    pub can_proxy: Option<Sender<socketcan::CanFrame>>,
 }
 
 #[derive(Default)]
@@ -66,17 +69,29 @@ impl CoreBuilder {
     pub fn spawn(self) -> Core {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
+        let (to_can_socket_proxy, from_can_socket_proxy) =
+            tokio::sync::mpsc::channel::<socketcan::CanFrame>(32);
+
         let core = Core {
             event_sender: tx,
             plot_origin: chrono::Utc::now(),
             db: Db::init(),
             systems: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(HashMap::new())),
+            can_proxy: Some(to_can_socket_proxy),
         };
 
-        let c = core.clone();
+        let cloned_core = core.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
+
+            // can socket
+            let c = cloned_core.clone();
+            rt.spawn(async move {
+                // NOTE: ignore errors for now
+                let _ = can_proxy::spawn_can_proxy(from_can_socket_proxy, cloned_core).await;
+            });
+
             rt.block_on(c.run(self.links, self.autoconnect_usb, rx, self.on_event));
         });
 
@@ -108,10 +123,6 @@ impl Core {
         if autoconnect_usb {
             tokio::spawn(links::usb::autoconnect(self.clone()));
         }
-
-        let socket = CanAddr::from_iface("vcan0")
-            .map(|addr| CanSocket::open_addr(&addr))
-            .flatten();
 
         while let Some((link, event)) = event_receiver.recv().await {
             match &event {
@@ -148,8 +159,12 @@ impl Core {
                                 ),
                             },
                             Common::CanFrame(can_frame) => {
-                                if let Ok(s) = &socket {
-                                    let id = if can_frame.id > 0b111_1111_1111 {
+                                trace!("mavlink can frame received");
+                                if let Some(can_sender) = &self.can_proxy {
+                                    let id = if can_frame.id > 0x1FFF_FFFF {
+                                        warn!("received illegal can id: {}", can_frame.id);
+                                        return;
+                                    } else if can_frame.id > 0b111_1111_1111 {
                                         Id::Extended(ExtendedId::new(can_frame.id).unwrap())
                                     } else {
                                         Id::Standard(StandardId::new(can_frame.id as u16).unwrap())
@@ -159,8 +174,8 @@ impl Core {
                                         id,
                                         &can_frame.data[..(can_frame.len as usize)],
                                     )
-                                    .unwrap();
-                                    let _ = s.write_frame(&frame);
+                                    .expect("can frame creation should not have failed");
+                                    let _ = can_sender.send(frame).await;
                                 }
                             }
                             _ => {}
@@ -221,16 +236,11 @@ impl Core {
         system_ids
     }
 
-    pub fn system<'a>(&'a self, id: SystemId) -> Option<System> {
-        self.systems.lock().unwrap().get(&id).map(|s| s.clone())
+    pub fn system(&self, id: SystemId) -> Option<System> {
+        self.systems.lock().unwrap().get(&id).cloned()
     }
 
     pub fn links(&self) -> Vec<Link> {
-        self.links
-            .lock()
-            .unwrap()
-            .values()
-            .map(|l| l.clone())
-            .collect()
+        self.links.lock().unwrap().values().cloned().collect()
     }
 }
