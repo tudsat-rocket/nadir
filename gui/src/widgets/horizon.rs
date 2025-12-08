@@ -26,6 +26,9 @@ impl ArtificialHorizon {
     }
 
     fn draw_ball(&self, painter: &mut egui::Painter, pitch: f32, center: Pos2, radius: f32) {
+        #[cfg(features = "profiling")]
+        puffin::profile_function!();
+
         let original_rect = painter.clip_rect();
         let ball_clip_rect = Rect::from_center_size(
             painter.clip_rect().center(),
@@ -134,6 +137,9 @@ impl ArtificialHorizon {
         center: Pos2,
         radius: f32,
     ) {
+        #[cfg(features = "profiling")]
+        puffin::profile_function!();
+
         painter.circle_filled(center, 2.0, Color32::RED);
         painter.circle_filled(center, 1.5, Color32::ORANGE);
         for mirror in [-1.0, 1.0] {
@@ -158,6 +164,9 @@ impl ArtificialHorizon {
     }
 
     fn draw_compass(&self, painter: &mut egui::Painter, heading: f32, center: Pos2, radius: f32) {
+        #[cfg(features = "profiling")]
+        puffin::profile_function!();
+
         for a in (0..360).step_by(10) {
             let r = (a as f32).to_radians() - heading;
             let tip = center + Vec2::new(r.sin(), -r.cos()) * radius;
@@ -319,6 +328,9 @@ impl ArtificialHorizon {
         painter: &mut egui::Painter,
         local_position: Option<&LocalPositionNed>,
     ) {
+        #[cfg(features = "profiling")]
+        puffin::profile_function!();
+
         let altitude = local_position.as_ref().map(|v| v.z * -1.0).unwrap_or(0.0);
         let climb = local_position.as_ref().map(|v| v.vz * -1.0).unwrap_or(0.0);
         self.draw_side_dial(painter, altitude, 1.0, None);
@@ -330,6 +342,9 @@ impl ArtificialHorizon {
         local_position: Option<&LocalPositionNed>,
         vfr_hud: Option<&VfrHud>,
     ) {
+        #[cfg(features = "profiling")]
+        puffin::profile_function!();
+
         let throttle = vfr_hud
             .map(|v| v.throttle as f32 / 100.0)
             .unwrap_or_default();

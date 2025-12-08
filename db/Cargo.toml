@@ -17,3 +17,5 @@ rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 mavspec = { workspace = true }
 maviola = { workspace = true }
 mavinspect = { version = "0.6.6" }
+
+puffin = { git = "https://github.com/EmbarkStudios/puffin" }

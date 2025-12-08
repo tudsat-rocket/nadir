@@ -100,6 +100,9 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
+        #[cfg(features = "profiling")]
+        puffin::profile_function!(format!("{}", pane));
+
         match pane {
             Pane::Map(p) => p.pane_ui(ui, self),
             Pane::Status(p) => p.pane_ui(ui, self),

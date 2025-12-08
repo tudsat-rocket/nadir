@@ -309,6 +309,8 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                     &self,
                     system_and_component_ids: (u8, u8)
                 ) -> Result<Option<mavspec::rust::dialects::common::messages::{type_name}>, DbError> {{
+                    puffin::profile_function!();
+
                     let conn = self.conn();
                     conn.busy_timeout(std::time::Duration::from_millis(10))?;
 
@@ -386,6 +388,8 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                 since: Option<chrono::DateTime<chrono::Utc>>,
                 until: Option<chrono::DateTime<chrono::Utc>>,
             ) -> Result<Vec<(chrono::DateTime<chrono::Utc>, f64)>, DbError> {{
+                puffin::profile_function!(msg_name.to_owned() + \".\" + field_name);
+
                 use chrono::TimeZone;
 
                 let conn = self.conn();
@@ -421,6 +425,8 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                 msg_name: &str,
                 system_and_component_ids: (u8, u8)
             ) -> Result<usize, DbError> {{
+                puffin::profile_function!();
+
                 use mavspec::rust::dialects::Common;
                 let result = match msg_name {{
                     {match_arms_count}
@@ -434,6 +440,8 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                 msg_name: &str,
                 system_and_component_ids: (u8, u8)
             ) -> Result<Option<mavspec::rust::dialects::Common>, DbError> {{
+                puffin::profile_function!();
+
                 use mavspec::rust::dialects::Common;
                 let result = match msg_name {{
                     {match_arms_last}

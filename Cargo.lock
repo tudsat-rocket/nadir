@@ -937,6 +937,7 @@ dependencies = [
  "mavinspect",
  "maviola",
  "mavspec",
+ "puffin",
  "rusqlite",
  "thiserror 2.0.17",
  "tracing",
