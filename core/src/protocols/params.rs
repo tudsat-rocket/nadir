@@ -66,7 +66,7 @@ pub async fn download_params(
                     let count = param.param_count as usize;
                     number_params = Some(count);
                     params.insert(
-                        id.clone(),
+                        id.trim_matches('\0').to_string(),
                         Param {
                             id,
                             param_type: param.param_type,
