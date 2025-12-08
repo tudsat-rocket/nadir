@@ -77,6 +77,13 @@ macro_rules! define_message_tables {
                 message.name(),
             );
             $conn.execute(&query, rusqlite::params![]).unwrap();
+
+            let query = format!(
+                "CREATE INDEX index_{} ON messages_{} (system_id, component_id, received_at)",
+                message.name(),
+                message.name(),
+            );
+            $conn.execute(&query, rusqlite::params![]).unwrap();
         }
     };
 }
