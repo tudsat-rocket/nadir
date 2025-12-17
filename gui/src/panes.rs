@@ -36,7 +36,7 @@ pub struct TreeBehavior<'a> {
 }
 
 pub enum Pane {
-    Map(MapPane),
+    Map(Box<MapPane>),
     Status(StatusPane),
     StateEstimator(StateEstimatorPane),
     Sensors(SensorsPane),

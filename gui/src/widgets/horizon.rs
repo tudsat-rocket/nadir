@@ -46,12 +46,11 @@ impl ArtificialHorizon {
 
         painter.add(Shape::Path(PathShape::convex_polygon(
             (0..N)
-                .into_iter()
                 .map(|i| {
                     let a = PI * (i as f32) / (N as f32);
-                    center + Vec2::new(a.cos(), a.sin() * pitch.signum() * -1.0) * radius
+                    center + Vec2::new(a.cos(), a.sin() * -pitch.signum()) * radius
                 })
-                .chain((0..N).into_iter().map(|i| {
+                .chain((0..N).map(|i| {
                     let a = PI - PI * (i as f32) / (N as f32);
                     center + Vec2::new(a.cos(), a.sin() * pitch.sin()) * radius
                 }))
@@ -61,10 +60,10 @@ impl ArtificialHorizon {
         )));
 
         // project our pitch ticks into 2d and paint them
-        for pitch_tick in (-90i32..=90).into_iter().step_by(5) {
+        for pitch_tick in (-90i32..=90).step_by(5) {
             let r = (pitch_tick as f32).to_radians();
 
-            let points3d = (0..N).into_iter().map(|i| {
+            let points3d = (0..N).map(|i| {
                 let a = PI * (i as f32) / (N as f32);
                 nalgebra::Vector3::new(a.cos() * r.cos(), a.sin() * r.cos(), -r.sin())
             });
@@ -103,7 +102,7 @@ impl ArtificialHorizon {
                 ),
             )));
 
-            if pitch_tick % 20 == 0 && pitch_tick != 0 && projected.len() > 0 {
+            if pitch_tick % 20 == 0 && pitch_tick != 0 && !projected.is_empty() {
                 for center in [projected[0], projected[projected.len() - 1]] {
                     painter.rect_filled(
                         Rect::from_center_size(center, Vec2::new(30.0, 20.0)),
@@ -331,8 +330,8 @@ impl ArtificialHorizon {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
-        let altitude = local_position.as_ref().map(|v| v.z * -1.0).unwrap_or(0.0);
-        let _climb = local_position.as_ref().map(|v| v.vz * -1.0).unwrap_or(0.0);
+        let altitude = local_position.as_ref().map(|v| -v.z).unwrap_or(0.0);
+        let _climb = local_position.as_ref().map(|v| -v.vz).unwrap_or(0.0);
         self.draw_side_dial(painter, altitude, 1.0, None);
     }
 

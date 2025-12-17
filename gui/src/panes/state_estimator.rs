@@ -18,7 +18,7 @@ impl StateEstimatorPane {
 
         let altitude_plot = Plot::new(
             vec![PlotLine {
-                system_id: system_id,
+                system_id,
                 component_id: 1,
                 message_name: "LOCAL_POSITION_NED".to_owned(),
                 field_name: "z".to_owned(),
@@ -27,14 +27,14 @@ impl StateEstimatorPane {
                 color: None,
             }],
             &behavior.core,
-            &mut behavior.shared_plot_state,
+            behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, altitude_plot);
 
         let velocity_plot = Plot::new(
             vec![PlotLine {
-                system_id: system_id,
+                system_id,
                 component_id: 1,
                 message_name: "LOCAL_POSITION_NED".to_owned(),
                 field_name: "vz".to_owned(),
@@ -43,7 +43,7 @@ impl StateEstimatorPane {
                 color: None,
             }],
             &behavior.core,
-            &mut behavior.shared_plot_state,
+            behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, velocity_plot);

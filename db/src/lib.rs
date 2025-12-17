@@ -113,7 +113,7 @@ impl Db {
         let component_id = system_and_component_ids.1;
 
         let conn = self.conn();
-        let mut stmt = conn.prepare(&"SELECT received_at, bus, id, len, data FROM messages_can_frame WHERE system_id=?1 AND component_id=?2")?;
+        let mut stmt = conn.prepare("SELECT received_at, bus, id, len, data FROM messages_can_frame WHERE system_id=?1 AND component_id=?2")?;
         let rows = stmt.query_map(rusqlite::params![&system_id, &component_id,], |row| {
             Ok((
                 row.get(0)?,

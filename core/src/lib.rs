@@ -28,6 +28,8 @@ use tracing::{trace, warn};
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
 
+pub type EventCallback = Box<dyn Fn(&Event<V2>) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Core {
     event_sender: tokio::sync::mpsc::Sender<(LinkId, Event<V2>)>,
@@ -42,7 +44,7 @@ pub struct Core {
 pub struct CoreBuilder {
     pub links: Vec<LinkId>,
     pub autoconnect_usb: bool,
-    pub on_event: Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>,
+    pub on_event: Option<EventCallback>,
 }
 
 impl CoreBuilder {
@@ -61,7 +63,7 @@ impl CoreBuilder {
         self
     }
 
-    pub fn on_event(mut self, cb: Box<dyn Fn(&Event<V2>) + Send + Sync>) -> Self {
+    pub fn on_event(mut self, cb: EventCallback) -> Self {
         self.on_event = Some(cb);
         self
     }
@@ -114,7 +116,7 @@ impl Core {
         initial_links: Vec<LinkId>,
         autoconnect_usb: bool,
         mut event_receiver: Receiver<(LinkId, Event<V2>)>,
-        on_event: Option<Box<dyn Fn(&Event<V2>) + Send + Sync>>,
+        on_event: Option<EventCallback>,
     ) {
         for id in initial_links {
             self.add_link(id);
@@ -127,6 +129,10 @@ impl Core {
         while let Some((link_id, event)) = event_receiver.recv().await {
             match &event {
                 Event::Frame(frame, callback) => {
+                    if frame.system_id() == 0xff {
+                        continue;
+                    }
+
                     if let Ok(message) = frame.decode::<Common>() {
                         match &message {
                             Common::Statustext(inner) => match inner.severity {
@@ -189,7 +195,7 @@ impl Core {
                             tracing::error!("Failed to process common message: {e:?}");
                         }
 
-                        let mut links = self.links.lock().unwrap();
+                        let links = self.links.lock().unwrap();
                         let link = links.get(&link_id).unwrap();
 
                         let mut systems = self.systems.lock().unwrap();

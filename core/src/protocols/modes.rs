@@ -32,12 +32,9 @@ pub async fn discover_available_modes(
             let mut number_modes: Option<usize> = None;
             let mut modes = Vec::new();
             while number_modes.map(|num| modes.len() < num).unwrap_or(true) {
-                match message_rx.recv().await {
-                    Ok(Common::AvailableModes(mode_info)) => {
-                        number_modes = Some(mode_info.number_modes as usize);
-                        modes.push(mode_info);
-                    }
-                    _ => {}
+                if let Ok(Common::AvailableModes(mode_info)) = message_rx.recv().await {
+                    number_modes = Some(mode_info.number_modes as usize);
+                    modes.push(mode_info);
                 }
             }
             modes

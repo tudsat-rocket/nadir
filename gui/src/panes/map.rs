@@ -231,6 +231,7 @@ impl MapPane {
         let gcs_position = Some(Position::new(8.592405614256041, 49.85598251253783));
 
         // TODO
+        #[allow(clippy::unnecessary_literal_unwrap)]
         let center_position = gcs_position.unwrap();
 
         let system_ids = behavior.core.known_system_ids();
@@ -241,9 +242,7 @@ impl MapPane {
             None
         };
 
-        let active_system = active_system_id
-            .map(|system_id| behavior.core.system(system_id))
-            .flatten();
+        let active_system = active_system_id.and_then(|system_id| behavior.core.system(system_id));
 
         let system_positions: HashMap<u8, (System, Position, f64, f64)> = systems
             .filter_map(|s| {
@@ -272,7 +271,7 @@ impl MapPane {
                     style: LabeledSymbolStyle {
                         symbol_size: 20.0,
                         label_background: if Some(s.system_id) == active_system_id
-                            || active_system_id == None
+                            || active_system_id.is_none()
                         {
                             ui.style().visuals.window_fill()
                         } else {

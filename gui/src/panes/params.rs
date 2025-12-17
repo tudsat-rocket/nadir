@@ -93,7 +93,7 @@ impl ParamsPane {
                                                     .clicked()
                                                 {
                                                     system.set_param(
-                                                        &param_id,
+                                                        param_id,
                                                         param.param_type,
                                                         param.value,
                                                     );

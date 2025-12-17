@@ -23,8 +23,8 @@ pub async fn request_message_intervals(
         (LocalPositionNed::ID, 100_000),
         (GlobalPositionInt::ID, 200_000),
         (ServoOutputRaw::ID, 200_000),
-        (LinkNodeStatus::ID, 2000_000),
-        (AutopilotVersion::ID, 5000_000),
+        (LinkNodeStatus::ID, 2_000_000),
+        (AutopilotVersion::ID, 5_000_000),
     ];
 
     loop {

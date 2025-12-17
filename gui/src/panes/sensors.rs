@@ -22,7 +22,7 @@ impl SensorsPane {
     ) -> Vec<PlotLine> {
         let mut lines = Vec::new();
         for msg in [
-            format!("{msg_prefix}"),
+            msg_prefix.to_string(),
             format!("{msg_prefix}2"),
             format!("{msg_prefix}3"),
         ] {
@@ -32,7 +32,7 @@ impl SensorsPane {
                 format!("z{field_suffix}"),
             ] {
                 lines.push(PlotLine {
-                    system_id: system_id,
+                    system_id,
                     component_id: 1,
                     message_name: msg.clone(),
                     field_name: field,
@@ -59,7 +59,7 @@ impl SensorsPane {
         let acc_plot = Plot::new(
             Self::sensor_plot_lines(system_id, "SCALED_IMU", "acc"),
             &behavior.core,
-            &mut behavior.shared_plot_state,
+            behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, acc_plot);
@@ -67,7 +67,7 @@ impl SensorsPane {
         let gyro_plot = Plot::new(
             Self::sensor_plot_lines(system_id, "SCALED_IMU", "gyro"),
             &behavior.core,
-            &mut behavior.shared_plot_state,
+            behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, gyro_plot);
@@ -75,7 +75,7 @@ impl SensorsPane {
         let mag_plot = Plot::new(
             Self::sensor_plot_lines(system_id, "SCALED_IMU", "mag"),
             &behavior.core,
-            &mut behavior.shared_plot_state,
+            behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, mag_plot);
@@ -88,7 +88,7 @@ impl SensorsPane {
                 let temp_plot = Plot::new(
                     vec![
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_IMU".to_owned(),
                             field_name: "temperature".to_owned(),
@@ -97,7 +97,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_IMU2".to_owned(),
                             field_name: "temperature".to_owned(),
@@ -106,7 +106,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_IMU3".to_owned(),
                             field_name: "temperature".to_owned(),
@@ -115,7 +115,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_PRESSURE".to_owned(),
                             field_name: "temperature".to_owned(),
@@ -124,7 +124,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_PRESSURE2".to_owned(),
                             field_name: "temperature".to_owned(),
@@ -133,7 +133,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_PRESSURE3".to_owned(),
                             field_name: "temperature".to_owned(),
@@ -143,7 +143,7 @@ impl SensorsPane {
                         },
                     ],
                     &behavior.core,
-                    &mut behavior.shared_plot_state,
+                    behavior.shared_plot_state,
                     (None, None),
                 );
                 ui.add_sized(size, temp_plot);
@@ -151,7 +151,7 @@ impl SensorsPane {
                 let pres_plot = Plot::new(
                     vec![
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_PRESSURE".to_owned(),
                             field_name: "press_abs".to_owned(),
@@ -160,7 +160,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_PRESSURE2".to_owned(),
                             field_name: "press_abs".to_owned(),
@@ -169,7 +169,7 @@ impl SensorsPane {
                             color: None,
                         },
                         PlotLine {
-                            system_id: system_id,
+                            system_id,
                             component_id: 1,
                             message_name: "SCALED_PRESSURE3".to_owned(),
                             field_name: "press_abs".to_owned(),
@@ -179,7 +179,7 @@ impl SensorsPane {
                         },
                     ],
                     &behavior.core,
-                    &mut behavior.shared_plot_state,
+                    behavior.shared_plot_state,
                     (None, None),
                 );
                 ui.add_sized(size, pres_plot);

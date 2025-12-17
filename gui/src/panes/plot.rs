@@ -99,7 +99,7 @@ impl PlotPane {
                     .active_fields
                     .iter()
                     .map(|(m, f)| PlotLine {
-                        system_id: system_id,
+                        system_id,
                         component_id: 1,
                         message_name: m.clone(),
                         field_name: f.clone(),

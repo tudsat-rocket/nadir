@@ -194,7 +194,7 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                 })
                 .collect::<Vec<_>>()
                 .join(",");
-            let param_refs = m
+            let _param_refs = m
                 .fields()
                 .iter()
                 .enumerate()
@@ -345,13 +345,6 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
         .into_iter()
         .map(|m| {
             let lower_case = m.name().to_lowercase();
-            let type_name: String = lower_case
-                .split("_")
-                .map(|s| {
-                    let (h, t) = s.split_at(1);
-                    format!("{}{}", h.to_uppercase(), t)
-                })
-                .collect();
 
             format!(
                 "\"{}\" => self.count_{lower_case}_for_system(system_and_component_ids)?,",

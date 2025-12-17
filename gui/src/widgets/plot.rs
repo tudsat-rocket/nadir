@@ -105,7 +105,7 @@ impl<'a> egui::Widget for Plot<'a> {
             .y_axis_width(3)
             .y_axis_formatter(|gm, _range| {
                 let tick = gm.value;
-                let digits = (gm.step_size.log10() * -1.0) as usize;
+                let digits = -gm.step_size.log10() as usize;
                 format!("{tick:.digits$}")
             })
             .legend(legend.clone());

@@ -46,7 +46,7 @@ impl App {
 
         let mut tiles = egui_tiles::Tiles::default();
 
-        let map = tiles.insert_pane(Pane::Map(MapPane::new(ctx, None)));
+        let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(ctx, None))));
 
         let horizon = tiles.insert_pane(Pane::Horizon(HorizonPane::new(ctx)));
 

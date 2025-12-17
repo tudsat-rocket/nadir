@@ -16,7 +16,7 @@ pub struct ChannelStats {
 impl LinkStats {
     pub fn received_packet_rate(&mut self) -> f32 {
         self.truncate_to_1s();
-        self.rx_last_1s.iter().count() as f32
+        self.rx_last_1s.len() as f32
     }
 
     pub fn received_data_rate(&mut self) -> f32 {
@@ -67,7 +67,7 @@ impl ChannelStats {
 
     pub fn received_packet_rate(&mut self) -> f32 {
         self.truncate_to_1s();
-        self.rx_last_1s.iter().count() as f32
+        self.rx_last_1s.len() as f32
     }
 
     pub fn received_data_rate(&mut self) -> f32 {
@@ -77,7 +77,7 @@ impl ChannelStats {
 
     pub fn sent_packet_rate(&mut self) -> f32 {
         self.truncate_to_1s();
-        self.tx_last_1s.iter().count() as f32
+        self.tx_last_1s.len() as f32
     }
 
     pub fn sent_data_rate(&mut self) -> f32 {

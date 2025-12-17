@@ -69,24 +69,23 @@ impl System {
             params,
         };
 
-        let _ = tokio::spawn(crate::protocols::heartbeat::send_heartbeats(system.clone()));
-
-        let _ = tokio::spawn(crate::protocols::modes::discover_available_modes(
+        std::mem::drop(tokio::spawn(crate::protocols::heartbeat::send_heartbeats(
             system.clone(),
-            0x01,
-            receiver,
+        )));
+
+        std::mem::drop(tokio::spawn(
+            crate::protocols::modes::discover_available_modes(system.clone(), 0x01, receiver),
         ));
 
-        let _ = tokio::spawn(crate::protocols::intervals::request_message_intervals(
-            system.clone(),
-            receiver2,
+        std::mem::drop(tokio::spawn(
+            crate::protocols::intervals::request_message_intervals(system.clone(), receiver2),
         ));
 
-        let _ = tokio::spawn(crate::protocols::params::download_params(
+        std::mem::drop(tokio::spawn(crate::protocols::params::download_params(
             system.clone(),
             0x01,
             receiver3,
-        ));
+        )));
 
         system
     }
@@ -299,34 +298,19 @@ impl System {
     }
 
     pub fn custom_mode_info(&self, custom_mode: u32) -> Option<AvailableModes> {
-        self.available_modes()
-            .map(|modes| {
-                modes
-                    .iter()
-                    .find(|mode| {
-                        //mode.standard_mode == MavStandardMode::NonStandard
-                        mode.custom_mode == custom_mode
-                    })
-                    .cloned()
-            })
-            .flatten()
-    }
-
-    fn standard_mode_info(&self, standard_mode: MavStandardMode) -> Option<AvailableModes> {
-        self.available_modes()
-            .map(|modes| {
-                modes
-                    .iter()
-                    .find(|mode| mode.standard_mode == standard_mode)
-                    .cloned()
-            })
-            .flatten()
+        self.available_modes().and_then(|modes| {
+            modes
+                .iter()
+                .find(|mode| {
+                    //mode.standard_mode == MavStandardMode::NonStandard
+                    mode.custom_mode == custom_mode
+                })
+                .cloned()
+        })
     }
 
     pub fn current_mode_info(&self) -> Option<AvailableModes> {
-        let Some(heartbeat) = self.last_heartbeat().ok().flatten() else {
-            return None;
-        };
+        let heartbeat = self.last_heartbeat().ok().flatten()?;
 
         if heartbeat
             .base_mode

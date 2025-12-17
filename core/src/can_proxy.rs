@@ -5,7 +5,7 @@ use mavspec::rust::dialects::common::messages;
 use socketcan::tokio::CanSocket;
 use socketcan::{CanAddr, EmbeddedFrame, Id};
 use tokio::{sync::mpsc::Receiver, task};
-use tracing::{info, trace, warn};
+use tracing::{trace, warn};
 
 pub async fn spawn_can_proxy(
     receive_can: Receiver<socketcan::CanFrame>,

@@ -36,78 +36,77 @@ pub async fn download_params(
     component_id: ComponentId,
     mut message_rx: tokio::sync::broadcast::Receiver<Common>,
 ) {
+    // Wait for the first AUTOPILOT_VERSION message. We need the device capabilities to check for
+    // the flags which tell us how the parameter values are encoded.
+    //let capabilities = loop {
+    //    if let Ok(Common::AutopilotVersion(av)) = message_rx.recv().await {
+    //        break av.capabilities;
+    //    }
+    //};
+
     tracing::debug!(system_id = system.system_id, "Downloading params");
 
     // First we download a complete list of parameters...
     // TODO: more robust behaviour for failures, manually redownload missed params, etc.
-    loop {
-        system.send_message(&ParamRequestList {
-            target_system: system.system_id,
-            target_component: component_id,
-        });
+    system.send_message(&ParamRequestList {
+        target_system: system.system_id,
+        target_component: component_id,
+    });
 
-        let mut number_params: Option<usize> = None;
-        let mut params: HashMap<ParamId, Param> = HashMap::new();
-        while number_params.map(|num| params.len() < num).unwrap_or(true) {
-            match timeout(Duration::from_millis(1000), async {
-                loop {
-                    match message_rx.recv().await {
-                        Ok(Common::ParamValue(value)) => {
-                            return value;
-                        }
-                        _ => {}
-                    }
-                }
-            })
-            .await
-            {
-                Ok(param) => {
-                    let id = String::from_utf8_lossy(&param.param_id).to_string();
-                    let count = param.param_count as usize;
-                    number_params = Some(count);
-                    params.insert(
-                        id.trim_matches('\0').to_string(),
-                        Param {
-                            id,
-                            param_type: param.param_type,
-                            value: param.param_value,
-                            downloaded_value: param.param_value,
-                        },
-                    );
-
-                    *system.params.lock().unwrap() =
-                        ParamProgress::Progress(param.param_index as usize, count);
-                }
-                Err(_) => {
-                    // TODO: back off here, or check MAVLink capabilities first?
-                    tracing::error!("Parameter download failed, retrying in 5s.");
-                    tokio::time::sleep(Duration::from_millis(5000)).await;
-                    break;
+    let mut number_params: Option<usize> = None;
+    let mut params: HashMap<ParamId, Param> = HashMap::new();
+    while number_params.map(|num| params.len() < num).unwrap_or(true) {
+        match timeout(Duration::from_millis(1000), async {
+            loop {
+                if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
+                    return value;
                 }
             }
-        }
+        })
+        .await
+        {
+            Ok(param) => {
+                let id = String::from_utf8_lossy(&param.param_id).to_string();
+                let count = param.param_count as usize;
+                number_params = Some(count);
+                params.insert(
+                    id.trim_matches('\0').to_string(),
+                    Param {
+                        id,
+                        param_type: param.param_type,
+                        value: param.param_value,
+                        downloaded_value: param.param_value,
+                    },
+                );
 
-        *system.params.lock().unwrap() = ParamProgress::Complete(params);
-        break;
+                *system.params.lock().unwrap() =
+                    ParamProgress::Progress(param.param_index as usize, count);
+            }
+            Err(_) => {
+                // TODO: back off here, or check MAVLink capabilities first?
+                tracing::error!("Parameter download failed, retrying in 5s.");
+                tokio::time::sleep(Duration::from_millis(5000)).await;
+                break;
+            }
+        }
     }
+
+    *system.params.lock().unwrap() = ParamProgress::Complete(params);
 
     // Now we maintain the list. If a change is made from the UI, the system responds with another
     // PARAM_VALUE message, so we listen for these from this task and keep our parameter storage
     // updated with the downloaded (saved to the system/vehicle) values.
     loop {
-        match message_rx.recv().await {
-            Ok(Common::ParamValue(value)) => {
-                let id = String::from_utf8_lossy(&value.param_id).to_string();
-                let mut progress = system.params.lock().unwrap();
-                let ParamProgress::Complete(params) = progress.deref_mut() else {
-                    continue;
-                };
+        if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
+            let id = String::from_utf8_lossy(&value.param_id).to_string();
+            let mut progress = system.params.lock().unwrap();
+            let ParamProgress::Complete(params) = progress.deref_mut() else {
+                continue;
+            };
 
-                if let Some(param) = params.get_mut(&id) {
-                    param.downloaded_value = value.param_value;
-                }
+            if let Some(param) = params.get_mut(&id) {
+                param.downloaded_value = value.param_value;
             }
-            _ => {}
         }
     }
 }
