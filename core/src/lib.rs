@@ -124,7 +124,7 @@ impl Core {
             tokio::spawn(links::usb::autoconnect(self.clone()));
         }
 
-        while let Some((link, event)) = event_receiver.recv().await {
+        while let Some((link_id, event)) = event_receiver.recv().await {
             match &event {
                 Event::Frame(frame, callback) => {
                     if let Ok(message) = frame.decode::<Common>() {
@@ -189,13 +189,21 @@ impl Core {
                             tracing::error!("Failed to process common message: {e:?}");
                         }
 
+                        let mut links = self.links.lock().unwrap();
+                        let link = links.get(&link_id).unwrap();
+
                         let mut systems = self.systems.lock().unwrap();
                         let system_id = frame.system_id();
                         let system = systems.entry(system_id).or_insert_with(|| {
-                            System::new(system_id, self.db.clone(), callback.clone())
+                            System::new(
+                                system_id,
+                                self.db.clone(),
+                                callback.clone(),
+                                link.endpoint.clone(),
+                            )
                         });
 
-                        system.notify_of_message(message, frame, callback);
+                        system.notify_of_message(message, frame, callback, link.endpoint.clone());
                     } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
                         match message {
                             Ardupilotmega::Ahrs(_) => {}
@@ -211,7 +219,7 @@ impl Core {
                     }
 
                     let mut links = self.links.lock().unwrap();
-                    let link = links.get_mut(&link).unwrap();
+                    let link = links.get_mut(&link_id).unwrap();
                     link.stats.push_received(frame.body_length());
                 }
                 Event::Invalid(_frame, _frame_error, _callback) => {}

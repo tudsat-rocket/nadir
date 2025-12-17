@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use maviola::asnc::node::Callback;
 use maviola::core::io::{ChannelId, ChannelInfo};
-use maviola::prelude::CallbackApi;
 use maviola::prelude::Frame;
 use maviola::prelude::Message;
 use maviola::prelude::V2;
+use maviola::prelude::{CallbackApi, Endpoint};
 use maviola::protocol::SystemId;
 use mavspec::rust::dialects::common::enums::{
     MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
@@ -24,8 +24,8 @@ use crate::protocols::params::ParamProgress;
 use crate::stats::ChannelStats;
 
 pub struct SystemConnection {
-    pub seq: u8,
     pub callback: Callback<V2>,
+    pub endpoint: Arc<Mutex<Endpoint<V2>>>,
     pub channels: HashMap<ChannelId, (ChannelInfo, ChannelStats)>,
 }
 
@@ -40,7 +40,12 @@ pub struct System {
 }
 
 impl System {
-    pub fn new(system_id: SystemId, db: Db, callback: Callback<V2>) -> Self {
+    pub fn new(
+        system_id: SystemId,
+        db: Db,
+        callback: Callback<V2>,
+        endpoint: Arc<Mutex<Endpoint<V2>>>,
+    ) -> Self {
         let available_modes = Arc::new(Mutex::new(None));
         let params = Arc::new(Mutex::new(ParamProgress::Unknown));
 
@@ -54,8 +59,8 @@ impl System {
             db,
             message_sender,
             conn: Arc::new(Mutex::new(SystemConnection {
-                seq: 0,
-                callback: callback.clone(),
+                callback,
+                endpoint,
                 channels: HashMap::new(),
             })),
             available_modes,
@@ -129,23 +134,18 @@ impl System {
 
     pub fn send_message(&self, message: &dyn Message) {
         let mut connection = self.conn.lock().unwrap();
-        connection.seq = connection.seq.wrapping_add(1);
 
-        let frame = Frame::builder()
-            .version(V2)
-            .system_id(0xfe)
-            .component_id(0x01)
-            .sequence(connection.seq)
-            .message(message)
-            .unwrap()
-            .build();
+        let frame = {
+            let endpoint = connection.endpoint.lock().unwrap();
+            endpoint.next_frame(message).unwrap()
+        };
 
         let channel_id = connection.callback.channel_id();
         if let Some((_, stats)) = connection.channels.get_mut(&channel_id) {
             stats.push_sent(frame.body_length());
         }
 
-        if let Err(e) = connection.callback.send(&frame) {
+        if let Err(e) = connection.callback.respond(&frame) {
             tracing::error!(system_id = self.system_id, "Failed to send message: {e:?}")
         }
     }
@@ -240,12 +240,14 @@ impl System {
         message: Common,
         frame: &Frame<V2>,
         callback: &Callback<V2>,
+        endpoint: Arc<Mutex<Endpoint<V2>>>,
     ) {
         let _ = self.message_sender.send(message);
 
         let mut conninfo = self.conn.lock().unwrap();
 
         conninfo.callback = callback.clone();
+        conninfo.endpoint = endpoint;
         let (_channel_info, channel_stats) = conninfo
             .channels
             .entry(callback.channel_id())
