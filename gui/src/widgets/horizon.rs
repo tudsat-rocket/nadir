@@ -26,7 +26,7 @@ impl ArtificialHorizon {
     }
 
     fn draw_ball(&self, painter: &mut egui::Painter, pitch: f32, center: Pos2, radius: f32) {
-        #[cfg(features = "profiling")]
+        #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
         let original_rect = painter.clip_rect();
@@ -137,7 +137,7 @@ impl ArtificialHorizon {
         center: Pos2,
         radius: f32,
     ) {
-        #[cfg(features = "profiling")]
+        #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
         painter.circle_filled(center, 2.0, Color32::RED);
@@ -164,7 +164,7 @@ impl ArtificialHorizon {
     }
 
     fn draw_compass(&self, painter: &mut egui::Painter, heading: f32, center: Pos2, radius: f32) {
-        #[cfg(features = "profiling")]
+        #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
         for a in (0..360).step_by(10) {
@@ -328,7 +328,7 @@ impl ArtificialHorizon {
         painter: &mut egui::Painter,
         local_position: Option<&LocalPositionNed>,
     ) {
-        #[cfg(features = "profiling")]
+        #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
         let altitude = local_position.as_ref().map(|v| v.z * -1.0).unwrap_or(0.0);
@@ -342,7 +342,7 @@ impl ArtificialHorizon {
         local_position: Option<&LocalPositionNed>,
         vfr_hud: Option<&VfrHud>,
     ) {
-        #[cfg(features = "profiling")]
+        #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
         let throttle = vfr_hud

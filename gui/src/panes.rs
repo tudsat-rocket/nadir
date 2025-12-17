@@ -100,7 +100,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        #[cfg(features = "profiling")]
+        #[cfg(feature = "profiling")]
         puffin::profile_function!(format!("{}", pane));
 
         match pane {
