@@ -50,6 +50,26 @@ pub enum Pane {
     Placeholder(String),
 }
 
+impl std::fmt::Display for Pane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name: String = match self {
+            Pane::Map(_) => "Map".into(),
+            Pane::Status(_) => "Status".into(),
+            Pane::StateEstimator(_) => "State Estimator".into(),
+            Pane::Sensors(_) => "Sensors".into(),
+            Pane::Plot(_) => "Plot".into(),
+            Pane::Messages(_) => "Messages".into(),
+            Pane::Commands(_) => "Commands".into(),
+            Pane::CanProbe(_) => "CAN Probe".into(),
+            Pane::Links(_) => "Link".into(),
+            Pane::Horizon(_) => "Horizon".into(),
+            Pane::Params(_) => "Params".into(),
+            Pane::Placeholder(s) => s.into(),
+        };
+        f.write_str(&name)
+    }
+}
+
 impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn tab_bar_color(&self, visuals: &egui::Visuals) -> egui::Color32 {
         visuals
@@ -78,20 +98,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        match pane {
-            Pane::Map(_) => "Map".into(),
-            Pane::Status(_) => "Status".into(),
-            Pane::StateEstimator(_) => "State Estimator".into(),
-            Pane::Sensors(_) => "Sensors".into(),
-            Pane::Plot(_) => "Plot".into(),
-            Pane::Messages(_) => "Messages".into(),
-            Pane::Commands(_) => "Commands".into(),
-            Pane::CanProbe(_) => "CAN Probe".into(),
-            Pane::Links(_) => "Links".into(),
-            Pane::Horizon(_) => "Horizon".into(),
-            Pane::Params(_) => "Params".into(),
-            Pane::Placeholder(s) => s.into(),
-        }
+        format!("{pane}").into()
     }
 
     fn pane_ui(
