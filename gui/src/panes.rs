@@ -50,7 +50,7 @@ pub enum Pane {
     Placeholder(String),
 }
 
-impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
+impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn tab_bar_color(&self, visuals: &egui::Visuals) -> egui::Color32 {
         visuals
             .extreme_bg_color

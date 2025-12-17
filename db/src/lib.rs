@@ -100,7 +100,7 @@ impl Db {
         }
     }
 
-    pub fn conn<'a>(&'a self) -> std::sync::MutexGuard<'a, rusqlite::Connection> {
+    pub fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
         self.conn.lock().unwrap()
     }
 
@@ -128,7 +128,7 @@ impl Db {
             ))
         })?;
 
-        Ok(rows.filter_map(|row| row.ok()).collect())
+        Ok(rows.filter_map(std::result::Result::ok).collect())
     }
 }
 

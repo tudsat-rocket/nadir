@@ -13,7 +13,7 @@ pub fn generate_message_writers(_item: TokenStream) -> TokenStream {
         .map(|m| {
             let lower_case = m.name().to_lowercase();
             let type_name: String = lower_case
-                .split("_")
+                .split('_')
                 .map(|s| {
                     let (h, t) = s.split_at(1);
                     format!("{}{}", h.to_uppercase(), t)
@@ -52,11 +52,11 @@ pub fn generate_message_writers(_item: TokenStream) -> TokenStream {
                     // around that.
                     match (f.r#type(), f.r#enum()) {
                         (MavType::Array(_, _), Some("ESC_FAILURE_FLAGS"))
-                                => format!("msg.{}.iter().map(|x| x.bits().to_be_bytes()).flatten().collect::<Vec<_>>()", varname),
+                                => format!("msg.{varname}.iter().map(|x| x.bits().to_be_bytes()).flatten().collect::<Vec<_>>()"),
                         (MavType::Array(_, _), Some("MAV_CMD"))
-                                => format!("msg.{}.iter().map(|x| x.value().to_be_bytes()).flatten().collect::<Vec<_>>()", varname),
+                                => format!("msg.{varname}.iter().map(|x| x.value().to_be_bytes()).flatten().collect::<Vec<_>>()"),
                         (MavType::Array(_, _), None)
-                                => format!("msg.{}.iter().map(|x| x.to_be_bytes()).flatten().collect::<Vec<_>>()", varname),
+                                => format!("msg.{varname}.iter().map(|x| x.to_be_bytes()).flatten().collect::<Vec<_>>()"),
                         (_, Some("ADSB_FLAGS"
                             | "AIS_FLAGS"
                             | "ATTITUDE_TARGET_TYPEMASK"
@@ -87,9 +87,9 @@ pub fn generate_message_writers(_item: TokenStream) -> TokenStream {
                             | "SERIAL_CONTROL_FLAG"
                             | "STORAGE_USAGE_FLAG"
                             | "UTM_DATA_AVAIL_FLAGS"
-                            | "VIDEO_STREAM_STATUS_FLAGS")) => format!("msg.{}.bits()", varname),
-                        (_, Some(_)) => format!("msg.{}.value()", varname),
-                        _ => format!("msg.{}", varname)
+                            | "VIDEO_STREAM_STATUS_FLAGS")) => format!("msg.{varname}.bits()"),
+                        (_, Some(_)) => format!("msg.{varname}.value()"),
+                        _ => format!("msg.{varname}")
                     }
                 })
                 .collect::<Vec<_>>()
@@ -132,7 +132,7 @@ pub fn generate_message_writers(_item: TokenStream) -> TokenStream {
         .map(|m| {
             let lower_case = m.name().to_lowercase();
             let type_name: String = lower_case
-                .split("_")
+                .split('_')
                 .map(|s| {
                     let (h, t) = s.split_at(1);
                     format!("{}{}", h.to_uppercase(), t)
@@ -177,7 +177,7 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
         .map(|m| {
             let lower_case = m.name().to_lowercase();
             let type_name: String = lower_case
-                .split("_")
+                .split('_')
                 .map(|s| {
                     let (h, t) = s.split_at(1);
                     format!("{}{}", h.to_uppercase(), t)
@@ -260,7 +260,7 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
                             | "VIDEO_STREAM_STATUS_FLAGS"
                             )) => {
                             let enum_name = f.r#enum();
-                            let enum_type: String = enum_name.unwrap().split("_").map(|n| {
+                            let enum_type: String = enum_name.unwrap().split('_').map(|n| {
                                 let (h, t) = n.split_at(1);
                                 format!("{}{}", h, t.to_lowercase())
                             }).collect();
@@ -359,7 +359,7 @@ pub fn generate_message_readers(_item: TokenStream) -> TokenStream {
         .map(|m| {
             let lower_case = m.name().to_lowercase();
             let type_name: String = lower_case
-                .split("_")
+                .split('_')
                 .map(|s| {
                     let (h, t) = s.split_at(1);
                     format!("{}{}", h.to_uppercase(), t)

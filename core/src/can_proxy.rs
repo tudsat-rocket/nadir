@@ -3,14 +3,11 @@ use std::{thread::sleep, time::Duration};
 
 use mavspec::rust::dialects::common::messages;
 use socketcan::tokio::CanSocket;
-use socketcan::{CanAddr, EmbeddedFrame, Id};
+use socketcan::{CanAddr, EmbeddedFrame as _, Id};
 use tokio::{sync::mpsc::Receiver, task};
 use tracing::{trace, warn};
 
-pub async fn spawn_can_proxy(
-    receive_can: Receiver<socketcan::CanFrame>,
-    core: super::Core,
-) -> Result<(), ()> {
+pub fn spawn_can_proxy(receive_can: Receiver<socketcan::CanFrame>, core: super::Core) {
     let mut can_socket = CanAddr::from_iface("vcan0").and_then(|addr| CanSocket::open_addr(&addr));
     while can_socket.is_err() {
         warn!("could not connect to SocketCan socket, retrying");
@@ -22,12 +19,11 @@ pub async fn spawn_can_proxy(
         Ok(can_socket) => {
             let shared_sock = Arc::new(can_socket);
             let receiver_sock = shared_sock.clone();
-            task::spawn(async move { can_receiver(receiver_sock, receive_can).await });
-            task::spawn(async move { can_sender(shared_sock, core).await });
+            task::spawn(can_receiver(receiver_sock, receive_can));
+            task::spawn(can_sender(shared_sock, core));
         }
         Err(..) => unreachable!(),
     }
-    Ok(())
 }
 
 // Receives can messages from the main task and writes them to the socket.
@@ -51,7 +47,7 @@ async fn can_sender(socket: Arc<CanSocket>, core: super::Core) {
             continue;
         };
         let id = match can_data_frame.id() {
-            Id::Standard(id) => id.as_raw() as u32,
+            Id::Standard(id) => u32::from(id.as_raw()),
             Id::Extended(id) => id.as_raw(),
         };
         if can_data_frame.dlc() > 8 {
@@ -66,7 +62,7 @@ async fn can_sender(socket: Arc<CanSocket>, core: super::Core) {
             .enumerate()
             .take(can_data_frame.dlc())
         {
-            data[i] = *byte
+            data[i] = *byte;
         }
 
         if let Some(system) = core.system(1) {

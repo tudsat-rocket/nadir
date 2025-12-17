@@ -19,7 +19,7 @@ impl CanProbePane {
             can_forwarding_enabled: false,
             group_by_id: false,
             id_to_send: 0x1ff,
-            hex_to_send: "".to_owned(),
+            hex_to_send: String::new(),
         }
     }
 
@@ -152,7 +152,7 @@ impl CanProbePane {
                                     row.col(|ui| {
                                         let data = &last.1.data[..(last.1.len as usize)];
                                         let hex: String =
-                                            data.iter().map(|b| format!("{:02x} ", b)).collect();
+                                            data.iter().map(|b| format!("{b:02x} ")).collect();
                                         ui.monospace(hex);
                                     });
                                 });
@@ -191,7 +191,7 @@ impl CanProbePane {
                                     row.col(|ui| {
                                         let data = &frame.data[..(frame.len as usize)];
                                         let hex: String =
-                                            data.iter().map(|b| format!("{:02x} ", b)).collect();
+                                            data.iter().map(|b| format!("{b:02x} ")).collect();
                                         ui.monospace(hex);
                                     });
                                 });

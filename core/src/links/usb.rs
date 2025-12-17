@@ -13,7 +13,7 @@ use tokio_serial::SerialPortType;
 
 async fn connect(port: String, sender: Sender<(LinkId, Event<V2>)>) -> Result<(), CoreError> {
     let network = Network::asnc()
-        .add_connection(SerialPort::new(&port, 115200)?)
+        .add_connection(SerialPort::new(&port, 115_200)?)
         .retry(RetryStrategy::Attempts(10, Duration::from_millis(500)))
         .stop_on_node_down(true);
 

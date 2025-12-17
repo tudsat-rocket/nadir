@@ -1,5 +1,5 @@
 use core::f32;
-use std::{collections::HashMap, ops::DerefMut, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use maviola::protocol::ComponentId;
 use mavspec::rust::dialects::{
@@ -55,7 +55,7 @@ pub async fn download_params(
 
     let mut number_params: Option<usize> = None;
     let mut params: HashMap<ParamId, Param> = HashMap::new();
-    while number_params.map(|num| params.len() < num).unwrap_or(true) {
+    while number_params.is_none_or(|num| params.len() < num) {
         match timeout(Duration::from_millis(1000), async {
             loop {
                 if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
@@ -82,9 +82,9 @@ pub async fn download_params(
                 *system.params.lock().unwrap() =
                     ParamProgress::Progress(param.param_index as usize, count);
             }
-            Err(_) => {
+            Err(e) => {
                 // TODO: back off here, or check MAVLink capabilities first?
-                tracing::error!("Parameter download failed, retrying in 5s.");
+                tracing::error!("Parameter download failed ({e:?}), retrying in 5s.");
                 tokio::time::sleep(Duration::from_millis(5000)).await;
                 break;
             }
@@ -100,7 +100,7 @@ pub async fn download_params(
         if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
             let id = String::from_utf8_lossy(&value.param_id).to_string();
             let mut progress = system.params.lock().unwrap();
-            let ParamProgress::Complete(params) = progress.deref_mut() else {
+            let ParamProgress::Complete(params) = &mut *progress else {
                 continue;
             };
 

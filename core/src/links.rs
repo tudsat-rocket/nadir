@@ -43,7 +43,7 @@ impl LinkId {
                 system: GROUND_STATION_SYSTEM_ID,
                 component: GROUND_STATION_COMPONENT_ID,
             }))),
-            stats: Default::default(),
+            stats: LinkStats::default(),
         }
     }
 }

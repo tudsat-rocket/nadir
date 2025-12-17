@@ -13,3 +13,6 @@ tracing = { workspace = true }
 
 mavspec = { workspace = true }
 mavinspect = { version = "0.6.6" }
+
+[lints]
+workspace = true

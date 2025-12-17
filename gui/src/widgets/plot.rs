@@ -27,7 +27,7 @@ impl SharedPlotState {
     }
 
     pub fn process_zoom(&mut self, zoom_delta: egui::Vec2) {
-        self.view_width /= zoom_delta[0] as f64;
+        self.view_width /= f64::from(zoom_delta[0]);
     }
 
     pub fn process_box_dragging(&mut self, box_dragging: bool) {
@@ -76,7 +76,7 @@ impl<'a> Plot<'a> {
     }
 }
 
-impl<'a> egui::Widget for Plot<'a> {
+impl egui::Widget for Plot<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
@@ -202,14 +202,15 @@ impl<'a> egui::Widget for Plot<'a> {
         // We have to check the interaction response to notice whether the plot
         // has been dragged or otherwise detached from the end of the data.
         if let Some(_hover_pos) = ir.response.hover_pos() {
-            let zoom_delta = ui.input(|i| i.zoom_delta_2d());
+            let zoom_delta = ui.input(egui::InputState::zoom_delta_2d);
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
             if zoom_delta.x != 1.0 {
-                self.shared.process_zoom(ui.input(|i| i.zoom_delta_2d()));
+                self.shared
+                    .process_zoom(ui.input(egui::InputState::zoom_delta_2d));
             } else if scroll_delta.x != 0.0 {
                 self.shared.attached_to_edge = false;
             }
-        };
+        }
 
         if ir.response.dragged_by(PointerButton::Primary) {
             self.shared.attached_to_edge = false;

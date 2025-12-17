@@ -139,10 +139,10 @@ impl StatusPane {
                             Button::selectable(false, RichText::new("ARM").size(s))
                         };
 
-                        let disarm_button = if !armed {
-                            Button::selectable(true, RichText::new("DISARMED").size(s))
-                        } else {
+                        let disarm_button = if armed {
                             Button::selectable(false, RichText::new("DISARM").size(s))
+                        } else {
+                            Button::selectable(true, RichText::new("DISARMED").size(s))
                         };
 
                         if armed {

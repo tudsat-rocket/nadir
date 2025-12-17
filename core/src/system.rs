@@ -7,7 +7,7 @@ use maviola::core::io::{ChannelId, ChannelInfo};
 use maviola::prelude::Frame;
 use maviola::prelude::Message;
 use maviola::prelude::V2;
-use maviola::prelude::{CallbackApi, Endpoint};
+use maviola::prelude::{CallbackApi as _, Endpoint};
 use maviola::protocol::SystemId;
 use mavspec::rust::dialects::common::enums::{
     MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
@@ -178,7 +178,7 @@ impl System {
         }
 
         if let Err(e) = connection.callback.respond(&frame) {
-            tracing::error!(system_id = self.system_id, "Failed to send message: {e:?}")
+            tracing::error!(system_id = self.system_id, "Failed to send message: {e:?}");
         }
     }
 
@@ -207,7 +207,7 @@ impl System {
             target_system: self.system_id,
             target_component: 0x01,
             command: MavCmd::ComponentArmDisarm,
-            param1: (arm as u8) as f32,
+            param1: f32::from(u8::from(arm)),
             param2: (if force { 21196 } else { 0 }) as f32,
             ..Default::default()
         };
@@ -233,7 +233,7 @@ impl System {
             target_system: self.system_id,
             target_component: 0x01,
             command: MavCmd::DoSetStandardMode,
-            param1: (standard_mode as u16) as f32,
+            param1: f32::from(standard_mode as u16),
             ..Default::default()
         };
 
@@ -245,7 +245,7 @@ impl System {
             target_system: self.system_id,
             target_component: 0x01,
             command: MavCmd::CanForward,
-            param1: (enable as u8) as f32,
+            param1: f32::from(u8::from(enable)),
             ..Default::default()
         };
 

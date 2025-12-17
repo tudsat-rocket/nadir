@@ -1,5 +1,3 @@
-use std::ops::DerefMut;
-
 use eframe::egui;
 use egui::{Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, Vec2};
 
@@ -24,7 +22,7 @@ impl ParamsPane {
         };
 
         let mut params = system.params.lock().unwrap();
-        match params.deref_mut() {
+        match &mut *params {
             ParamProgress::Unknown => {
                 ui.label("");
             }
@@ -41,13 +39,13 @@ impl ParamsPane {
                     param_ids.sort();
 
                     let param_id_chunks = param_ids.chunk_by(|a, b| {
-                        let a_cat = a.split_once('_').map(|s| s.0).unwrap_or(a);
-                        let b_cat = b.split_once('_').map(|s| s.0).unwrap_or(b);
+                        let a_cat = a.split_once('_').map_or(a.as_str(), |s| s.0);
+                        let b_cat = b.split_once('_').map_or(b.as_str(), |s| s.0);
                         a_cat == b_cat
                     });
 
                     for chunk in param_id_chunks {
-                        let cat = chunk[0].split_once('_').map(|s| s.0).unwrap_or(&chunk[0]);
+                        let cat = chunk[0].split_once('_').map_or(chunk[0].as_str(), |s| s.0);
                         CollapsingHeader::new(cat)
                             .default_open(true)
                             .show(ui, |ui| {
@@ -68,10 +66,10 @@ impl ParamsPane {
                                         let param = params.get_mut(param_id).unwrap();
                                         ui.vertical(|ui| {
                                             ui.set_width(col_w);
-                                            if param.value != param.downloaded_value {
-                                                ui.monospace(RichText::new(param_id).strong());
-                                            } else {
+                                            if param.value == param.downloaded_value {
                                                 ui.monospace(param_id);
+                                            } else {
+                                                ui.monospace(RichText::new(param_id).strong());
                                             }
                                         });
                                         ui.add_sized(
@@ -80,7 +78,9 @@ impl ParamsPane {
                                         );
                                         ui.horizontal(|ui| {
                                             let size = Vec2::new(button_w, col_h);
-                                            if param.value != param.downloaded_value {
+                                            if param.value == param.downloaded_value {
+                                                ui.add_space(2.0 * button_w + 2.0 * spacing.x);
+                                            } else {
                                                 if ui
                                                     .add_sized(size, Button::new("⟲ Discard"))
                                                     .clicked()
@@ -98,8 +98,6 @@ impl ParamsPane {
                                                         param.value,
                                                     );
                                                 }
-                                            } else {
-                                                ui.add_space(2.0 * button_w + 2.0 * spacing.x);
                                             }
                                         });
 
@@ -113,6 +111,6 @@ impl ParamsPane {
             ParamProgress::Failed(_e) => {
                 ui.label("failed");
             }
-        };
+        }
     }
 }

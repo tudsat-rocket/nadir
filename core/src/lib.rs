@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use socketcan::{EmbeddedFrame, ExtendedId, Id, StandardId};
+use socketcan::{EmbeddedFrame as _, ExtendedId, Id, StandardId};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use maviola::asnc::prelude::*;
@@ -91,7 +91,7 @@ impl CoreBuilder {
             let c = cloned_core.clone();
             rt.spawn(async move {
                 // NOTE: ignore errors for now
-                let _ = can_proxy::spawn_can_proxy(from_can_socket_proxy, cloned_core).await;
+                can_proxy::spawn_can_proxy(from_can_socket_proxy, cloned_core);
             });
 
             rt.block_on(c.run(self.links, self.autoconnect_usb, rx, self.on_event));
@@ -185,7 +185,7 @@ impl Core {
                                 }
                             }
                             _ => {}
-                        };
+                        }
 
                         if let Err(e) = self.db.write_common_message(
                             message.clone(),
@@ -244,8 +244,8 @@ impl Core {
     }
 
     pub fn known_system_ids(&self) -> Vec<SystemId> {
-        let mut system_ids: Vec<SystemId> = self.systems.lock().unwrap().keys().cloned().collect();
-        system_ids.sort();
+        let mut system_ids: Vec<SystemId> = self.systems.lock().unwrap().keys().copied().collect();
+        system_ids.sort_unstable();
         system_ids.dedup();
         system_ids
     }

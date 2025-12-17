@@ -7,6 +7,7 @@ use maviola::prelude::V2;
 use mavspec::rust::dialects::Common;
 use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 
+#[allow(clippy::wildcard_imports)]
 use crate::panes::*;
 use crate::views::View;
 use crate::widgets::{ArmedIndicator, AutopilotLogo, ModeDisplay, SharedPlotState};
@@ -159,7 +160,7 @@ impl eframe::App for App {
                     self.toasts
                         .warning(format!("System 0x{:02x} lost.", peer.system_id()));
                 }
-                _ => {}
+                Event::Invalid(..) => {}
             }
         }
 
@@ -187,7 +188,7 @@ impl eframe::App for App {
                         );
                     } else if let Some(heartbeat) = system.last_heartbeat().ok().flatten() {
                         ui.horizontal(|ui| {
-                            ui.monospace(format!("0x{:02x}", system_id));
+                            ui.monospace(format!("0x{system_id:02x}"));
                             ui.label(system.icon());
 
                             ui.add(ArmedIndicator(heartbeat.base_mode));
@@ -222,14 +223,14 @@ impl eframe::App for App {
                                         .sum::<f32>()
                                         / 1024.0;
                                     ui.label("KiB/s");
-                                    ui.monospace(format!("{:>5.2}", total_data_rate));
+                                    ui.monospace(format!("{total_data_rate:>5.2}"));
                                     ui.weak("⏬");
                                 })
                                 .response
                             });
                         });
                     } else {
-                        ui.monospace(format!("0x{:02x}", system_id));
+                        ui.monospace(format!("0x{system_id:02x}"));
                         ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
                             ui.selectable_value(
                                 &mut self.active_view,

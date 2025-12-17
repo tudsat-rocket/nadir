@@ -28,8 +28,7 @@ impl LinkStats {
         while self
             .rx_last_1s
             .front()
-            .map(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
-            .unwrap_or(false)
+            .is_some_and(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
         {
             let _ = self.rx_last_1s.pop_front();
         }
@@ -53,8 +52,8 @@ impl ChannelStats {
         let mut total: u64 = 0;
         for p2 in self.rx_last_1s.iter().skip(1) {
             let diff = p2.1.wrapping_sub(p.1);
-            missed += (diff - 1) as u64;
-            total += diff as u64;
+            missed += u64::from(diff - 1);
+            total += u64::from(diff);
             p = p2;
         }
 
@@ -89,8 +88,7 @@ impl ChannelStats {
         while self
             .tx_last_1s
             .front()
-            .map(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
-            .unwrap_or(false)
+            .is_some_and(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
         {
             let _ = self.tx_last_1s.pop_front();
         }
@@ -98,8 +96,7 @@ impl ChannelStats {
         while self
             .rx_last_1s
             .front()
-            .map(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
-            .unwrap_or(false)
+            .is_some_and(|(t, ..)| t.elapsed().as_secs_f32() > 1.0)
         {
             let _ = self.rx_last_1s.pop_front();
         }

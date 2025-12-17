@@ -116,7 +116,7 @@ impl ArtificialHorizon {
                     painter.text(
                         center,
                         Align2::CENTER_CENTER,
-                        format!("{}", pitch_tick),
+                        format!("{pitch_tick}"),
                         FontId::monospace(10.0),
                         //Color32::BLACK,
                         Color32::WHITE,
@@ -176,7 +176,7 @@ impl ArtificialHorizon {
                     90 => ("E".to_owned(), 20.0, Color32::ORANGE),
                     180 => ("S".to_owned(), 20.0, Color32::ORANGE),
                     270 => ("W".to_owned(), 20.0, Color32::ORANGE),
-                    a => (format!("{}", a), 12.0, Color32::WHITE),
+                    a => (format!("{a}"), 12.0, Color32::WHITE),
                 };
 
                 let mut job = LayoutJob::default();
@@ -263,7 +263,7 @@ impl ArtificialHorizon {
                     } else {
                         Align2::LEFT_CENTER
                     },
-                    format!("{:0}", tick),
+                    format!("{tick:0}"),
                     FontId::monospace(12.0),
                     Color32::WHITE,
                 );
@@ -305,7 +305,7 @@ impl ArtificialHorizon {
         painter.text(
             center_side + Vec2::new(text_x - 5.0, 0.0),
             Align2::RIGHT_CENTER,
-            format!("{:.0}.", value),
+            format!("{value:.0}."),
             FontId::monospace(18.0),
             Color32::WHITE,
         );
@@ -330,8 +330,8 @@ impl ArtificialHorizon {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
-        let altitude = local_position.as_ref().map(|v| -v.z).unwrap_or(0.0);
-        let _climb = local_position.as_ref().map(|v| -v.vz).unwrap_or(0.0);
+        let altitude = local_position.as_ref().map_or(0.0, |v| -v.z);
+        let _climb = local_position.as_ref().map_or(0.0, |v| -v.vz);
         self.draw_side_dial(painter, altitude, 1.0, None);
     }
 
@@ -345,11 +345,10 @@ impl ArtificialHorizon {
         puffin::profile_function!();
 
         let throttle = vfr_hud
-            .map(|v| v.throttle as f32 / 100.0)
+            .map(|v| f32::from(v.throttle) / 100.0)
             .unwrap_or_default();
-        let velocity = local_position
-            .map(|v| (v.vx.powi(2) + v.vy.powi(2) + v.vz.powi(2)).sqrt())
-            .unwrap_or(0.0);
+        let velocity =
+            local_position.map_or(0.0, |v| (v.vx.powi(2) + v.vy.powi(2) + v.vz.powi(2)).sqrt());
         self.draw_side_dial(painter, velocity, -1.0, Some(throttle));
     }
 }
@@ -357,9 +356,9 @@ impl ArtificialHorizon {
 impl egui::Widget for ArtificialHorizon {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let attitude = self.system.last_attitude().ok().flatten();
-        let pitch = attitude.as_ref().map(|a| a.pitch).unwrap_or(0.0);
-        let roll = attitude.as_ref().map(|a| a.roll).unwrap_or(0.0);
-        let yaw = attitude.as_ref().map(|a| a.yaw).unwrap_or(0.0);
+        let pitch = attitude.as_ref().map_or(0.0, |a| a.pitch);
+        let roll = attitude.as_ref().map_or(0.0, |a| a.roll);
+        let yaw = attitude.as_ref().map_or(0.0, |a| a.yaw);
 
         let local_position = self.system.last_local_position_ned().ok().flatten();
         let vfr_hud = self.system.last_vfr_hud().ok().flatten();

@@ -35,3 +35,6 @@ nalgebra = "0.34.1"
 [features]
 default = []
 profiling = ["dep:puffin", "dep:puffin_egui"]
+
+[lints]
+workspace = true

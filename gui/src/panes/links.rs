@@ -169,10 +169,10 @@ impl LinksPane {
 
         let remote_uplink_quality = radio_status
             .as_ref()
-            .map(|rs| 1.0 - (rs.fixed as f32) / 100.0);
+            .map(|rs| 1.0 - f32::from(rs.fixed) / 100.0);
         let remote_downlink_quality = radio_status
             .as_ref()
-            .map(|rs| 1.0 - (rs.rxerrors as f32) / 100.0);
+            .map(|rs| 1.0 - f32::from(rs.rxerrors) / 100.0);
 
         let (response, painter) = ui.allocate_painter(
             Vec2::new(ui.available_width(), ui.available_height()),
@@ -246,7 +246,7 @@ impl LinksPane {
                     ui.add_space(5.0);
 
                     ui.horizontal(|ui| {
-                        ui.monospace(format!("{:>5.1}", up_packets));
+                        ui.monospace(format!("{up_packets:>5.1}"));
                         ui.weak("pkt/s ");
                         ui.monospace(format!("{:>5.2}", up_data / 1024.0));
                         ui.weak("KiB/s");
@@ -264,7 +264,7 @@ impl LinksPane {
                     ui.add_space(5.0);
 
                     ui.horizontal(|ui| {
-                        ui.monospace(format!("{:>5.1}", down_packets));
+                        ui.monospace(format!("{down_packets:>5.1}"));
                         ui.weak("pkt/s ");
                         ui.monospace(format!("{:>5.2}", down_data / 1024.0));
                         ui.weak("KiB/s");
@@ -287,9 +287,9 @@ impl LinksPane {
 
                         ui.with_layout(Layout::left_to_right(Align::BOTTOM), |ui| {
                             ui.weak("RSSI");
-                            ui.monospace(format!("{:>3.0}", uplink_rssi));
+                            ui.monospace(format!("{uplink_rssi:>3.0}"));
                             ui.weak("dBm, SNR:");
-                            ui.monospace(format!("{:>2.0}", uplink_snr));
+                            ui.monospace(format!("{uplink_snr:>2.0}"));
                             ui.weak("dB");
                         });
                     })
@@ -309,9 +309,9 @@ impl LinksPane {
 
                         ui.horizontal(|ui| {
                             ui.weak("RSSI");
-                            ui.monospace(format!("{:>3.0}", downlink_rssi));
+                            ui.monospace(format!("{downlink_rssi:>3.0}"));
                             ui.weak("dBm, SNR:");
-                            ui.monospace(format!("{:>2.0}", downlink_snr));
+                            ui.monospace(format!("{downlink_snr:>2.0}"));
                             ui.weak("dB");
                         });
                     })

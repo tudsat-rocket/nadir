@@ -91,13 +91,13 @@ impl MapPane {
         );
 
         // We only show the mapbox map if we have an access token
-        let mapbox_access_token =
-            mapbox_access_token.or(option_env!("MAPBOX_ACCESS_TOKEN").map(|s| s.to_string()));
+        let mapbox_access_token = mapbox_access_token
+            .or(option_env!("MAPBOX_ACCESS_TOKEN").map(std::string::ToString::to_string));
         let mapbox_tiles = mapbox_access_token.map(|t| {
             HttpTiles::with_options(
                 walkers::sources::Mapbox {
                     style: walkers::sources::MapboxStyle::Satellite,
-                    access_token: t.to_string(),
+                    access_token: t.clone(),
                     high_resolution: true,
                 },
                 Self::http_options(),
@@ -228,7 +228,7 @@ impl MapPane {
 
         // TODO: configurable GCS position
         //let gcs_position = Some(Position::new(-8.292362108248733, 39.394546258787685));
-        let gcs_position = Some(Position::new(8.592405614256041, 49.85598251253783));
+        let gcs_position = Some(Position::new(8.592_405, 49.855_982));
 
         // TODO
         #[allow(clippy::unnecessary_literal_unwrap)]
@@ -249,12 +249,17 @@ impl MapPane {
                 s.last_global_position_int().unwrap_or_default().map(|gps| {
                     let s_id = s.system_id;
                     let pos = Position::new(
-                        (gps.lon as f64) / 10_000_000.0,
-                        (gps.lat as f64) / 10_000_000.0,
+                        f64::from(gps.lon) / 10_000_000.0,
+                        f64::from(gps.lat) / 10_000_000.0,
                     );
                     (
                         s_id,
-                        (s, pos, gps.alt as f64 / 1000.0, gps.vz as f64 / -100.0),
+                        (
+                            s,
+                            pos,
+                            f64::from(gps.alt) / 1000.0,
+                            f64::from(gps.vz) / -100.0,
+                        ),
                     )
                 })
             })
@@ -266,7 +271,7 @@ impl MapPane {
                 LabeledSymbol {
                     position: *pos,
                     //Position::new(-8.292362108248733, 39.394546258787685),
-                    label: format!("System 0x{:02x}\n☁ {}m\n↕ {}m/s", s_id, alt, vz,),
+                    label: format!("System 0x{s_id:02x}\n☁ {alt}m\n↕ {vz}m/s",),
                     symbol: Some(Symbol::Circle(s.icon().to_string())),
                     style: LabeledSymbolStyle {
                         symbol_size: 20.0,
@@ -297,7 +302,7 @@ impl MapPane {
             map = map.with_plugin(Places::new(vec![LabeledSymbol {
                 position: gcs_pos,
                 symbol: Some(Symbol::Circle("📡".to_string())),
-                label: "".to_string(),
+                label: String::new(),
                 style: simple_place_style.clone(),
             }]));
         }
@@ -314,7 +319,7 @@ impl MapPane {
                     a: gcs_pos,
                     b: *pos,
                     color: Color32::BLACK,
-                })
+                });
             }
 
             if let Some(target) = system.last_target_global_int().ok().flatten() {
@@ -322,20 +327,20 @@ impl MapPane {
                     map = map.with_plugin(LinePlugin {
                         a: *pos,
                         b: Position::new(
-                            target.lon_int as f64 / 10_000_000.0,
-                            target.lat_int as f64 / 10_000_000.0,
+                            f64::from(target.lon_int) / 10_000_000.0,
+                            f64::from(target.lat_int) / 10_000_000.0,
                         ),
                         color: Color32::PURPLE.linear_multiply(1.5),
-                    })
+                    });
                 }
 
                 map = map.with_plugin(Places::new(vec![LabeledSymbol {
                     position: Position::new(
-                        target.lon_int as f64 / 10_000_000.0,
-                        target.lat_int as f64 / 10_000_000.0,
+                        f64::from(target.lon_int) / 10_000_000.0,
+                        f64::from(target.lat_int) / 10_000_000.0,
                     ),
                     symbol: Some(Symbol::Circle("🏁".to_string())),
-                    label: "".to_string(),
+                    label: String::new(),
                     style: simple_place_style.clone(),
                 }]));
             }
@@ -343,11 +348,11 @@ impl MapPane {
             if let Some(home) = system.last_home_position().ok().flatten() {
                 map = map.with_plugin(Places::new(vec![LabeledSymbol {
                     position: Position::new(
-                        home.longitude as f64 / 10_000_000.0,
-                        home.latitude as f64 / 10_000_000.0,
+                        f64::from(home.longitude) / 10_000_000.0,
+                        f64::from(home.latitude) / 10_000_000.0,
                     ),
                     symbol: Some(Symbol::Circle("🏠".to_string())),
-                    label: "".to_string(),
+                    label: String::new(),
                     style: simple_place_style,
                 }]));
             }
@@ -528,7 +533,7 @@ impl<'a, T> PathPlugin<'a, T> {
     }
 }
 
-impl<'a, T> Plugin for PathPlugin<'a, T> {
+impl<T> Plugin for PathPlugin<'_, T> {
     fn run(
         self: Box<Self>,
         ui: &mut Ui,
