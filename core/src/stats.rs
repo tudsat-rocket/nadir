@@ -58,6 +58,10 @@ impl ChannelStats {
             p = p2;
         }
 
+        if total == 0 {
+            return 0.0;
+        }
+
         (missed as f32) / (total as f32)
     }
 
