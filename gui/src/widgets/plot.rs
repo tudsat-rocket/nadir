@@ -10,10 +10,6 @@ use maviola::protocol::{ComponentId, SystemId};
 
 /// State shared by all linked plots
 pub struct SharedPlotState {
-    /// First x-axis value
-    pub start: f64,
-    /// Last x-axis value
-    pub end: f64,
     /// Are we currently attached to the right edge?
     pub attached_to_edge: bool,
     /// Width of the view (in seconds)
@@ -24,16 +20,10 @@ pub struct SharedPlotState {
 impl SharedPlotState {
     pub fn new() -> Self {
         Self {
-            start: 0.0,
-            end: 1.0,
             attached_to_edge: true,
             view_width: 30.0,
             box_dragging: false,
         }
-    }
-
-    pub fn set_end(&mut self, end: Option<f64>) {
-        self.end = end.unwrap_or(self.start);
     }
 
     pub fn process_zoom(&mut self, zoom_delta: egui::Vec2) {
@@ -52,6 +42,7 @@ impl SharedPlotState {
     }
 }
 
+#[allow(dead_code)]
 pub struct PlotLine {
     pub system_id: SystemId,
     pub component_id: ComponentId,

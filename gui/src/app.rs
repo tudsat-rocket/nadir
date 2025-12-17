@@ -120,8 +120,6 @@ impl eframe::App for App {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
-        ctx.set_zoom_factor(1.25);
-
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
                 Event::Frame(frame, _callback) => {

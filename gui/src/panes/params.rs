@@ -1,11 +1,7 @@
 use std::ops::DerefMut;
 
 use eframe::egui;
-use egui::{
-    Button, CollapsingHeader, DragValue, Grid, Label, ProgressBar, RichText, ScrollArea, Vec2,
-};
-use egui_extras::{Column, TableBuilder};
-use mavspec::rust::dialects::common::enums::MavParamType;
+use egui::{Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, Vec2};
 
 use core::ParamProgress;
 
@@ -52,59 +48,65 @@ impl ParamsPane {
 
                     for chunk in param_id_chunks {
                         let cat = chunk[0].split_once('_').map(|s| s.0).unwrap_or(&chunk[0]);
-                        CollapsingHeader::new(cat).show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-
-                            Grid::new(ui.next_auto_id()).striped(true).show(ui, |ui| {
+                        CollapsingHeader::new(cat)
+                            .default_open(true)
+                            .show(ui, |ui| {
                                 ui.set_width(ui.available_width());
 
-                                let button_w = 100.0;
-                                let spacing = ui.spacing().item_spacing;
-                                let col_w =
-                                    f32::max(200.0, (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0);
-                                let col_h = 20.0;
+                                Grid::new(ui.next_auto_id()).striped(true).show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
 
-                                for param_id in chunk {
-                                    let param = params.get_mut(param_id).unwrap();
-                                    ui.vertical(|ui| {
-                                        ui.set_width(col_w);
-                                        if param.value != param.downloaded_value {
-                                            ui.monospace(RichText::new(param_id).strong());
-                                        } else {
-                                            ui.monospace(param_id);
-                                        }
-                                    });
-                                    ui.add_sized(
-                                        Vec2::new(col_w, col_h),
-                                        DragValue::new(&mut param.value),
+                                    let button_w = 100.0;
+                                    let spacing = ui.spacing().item_spacing;
+                                    let col_w = f32::max(
+                                        200.0,
+                                        (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0,
                                     );
-                                    ui.horizontal(|ui| {
-                                        let size = Vec2::new(button_w, col_h);
-                                        if param.value != param.downloaded_value {
-                                            if ui
-                                                .add_sized(size, Button::new("⟲ Discard"))
-                                                .clicked()
-                                            {
-                                                param.value = param.downloaded_value;
-                                            }
+                                    let col_h = 20.0;
 
-                                            if ui.add_sized(size, Button::new("💾 Save")).clicked()
-                                            {
-                                                system.set_param(
-                                                    &param_id,
-                                                    param.param_type,
-                                                    param.value,
-                                                );
+                                    for param_id in chunk {
+                                        let param = params.get_mut(param_id).unwrap();
+                                        ui.vertical(|ui| {
+                                            ui.set_width(col_w);
+                                            if param.value != param.downloaded_value {
+                                                ui.monospace(RichText::new(param_id).strong());
+                                            } else {
+                                                ui.monospace(param_id);
                                             }
-                                        } else {
-                                            ui.add_space(2.0 * button_w + 2.0 * spacing.x);
-                                        }
-                                    });
+                                        });
+                                        ui.add_sized(
+                                            Vec2::new(col_w, col_h),
+                                            DragValue::new(&mut param.value),
+                                        );
+                                        ui.horizontal(|ui| {
+                                            let size = Vec2::new(button_w, col_h);
+                                            if param.value != param.downloaded_value {
+                                                if ui
+                                                    .add_sized(size, Button::new("⟲ Discard"))
+                                                    .clicked()
+                                                {
+                                                    param.value = param.downloaded_value;
+                                                }
 
-                                    ui.end_row();
-                                }
+                                                if ui
+                                                    .add_sized(size, Button::new("💾 Save"))
+                                                    .clicked()
+                                                {
+                                                    system.set_param(
+                                                        &param_id,
+                                                        param.param_type,
+                                                        param.value,
+                                                    );
+                                                }
+                                            } else {
+                                                ui.add_space(2.0 * button_w + 2.0 * spacing.x);
+                                            }
+                                        });
+
+                                        ui.end_row();
+                                    }
+                                });
                             });
-                        });
                     }
                 });
             }

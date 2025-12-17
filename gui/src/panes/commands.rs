@@ -1,16 +1,16 @@
 use eframe::egui;
-use egui::{Align, Layout, TextStyle};
+use egui::{Align, Layout};
 
 use crate::panes::TreeBehavior;
 
 pub struct CommandsPane {}
 
 impl CommandsPane {
-    pub fn new(ctx: &egui::Context) -> Self {
+    pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+    pub fn pane_ui(&mut self, ui: &mut egui::Ui, _behavior: &mut TreeBehavior) {
         use egui_extras::{Column, TableBuilder};
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
             ui.horizontal(|ui| {

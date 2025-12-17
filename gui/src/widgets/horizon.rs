@@ -5,8 +5,8 @@ use core::System;
 use egui::epaint::{PathShape, TextShape};
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Color32, CornerRadius, FontFamily, FontId, Galley, Pos2, Rect, Sense, Shape,
-    Stroke, TextFormat, Vec2,
+    Align, Align2, Color32, CornerRadius, FontFamily, FontId, Pos2, Rect, Sense, Shape, Stroke,
+    TextFormat, Vec2,
 };
 use mavspec::rust::dialects::common::messages::{LocalPositionNed, VfrHud};
 
@@ -16,7 +16,7 @@ pub struct ArtificialHorizon {
 
 const COLOR_GROUND: Color32 = Color32::from_rgb(0x7d, 0x52, 0x33);
 const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
-const N: usize = 1000;
+const N: usize = 16;
 
 impl ArtificialHorizon {
     pub fn new(system: &System) -> Self {
@@ -93,11 +93,11 @@ impl ArtificialHorizon {
                 projected.clone(),
                 Stroke::new(
                     if pitch_tick == 0 {
-                        3.0
-                    } else if pitch_tick % 20 == 10 || pitch_tick % 10 == 5 {
-                        0.75
-                    } else {
                         2.0
+                    } else if pitch_tick % 20 == 10 || pitch_tick % 10 == 5 {
+                        0.5
+                    } else {
+                        1.0
                     },
                     Color32::WHITE,
                 ),
@@ -157,9 +157,9 @@ impl ArtificialHorizon {
 
             painter.add(Shape::line(
                 projected.clone(),
-                Stroke::new(4.0, Color32::RED),
+                Stroke::new(3.0, Color32::RED),
             ));
-            painter.add(Shape::line(projected, Stroke::new(3.0, Color32::ORANGE)));
+            painter.add(Shape::line(projected, Stroke::new(2.0, Color32::ORANGE)));
         }
     }
 
@@ -201,18 +201,18 @@ impl ArtificialHorizon {
             } else {
                 painter.line(
                     vec![center.lerp(tip, 1.0 - 0.05), tip],
-                    Stroke::new(2.0, Color32::WHITE),
+                    Stroke::new(1.0, Color32::WHITE),
                 );
             }
         }
 
-        let indicator_pos = center - Vec2::new(0.0, radius - 40.0);
+        let indicator_pos = center - Vec2::new(0.0, radius - 30.0);
 
         painter.rect(
             Rect::from_center_size(indicator_pos, Vec2::new(48.0, 25.0)),
             CornerRadius::ZERO.at_least(1),
             Color32::BLACK,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(0.5, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
 
@@ -238,7 +238,7 @@ impl ArtificialHorizon {
         let rect = painter.clip_rect();
         let center_side = rect.center() + Vec2::new(rect.width() * 0.5 * side, 0.0);
 
-        for tick in (0..10_000).step_by(2) {
+        for tick in (0..100 * ((value + 200.0) / 100.0) as u32).step_by(2) {
             let len = if tick % 100 == 0 {
                 18.0
             } else if tick % 10 == 0 {
@@ -253,7 +253,7 @@ impl ArtificialHorizon {
                     center_side - Vec2::new(0.0, y),
                     center_side - Vec2::new(len * side, y),
                 ],
-                Stroke::new(if tick % 50 == 0 { 3.0 } else { 1.5 }, Color32::WHITE),
+                Stroke::new(if tick % 50 == 0 { 2.0 } else { 1.0 }, Color32::WHITE),
             );
 
             if tick % 50 == 0 {
@@ -286,7 +286,7 @@ impl ArtificialHorizon {
                 center_side + Vec2::new(0.0, value * POINTS_PER_UNIT),
                 center_side - Vec2::new(0.0, rect.height() / 2.0),
             ],
-            Stroke::new(5.0, COLOR_DIAL),
+            Stroke::new(4.0, COLOR_DIAL),
         );
 
         painter.add(Shape::convex_polygon(
@@ -298,7 +298,7 @@ impl ArtificialHorizon {
                 center_side + Vec2::new(-80.0 * side, 12.0),
             ],
             Color32::BLACK,
-            Stroke::new(2.0, Color32::WHITE),
+            Stroke::new(1.0, Color32::WHITE),
         ));
 
         let text_x = if side > 0.0 { -22.0 } else { 76.0 };
@@ -332,7 +332,7 @@ impl ArtificialHorizon {
         puffin::profile_function!();
 
         let altitude = local_position.as_ref().map(|v| v.z * -1.0).unwrap_or(0.0);
-        let climb = local_position.as_ref().map(|v| v.vz * -1.0).unwrap_or(0.0);
+        let _climb = local_position.as_ref().map(|v| v.vz * -1.0).unwrap_or(0.0);
         self.draw_side_dial(painter, altitude, 1.0, None);
     }
 
@@ -395,31 +395,19 @@ impl egui::Widget for ArtificialHorizon {
 
         // draw some darkened backgrounds on the sides for our velocity and altitude dials
         painter.rect_filled(
-            Rect::from_two_pos(rect.right_top(), rect.right_bottom() - Vec2::new(50.0, 0.0)),
+            Rect::from_two_pos(rect.right_top(), rect.right_bottom() - Vec2::new(20.0, 0.0)),
             CornerRadius::ZERO,
-            Color32::BLACK.gamma_multiply(1.0),
+            Color32::BLACK.gamma_multiply(0.2),
         );
         painter.rect_filled(
-            Rect::from_two_pos(rect.left_top(), rect.left_bottom() + Vec2::new(50.0, 0.0)),
+            Rect::from_two_pos(rect.left_top(), rect.left_bottom() + Vec2::new(20.0, 0.0)),
             CornerRadius::ZERO,
-            Color32::BLACK.gamma_multiply(1.0),
+            Color32::BLACK.gamma_multiply(0.2),
         );
 
-        painter.rect_filled(
-            Rect::from_two_pos(
-                rect.left_bottom(),
-                rect.right_bottom() - Vec2::new(0.0, 80.0),
-            ),
-            CornerRadius::ZERO,
-            Color32::BLACK.gamma_multiply(1.0),
-        );
-
-        self.draw_compass(
-            &mut painter,
-            yaw,
-            rect.center_bottom() + Vec2::new(0.0, radius - 60.0),
-            radius,
-        );
+        let compass_center = rect.center_bottom() + Vec2::new(0.0, radius + 20.0 - 40.0);
+        painter.circle_filled(compass_center, radius + 20.0 + 5.0, Color32::BLACK);
+        self.draw_compass(&mut painter, yaw, compass_center, radius + 20.0);
 
         self.draw_altitude_dial(&mut painter, local_position.as_ref());
         self.draw_velocity_dial(&mut painter, local_position.as_ref(), vfr_hud.as_ref());

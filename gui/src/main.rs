@@ -7,6 +7,7 @@ use egui::FontFamily;
 use tracing_subscriber::prelude::*;
 
 mod app;
+mod colors;
 mod panes;
 mod views;
 mod widgets;

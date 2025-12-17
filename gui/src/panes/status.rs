@@ -1,12 +1,11 @@
 use mavspec::rust::dialects::ardupilotmega::enums::PlaneMode;
-use mavspec::rust::dialects::common::enums::{
-    MavAutopilot, MavModeFlag, MavStandardMode, MavState, MavType,
-};
+use mavspec::rust::dialects::common::enums::{MavAutopilot, MavModeFlag, MavStandardMode, MavType};
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
 use eframe::egui;
 use egui::{Align, Button, Color32, Frame, Layout, RichText, Separator, Vec2};
 
+use crate::colors::COLOR_INDICATOR_WARNING;
 use crate::widgets::{AutopilotLogo, MavStateIndicator, ModeDisplay, ModeDropdown};
 use crate::{panes::TreeBehavior, views::View};
 
@@ -126,8 +125,8 @@ impl StatusPane {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    let s = 18.0;
-                    let button_h = s + 5.0;
+                    let s = 14.0;
+                    let button_h = s + 15.0;
 
                     ui.vertical(|ui| {
                         let armed = base_mode.contains(MavModeFlag::SAFETY_ARMED);
@@ -135,7 +134,7 @@ impl StatusPane {
 
                         let arm_button = if armed {
                             Button::selectable(true, RichText::new("ARMED").size(s))
-                                .fill(Color32::from_rgb(204, 0, 0))
+                                .fill(COLOR_INDICATOR_WARNING)
                         } else {
                             Button::selectable(false, RichText::new("ARM").size(s))
                         };
@@ -146,9 +145,15 @@ impl StatusPane {
                             Button::selectable(false, RichText::new("DISARM").size(s))
                         };
 
+                        if armed {
+                            ui.style_mut().visuals.override_text_color = Some(Color32::BLACK);
+                        }
+
                         if ui.add_sized(size, arm_button).clicked() {
                             system.do_arm(true, false);
                         }
+
+                        ui.style_mut().visuals.override_text_color = None;
 
                         ui.add_space(5.0);
 
@@ -189,6 +194,10 @@ impl StatusPane {
 
                         if let Some((row1, row2)) = favourites {
                             for (i, row) in [&row1, &row2].into_iter().enumerate() {
+                                if i != 0 {
+                                    ui.add_space(5.0);
+                                }
+
                                 ui.horizontal(|ui| {
                                     for cm in row {
                                         let Some(mode_info) = system.custom_mode_info(*cm) else {

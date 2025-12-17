@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Vec2, Vec2b};
+use egui::Align;
 
 use crate::{
     panes::TreeBehavior,

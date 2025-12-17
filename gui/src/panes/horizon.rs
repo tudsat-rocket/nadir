@@ -1,12 +1,11 @@
 use egui::{CornerRadius, Frame, Vec2};
-use maviola::core::io::ChannelDetails;
 
 use crate::{panes::TreeBehavior, views::View, widgets::ArtificialHorizon};
 
 pub struct HorizonPane {}
 
 impl HorizonPane {
-    pub fn new(ctx: &egui::Context) -> Self {
+    pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
 
