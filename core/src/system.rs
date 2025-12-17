@@ -67,6 +67,8 @@ impl System {
             params,
         };
 
+        let _ = tokio::spawn(crate::protocols::heartbeat::send_heartbeats(system.clone()));
+
         let _ = tokio::spawn(crate::protocols::modes::discover_available_modes(
             system.clone(),
             0x01,
