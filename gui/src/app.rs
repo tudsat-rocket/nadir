@@ -1,6 +1,6 @@
 use core::LinkId;
 
-use egui::{Align, Color32, Key, Layout, Margin, RichText};
+use egui::{Align, Color32, Key, Layout, Margin, Modifiers, RichText};
 use egui_tiles::LinearDir;
 use maviola::asnc::node::Event;
 use maviola::prelude::V2;
@@ -309,7 +309,10 @@ impl eframe::App for App {
             ];
             for (i, key) in system_shortcuts.iter().enumerate() {
                 let sysid = (i + 1) as u8;
-                if input.key_down(*key) && self.core.known_system_ids().contains(&sysid) {
+                if input.key_down(*key)
+                    && input.modifiers.contains(Modifiers::CTRL)
+                    && self.core.known_system_ids().contains(&sysid)
+                {
                     self.active_view = View::System(sysid);
                 }
             }
