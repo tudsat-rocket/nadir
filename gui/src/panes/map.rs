@@ -3,8 +3,11 @@
 #![allow(dead_code)]
 #![allow(unused)]
 
+use core::System;
+use std::collections::HashMap;
+
 use eframe::egui;
-use egui::{Color32, CornerRadius, Frame, Rect, Stroke, Style, Ui, Vec2, Widget};
+use egui::{Color32, CornerRadius, Frame, Pos2, Rect, Shape, Stroke, Style, Ui, Vec2, Widget};
 use mavspec::rust::dialects::common::enums::MavCmd;
 use walkers::{
     HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
@@ -48,6 +51,34 @@ impl walkers::Plugin for NavigationPlugin {
             self.system
                 .do_reposition(world_pos.y(), world_pos.x(), 50.0);
         }
+    }
+}
+
+struct LinePlugin {
+    a: Position,
+    b: Position,
+    color: Color32,
+}
+
+impl walkers::Plugin for LinePlugin {
+    fn run(
+        self: Box<Self>,
+        ui: &mut Ui,
+        response: &egui::Response,
+        projector: &Projector,
+        map_memory: &MapMemory,
+    ) {
+        let a_pos = projector.project(self.a);
+        let b_pos = projector.project(self.b);
+
+        let shape = Shape::dashed_line(
+            &[Pos2::new(a_pos.x, a_pos.y), Pos2::new(b_pos.x, b_pos.y)],
+            Stroke::new(2.0, self.color),
+            12.0,
+            8.0,
+        );
+
+        ui.painter().add(shape);
     }
 }
 
@@ -195,8 +226,12 @@ impl MapPane {
         //    },
         //};
 
+        // TODO: configurable GCS position
+        //let gcs_position = Some(Position::new(-8.292362108248733, 39.394546258787685));
+        let gcs_position = Some(Position::new(8.592405614256041, 49.85598251253783));
+
         // TODO
-        let center_position = Position::new(-8.292362108248733, 39.394546258787685);
+        let center_position = gcs_position.unwrap();
 
         let system_ids = behavior.core.known_system_ids();
         let systems = system_ids.iter().filter_map(|id| behavior.core.system(*id));
@@ -210,61 +245,116 @@ impl MapPane {
             .map(|system_id| behavior.core.system(system_id))
             .flatten();
 
-        let places = systems
+        let system_positions: HashMap<u8, (System, Position, f64, f64)> = systems
             .filter_map(|s| {
                 s.last_global_position_int().unwrap_or_default().map(|gps| {
+                    let s_id = s.system_id;
                     let pos = Position::new(
                         (gps.lon as f64) / 10_000_000.0,
                         (gps.lat as f64) / 10_000_000.0,
                     );
-
-                    LabeledSymbol {
-                        position: pos,
-                        //Position::new(-8.292362108248733, 39.394546258787685),
-                        label: format!(
-                            "System 0x{:02x}\n☁ {}m\n↕ {}m/s",
-                            s.system_id,
-                            gps.alt as f64 / 1000.0,
-                            gps.vz as f64 / -100.0,
-                        ),
-                        symbol: Some(Symbol::Circle(s.icon().to_string())),
-                        style: LabeledSymbolStyle {
-                            symbol_size: 20.0,
-                            label_background: if Some(s.system_id) == active_system_id
-                                || active_system_id == None
-                            {
-                                ui.style().visuals.window_fill()
-                            } else {
-                                ui.style().visuals.window_fill().gamma_multiply(0.6)
-                            },
-                            ..Default::default()
-                        },
-                    }
+                    (
+                        s_id,
+                        (s, pos, gps.alt as f64 / 1000.0, gps.vz as f64 / -100.0),
+                    )
                 })
             })
             .collect();
 
-        let mut map = walkers::Map::new(Some(tiles), &mut self.memory, center_position)
-            //.with_plugin(PathPlugin::new(vec![vis_plugin]))
-            // TODO: configurable GCS position
-            .with_plugin(Places::new(vec![LabeledSymbol {
-                position: Position::new(-8.292362108248733, 39.394546258787685),
+        let places = system_positions
+            .iter()
+            .map(|(s_id, (s, pos, alt, vz))| {
+                LabeledSymbol {
+                    position: *pos,
+                    //Position::new(-8.292362108248733, 39.394546258787685),
+                    label: format!("System 0x{:02x}\n☁ {}m\n↕ {}m/s", s_id, alt, vz,),
+                    symbol: Some(Symbol::Circle(s.icon().to_string())),
+                    style: LabeledSymbolStyle {
+                        symbol_size: 20.0,
+                        label_background: if Some(s.system_id) == active_system_id
+                            || active_system_id == None
+                        {
+                            ui.style().visuals.window_fill()
+                        } else {
+                            ui.style().visuals.window_fill().gamma_multiply(0.6)
+                        },
+                        ..Default::default()
+                    },
+                }
+            })
+            .collect();
+
+        let simple_place_style = LabeledSymbolStyle {
+            symbol_size: 20.0,
+            symbol_color: Color32::WHITE,
+            symbol_background: Color32::BLACK,
+            ..Default::default()
+        };
+
+        let mut map = walkers::Map::new(Some(tiles), &mut self.memory, center_position);
+        //.with_plugin(PathPlugin::new(vec![vis_plugin]))
+
+        if let Some(gcs_pos) = gcs_position {
+            map = map.with_plugin(Places::new(vec![LabeledSymbol {
+                position: gcs_pos,
                 symbol: Some(Symbol::Circle("📡".to_string())),
                 label: "".to_string(),
-                style: LabeledSymbolStyle {
-                    symbol_size: 20.0,
-                    symbol_color: Color32::WHITE,
-                    symbol_background: Color32::BLACK,
-                    ..Default::default()
-                },
-            }]))
-            .with_plugin(Places::new(places));
+                style: simple_place_style.clone(),
+            }]));
+        }
 
         if let Some(system) = &active_system {
             map = map.with_plugin(NavigationPlugin {
                 system: system.clone(),
-            })
+            });
+
+            if let Some((_s, pos, ..)) = system_positions.get(&system.system_id)
+                && let Some(gcs_pos) = gcs_position
+            {
+                map = map.with_plugin(LinePlugin {
+                    a: gcs_pos,
+                    b: *pos,
+                    color: Color32::BLACK,
+                })
+            }
+
+            if let Some(target) = system.last_target_global_int().ok().flatten() {
+                if let Some((_s, pos, ..)) = system_positions.get(&system.system_id) {
+                    map = map.with_plugin(LinePlugin {
+                        a: *pos,
+                        b: Position::new(
+                            target.lon_int as f64 / 10_000_000.0,
+                            target.lat_int as f64 / 10_000_000.0,
+                        ),
+                        color: Color32::PURPLE.linear_multiply(1.5),
+                    })
+                }
+
+                map = map.with_plugin(Places::new(vec![LabeledSymbol {
+                    position: Position::new(
+                        target.lon_int as f64 / 10_000_000.0,
+                        target.lat_int as f64 / 10_000_000.0,
+                    ),
+                    symbol: Some(Symbol::Circle("🏁".to_string())),
+                    label: "".to_string(),
+                    style: simple_place_style.clone(),
+                }]));
+            }
+
+            if let Some(home) = system.last_home_position().ok().flatten() {
+                map = map.with_plugin(Places::new(vec![LabeledSymbol {
+                    position: Position::new(
+                        home.longitude as f64 / 10_000_000.0,
+                        home.latitude as f64 / 10_000_000.0,
+                    ),
+                    symbol: Some(Symbol::Circle("🏠".to_string())),
+                    label: "".to_string(),
+                    style: simple_place_style,
+                }]));
+            }
         }
+
+        map = map.with_plugin(Places::new(places));
 
         let response = ui.add(map);
 
