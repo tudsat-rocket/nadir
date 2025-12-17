@@ -4,7 +4,10 @@ use mavspec::rust::dialects::{
     Common,
     common::{
         enums::{MavCmd, MavResult},
-        messages::{Attitude, CommandLong, GlobalPositionInt, LocalPositionNed, VfrHud},
+        messages::{
+            Attitude, AutopilotVersion, CommandLong, GlobalPositionInt, LinkNodeStatus,
+            LocalPositionNed, ServoOutputRaw, VfrHud,
+        },
     },
 };
 
@@ -14,11 +17,14 @@ pub async fn request_message_intervals(
     system: System,
     mut message_rx: tokio::sync::broadcast::Receiver<Common>,
 ) {
-    const INTERVALS: [(u32, u32); 4] = [
+    const INTERVALS: [(u32, u32); 7] = [
         (Attitude::ID, 100_000),
         (VfrHud::ID, 100_000),
         (LocalPositionNed::ID, 100_000),
         (GlobalPositionInt::ID, 200_000),
+        (ServoOutputRaw::ID, 200_000),
+        (LinkNodeStatus::ID, 2000_000),
+        (AutopilotVersion::ID, 5000_000),
     ];
 
     loop {

@@ -13,7 +13,9 @@ use mavspec::rust::dialects::common::enums::{
     MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
 };
 use mavspec::rust::dialects::common::messages::{
-    Attitude, AvailableModes, CommandInt, CommandLong, GlobalPositionInt, ParamSet, VfrHud,
+    Attitude, AvailableModes, BatteryStatus, CommandInt, CommandLong, GlobalPositionInt,
+    HomePosition, LinkNodeStatus, ParamSet, PositionTargetGlobalInt, RadioStatus, ServoOutputRaw,
+    VfrHud,
 };
 use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
@@ -109,6 +111,35 @@ impl System {
 
     pub fn last_vfr_hud(&self) -> Result<Option<VfrHud>, DbError> {
         self.db.last_vfr_hud_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_servo_output_raw(&self) -> Result<Option<ServoOutputRaw>, DbError> {
+        self.db
+            .last_servo_output_raw_for_system((self.system_id, 0x1))
+    }
+
+    // TODO: properly handle multiple batteries / different instance IDs
+    pub fn last_battery_status(&self) -> Result<Option<BatteryStatus>, DbError> {
+        self.db
+            .last_battery_status_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_target_global_int(&self) -> Result<Option<PositionTargetGlobalInt>, DbError> {
+        self.db
+            .last_position_target_global_int_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_home_position(&self) -> Result<Option<HomePosition>, DbError> {
+        self.db.last_home_position_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_radio_status_for_system(&self) -> Result<Option<RadioStatus>, DbError> {
+        self.db.last_radio_status_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_link_node_status_for_system(&self) -> Result<Option<LinkNodeStatus>, DbError> {
+        self.db
+            .last_link_node_status_for_system((self.system_id, 0x1))
     }
 
     pub fn mav_type(&self) -> MavType {
