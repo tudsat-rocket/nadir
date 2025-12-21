@@ -6,7 +6,7 @@ use mavspec::rust::dialects::{
         enums::{MavCmd, MavResult},
         messages::{
             Attitude, AutopilotVersion, CommandLong, GlobalPositionInt, LinkNodeStatus,
-            LocalPositionNed, ServoOutputRaw, VfrHud,
+            LocalPositionNed, ServoOutputRaw, SysStatus, VfrHud,
         },
     },
 };
@@ -17,7 +17,7 @@ pub async fn request_message_intervals(
     system: System,
     mut message_rx: tokio::sync::broadcast::Receiver<Common>,
 ) {
-    const INTERVALS: [(u32, u32); 7] = [
+    const INTERVALS: [(u32, u32); 8] = [
         (Attitude::ID, 100_000),
         (VfrHud::ID, 100_000),
         (LocalPositionNed::ID, 100_000),
@@ -25,6 +25,7 @@ pub async fn request_message_intervals(
         (ServoOutputRaw::ID, 200_000),
         (LinkNodeStatus::ID, 2_000_000),
         (AutopilotVersion::ID, 5_000_000),
+        (SysStatus::ID, 1_000_000),
     ];
 
     loop {
