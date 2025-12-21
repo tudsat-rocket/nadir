@@ -13,9 +13,9 @@ use mavspec::rust::dialects::common::enums::{
     MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
 };
 use mavspec::rust::dialects::common::messages::{
-    Attitude, AvailableModes, BatteryStatus, CommandInt, CommandLong, GlobalPositionInt,
-    HomePosition, LinkNodeStatus, ParamSet, PositionTargetGlobalInt, RadioStatus, ServoOutputRaw,
-    VfrHud,
+    Attitude, AutopilotVersion, AvailableModes, BatteryStatus, CommandInt, CommandLong,
+    GlobalPositionInt, HomePosition, LinkNodeStatus, ParamSet, PositionTargetGlobalInt,
+    RadioStatus, ServoOutputRaw, SysStatus, VfrHud,
 };
 use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
@@ -92,6 +92,15 @@ impl System {
 
     pub fn last_heartbeat(&self) -> Result<Option<Heartbeat>, DbError> {
         self.db.last_heartbeat_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_sys_status(&self) -> Result<Option<SysStatus>, DbError> {
+        self.db.last_sys_status_for_system((self.system_id, 0x1))
+    }
+
+    pub fn last_autopilot_version(&self) -> Result<Option<AutopilotVersion>, DbError> {
+        self.db
+            .last_autopilot_version_for_system((self.system_id, 0x1))
     }
 
     pub fn last_global_position_int(&self) -> Result<Option<GlobalPositionInt>, DbError> {

@@ -18,3 +18,9 @@ pub use armed::*;
 
 mod mode;
 pub use mode::*;
+
+mod dial;
+pub use dial::*;
+
+mod battery;
+pub use battery::*;

@@ -1,7 +1,7 @@
 use core::System;
 
 use eframe::egui;
-use egui::{Align, Align2, Color32, FontId, Layout, Pos2, Rect, Sense, Shape, Stroke, Vec2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
 use maviola::core::io::ChannelDetails;
 
 use crate::{
@@ -23,7 +23,7 @@ impl LinksPane {
             ui.weak("🖧 Links");
         });
 
-        for (i, (info, _)) in system.channels().into_iter().enumerate() {
+        for (info, _) in system.channels() {
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
                 match info.details() {
@@ -47,7 +47,7 @@ impl LinksPane {
                     ChannelDetails::SerialPort { path, baud_rate: _ } => {
                         ui.horizontal(|ui| {
                             ui.weak("USB");
-                            ui.label(format!("{path}"));
+                            ui.label(path.clone());
                         });
                     }
                     _ => {

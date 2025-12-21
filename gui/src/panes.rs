@@ -8,8 +8,11 @@ mod horizon;
 mod links;
 mod map;
 mod messages;
+mod navigation;
 mod params;
 mod plot;
+mod preflight;
+mod propulsion;
 mod sensors;
 mod state_estimator;
 mod status;
@@ -20,8 +23,11 @@ pub use horizon::HorizonPane;
 pub use links::LinksPane;
 pub use map::MapPane;
 pub use messages::MessagesPane;
+pub use navigation::NavigationPane;
 pub use params::ParamsPane;
 pub use plot::PlotPane;
+pub use preflight::PreflightPane;
+pub use propulsion::PropulsionPane;
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
@@ -47,6 +53,9 @@ pub enum Pane {
     Links(LinksPane),
     Horizon(HorizonPane),
     Params(ParamsPane),
+    Propulsion(PropulsionPane),
+    Preflight(PreflightPane),
+    Navigation(NavigationPane),
     Placeholder(String),
 }
 
@@ -64,6 +73,9 @@ impl std::fmt::Display for Pane {
             Pane::Links(_) => "Link".into(),
             Pane::Horizon(_) => "Horizon".into(),
             Pane::Params(_) => "Params".into(),
+            Pane::Propulsion(_) => "Propulsion".into(),
+            Pane::Preflight(_) => "Preflight".into(),
+            Pane::Navigation(_) => "Navigation".into(),
             Pane::Placeholder(s) => s.into(),
         };
         f.write_str(&name)
@@ -122,7 +134,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::Links(p) => p.pane_ui(ui, self),
             Pane::Horizon(p) => p.pane_ui(ui, self),
             Pane::Params(p) => p.pane_ui(ui, self),
-            Pane::Placeholder(_) => {}
+            Pane::Propulsion(p) => p.pane_ui(ui, self),
+            Pane::Preflight(p) => p.pane_ui(ui, self),
+            Pane::Navigation(p) => p.pane_ui(ui, self),
+            Pane::Placeholder(_) => {
+                ui.centered_and_justified(|ui| {
+                    ui.weak("To be implemented.");
+                });
+            }
         }
 
         egui_tiles::UiResponse::None

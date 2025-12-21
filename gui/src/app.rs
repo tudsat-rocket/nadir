@@ -49,16 +49,16 @@ impl App {
 
         let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(ctx, None))));
 
+        let link = tiles.insert_pane(Pane::Links(LinksPane::new(ctx)));
         let horizon = tiles.insert_pane(Pane::Horizon(HorizonPane::new(ctx)));
 
         let status = tiles.insert_pane(Pane::Status(StatusPane::new(ctx)));
         let components = tiles.insert_pane(Pane::Placeholder("Info".to_owned()));
-        let info_top_tabs = tiles.insert_tab_tile(vec![status, components]);
 
-        let link = tiles.insert_pane(Pane::Links(LinksPane::new(ctx)));
-        let info_bottom_tabs = tiles.insert_tab_tile(vec![link]);
-
-        let system = tiles.insert_pane(Pane::Placeholder("System Overview".to_owned()));
+        let propulsion = tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx)));
+        let preflight = tiles.insert_pane(Pane::Preflight(PreflightPane::new(ctx)));
+        let navigation = tiles.insert_pane(Pane::Navigation(NavigationPane::new(ctx)));
+        let mission = tiles.insert_pane(Pane::Placeholder("Mission".to_owned()));
         let state = tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx)));
         let sensors = tiles.insert_pane(Pane::Sensors(SensorsPane::new(ctx)));
         let plot = tiles.insert_pane(Pane::Plot(PlotPane::new(ctx)));
@@ -67,33 +67,30 @@ impl App {
         let params = tiles.insert_pane(Pane::Params(ParamsPane::new(ctx)));
         let can = tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx)));
 
-        let main_tabs = tiles.insert_tab_tile(vec![
-            system, state, sensors, plot, messages, commands, params, can,
+        let link_and_horizon = tiles.insert_horizontal_tile(vec![link, horizon]);
+        let info_top_tabs = tiles.insert_tab_tile(vec![status, components]);
+
+        let top_split = tiles.insert_horizontal_tile(vec![link_and_horizon, info_top_tabs]);
+
+        let top_left_tabs = tiles.insert_tab_tile(vec![propulsion, params]);
+        let bottom_left_tabs = tiles.insert_tab_tile(vec![commands, messages, plot, can]);
+
+        let top_right_tabs = tiles.insert_tab_tile(vec![preflight, navigation, mission]);
+        let bottom_right_tabs = tiles.insert_tab_tile(vec![state, sensors]);
+
+        let bottom = tiles.insert_grid_tile(vec![
+            top_left_tabs,
+            top_right_tabs,
+            bottom_left_tabs,
+            bottom_right_tabs,
         ]);
 
-        let info = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(
-                LinearDir::Vertical,
-                [info_top_tabs, info_bottom_tabs],
-                0.5,
-            ),
-        )));
-
-        let horizon_and_info =
-            tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-                egui_tiles::Linear::new_binary(LinearDir::Horizontal, [horizon, info], 0.35),
-            )));
-
         let side = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(
-                LinearDir::Vertical,
-                [horizon_and_info, main_tabs],
-                0.25,
-            ),
+            egui_tiles::Linear::new_binary(LinearDir::Vertical, [top_split, bottom], 0.2),
         )));
 
         let root = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.45),
+            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.6),
         )));
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
