@@ -17,34 +17,37 @@ impl LinksPane {
         Self {}
     }
 
-    // TODO: add peer information back in
-    #[allow(dead_code)]
     fn draw_peers(&mut self, ui: &mut egui::Ui, system: &System) {
-        for (i, (info, _)) in system.channels().into_iter().enumerate() {
-            if i != 0 {
-                ui.separator();
-            }
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.weak("🖧 Links");
+        });
 
+        for (i, (info, _)) in system.channels().into_iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
-                ui.weak("🖧");
                 match info.details() {
                     ChannelDetails::TcpClient { server_addr } => {
-                        ui.label(format!("tcp:{server_addr}"));
+                        ui.horizontal(|ui| {
+                            ui.weak("TCP");
+                            ui.label(format!("{server_addr}"));
+                        });
                     }
                     ChannelDetails::UdpServer {
                         server_addr,
                         peer_addr,
                     } => {
-                        ui.vertical(|ui| {
-                            ui.label(format!("udp:{server_addr}"));
-                            ui.weak(format!("(peer: {peer_addr})"));
+                        ui.horizontal(|ui| {
+                            ui.weak("UDP");
+                            ui.label(format!("{server_addr}"));
+                            ui.weak("↔");
+                            ui.label(format!("{peer_addr}"));
                         });
                     }
-                    ChannelDetails::SerialPort { path, baud_rate } => {
-                        ui.vertical(|ui| {
-                            ui.label(format!("serial:{path}"));
-                            ui.weak(format!("(baud rate: {baud_rate})"));
+                    ChannelDetails::SerialPort { path, baud_rate: _ } => {
+                        ui.horizontal(|ui| {
+                            ui.weak("USB");
+                            ui.label(format!("{path}"));
                         });
                     }
                     _ => {
@@ -102,7 +105,7 @@ impl LinksPane {
         }
     }
 
-    fn draw_link_quality(&mut self, ui: &mut egui::Ui, mut lq: Option<f32>) {
+    fn draw_link_quality(&mut self, ui: &mut egui::Ui, mut lq: Option<f32>) -> egui::Response {
         lq = lq.and_then(|lq| lq.is_normal().then_some(lq));
 
         let color = match lq {
@@ -112,7 +115,7 @@ impl LinksPane {
             None => ui.visuals().weak_text_color(),
         };
 
-        ui.colored_label(color, format!("{:.0}%", 100.0 * lq.unwrap_or(0.0)));
+        ui.colored_label(color, format!("{:.0}%", 100.0 * lq.unwrap_or(0.0)))
     }
 
     pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
@@ -174,150 +177,139 @@ impl LinksPane {
             .as_ref()
             .map(|rs| 1.0 - f32::from(rs.rxerrors) / 100.0);
 
-        let (response, painter) = ui.allocate_painter(
-            Vec2::new(ui.available_width(), ui.available_height()),
-            Sense::empty(),
-        );
+        let (response, painter) =
+            ui.allocate_painter(Vec2::new(ui.available_width(), 150.0), Sense::empty());
+        let rect = response.rect.shrink(20.0);
 
-        let inset = response.rect.shrink(20.0);
-
-        painter.text(
-            inset.left_center(),
-            Align2::CENTER_CENTER,
-            "🖳",
-            FontId::proportional(18.0),
-            ui.visuals().weak_text_color(),
-        );
+        let icon_font = FontId::proportional(18.0);
+        let weak = ui.visuals().weak_text_color();
+        let align = Align2::CENTER_CENTER;
+        painter.text(rect.left_center(), align, "🖳", icon_font.clone(), weak);
 
         if radio_status.is_some() {
-            painter.text(
-                inset.center(),
-                Align2::CENTER_CENTER,
-                "📡",
-                FontId::proportional(18.0),
-                ui.visuals().weak_text_color(),
-            );
+            painter.text(rect.center(), align, "📡", icon_font.clone(), weak);
         }
 
-        painter.text(
-            inset.right_center(),
-            Align2::CENTER_CENTER,
-            system.icon(),
-            FontId::proportional(18.0),
-            ui.visuals().weak_text_color(),
-        );
+        painter.text(rect.right_center(), align, system.icon(), icon_font, weak);
 
         if radio_status.is_some() {
             self.draw_link_lines(
                 &painter,
-                inset.left_center() + Vec2::new(20.0, 0.0),
-                inset.center() - Vec2::new(20.0, 0.0),
+                rect.left_center() + Vec2::new(20.0, 0.0),
+                rect.center() - Vec2::new(20.0, 0.0),
                 (local_uplink_quality, local_downlink_quality),
                 false,
             );
             self.draw_link_lines(
                 &painter,
-                inset.center() + Vec2::new(20.0, 0.0),
-                inset.right_center() - Vec2::new(20.0, 0.0),
+                rect.center() + Vec2::new(20.0, 0.0),
+                rect.right_center() - Vec2::new(20.0, 0.0),
                 (remote_uplink_quality, remote_downlink_quality),
                 true,
             );
         } else {
             self.draw_link_lines(
                 &painter,
-                inset.left_center() + Vec2::new(20.0, 0.0),
-                inset.right_center() - Vec2::new(20.0, 0.0),
+                rect.left_center() + Vec2::new(20.0, 0.0),
+                rect.right_center() - Vec2::new(20.0, 0.0),
                 (local_uplink_quality, local_downlink_quality),
                 false,
             );
         }
 
         let local_link_target = if radio_status.is_some() {
-            inset.center()
+            rect.center()
         } else {
-            inset.right_center()
+            rect.right_center()
         };
 
-        ui.place(
-            Rect::from_two_pos(inset.left_top(), local_link_target).shrink(20.0),
-            |ui: &mut egui::Ui| {
-                ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                    self.draw_link_quality(ui, local_uplink_quality);
-                    ui.add_space(5.0);
+        ui.style_mut().spacing.item_spacing = Vec2::new(5.0, 2.0);
 
-                    ui.horizontal(|ui| {
-                        ui.monospace(format!("{up_packets:>5.1}"));
-                        ui.weak("pkt/s ");
-                        ui.monospace(format!("{:>5.2}", up_data / 1024.0));
-                        ui.weak("KiB/s");
-                    });
-                })
-                .response
-            },
-        );
+        let local_center = rect.left_center().lerp(local_link_target, 0.5);
+        let s = Vec2::new(90.0, 20.0);
 
-        ui.place(
-            Rect::from_two_pos(inset.left_bottom(), local_link_target).shrink(20.0),
-            |ui: &mut egui::Ui| {
-                ui.vertical_centered(|ui| {
-                    self.draw_link_quality(ui, local_downlink_quality);
-                    ui.add_space(5.0);
-
-                    ui.horizontal(|ui| {
-                        ui.monospace(format!("{down_packets:>5.1}"));
-                        ui.weak("pkt/s ");
-                        ui.monospace(format!("{:>5.2}", down_data / 1024.0));
-                        ui.weak("KiB/s");
-                    });
-                })
-                .response
-            },
-        );
-
-        if let Some(radio_status) = radio_status {
+        for (sign, lq) in [(-1.0, local_uplink_quality), (1.0, local_downlink_quality)] {
             ui.place(
-                Rect::from_two_pos(inset.right_top(), inset.center()).shrink(20.0),
-                |ui: &mut egui::Ui| {
-                    ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                        let uplink_rssi = radio_status.remrssi as i8;
-                        let uplink_snr = uplink_rssi - (radio_status.remnoise as i8);
-
-                        self.draw_link_quality(ui, remote_uplink_quality);
-                        ui.add_space(5.0);
-
-                        ui.with_layout(Layout::left_to_right(Align::BOTTOM), |ui| {
-                            ui.weak("RSSI");
-                            ui.monospace(format!("{uplink_rssi:>3.0}"));
-                            ui.weak("dBm, SNR:");
-                            ui.monospace(format!("{uplink_snr:>2.0}"));
-                            ui.weak("dB");
-                        });
-                    })
-                    .response
-                },
+                Rect::from_center_size(local_center + Vec2::new(0.0, 20.0 * sign), s),
+                |ui: &mut egui::Ui| self.draw_link_quality(ui, lq),
             );
+        }
 
+        for (sign, pkts) in [(-1.0, up_packets), (1.0, down_packets)] {
             ui.place(
-                Rect::from_two_pos(inset.right_bottom(), inset.center()).shrink(20.0),
+                Rect::from_center_size(local_center + Vec2::new(0.0, 42.0 * sign), s),
                 |ui: &mut egui::Ui| {
-                    ui.vertical_centered(|ui| {
-                        let downlink_rssi = radio_status.rssi as i8;
-                        let downlink_snr = downlink_rssi - (radio_status.noise as i8);
-
-                        self.draw_link_quality(ui, remote_downlink_quality);
-                        ui.add_space(5.0);
-
-                        ui.horizontal(|ui| {
-                            ui.weak("RSSI");
-                            ui.monospace(format!("{downlink_rssi:>3.0}"));
-                            ui.weak("dBm, SNR:");
-                            ui.monospace(format!("{downlink_snr:>2.0}"));
-                            ui.weak("dB");
-                        });
+                    ui.horizontal(|ui| {
+                        ui.monospace(format!("{pkts:>5.1}"));
+                        ui.weak("pkt/s ");
                     })
                     .response
                 },
             );
         }
+
+        for (sign, data) in [(-1.0, up_data), (1.0, down_data)] {
+            ui.place(
+                Rect::from_center_size(local_center + Vec2::new(0.0, 62.0 * sign), s),
+                |ui: &mut egui::Ui| {
+                    ui.horizontal(|ui| {
+                        ui.monospace(format!("{:>5.2}", data / 1024.0));
+                        ui.weak("KiB/s");
+                    })
+                    .response
+                },
+            );
+        }
+
+        if let Some(radio_status) = radio_status {
+            let radio_center = rect.center().lerp(rect.right_center(), 0.5);
+
+            let uplink_rssi = radio_status.remrssi as i8;
+            let uplink_snr = uplink_rssi - (radio_status.remnoise as i8);
+            let downlink_rssi = radio_status.rssi as i8;
+            let downlink_snr = downlink_rssi - (radio_status.noise as i8);
+
+            for (sign, lq) in [
+                (-1.0, remote_uplink_quality),
+                (1.0, remote_downlink_quality),
+            ] {
+                ui.place(
+                    Rect::from_center_size(radio_center + Vec2::new(0.0, 20.0 * sign), s),
+                    |ui: &mut egui::Ui| self.draw_link_quality(ui, lq),
+                );
+            }
+
+            for (sign, rssi) in [(-1.0, uplink_rssi), (1.0, downlink_rssi)] {
+                ui.place(
+                    Rect::from_center_size(radio_center + Vec2::new(0.0, 42.0 * sign), s),
+                    |ui: &mut egui::Ui| {
+                        ui.horizontal(|ui| {
+                            ui.weak("RSSI:");
+                            ui.monospace(format!("{rssi:+>3.0}"));
+                            ui.weak("dBm");
+                        })
+                        .response
+                    },
+                );
+            }
+
+            for (sign, snr) in [(-1.0, uplink_snr), (1.0, downlink_snr)] {
+                ui.place(
+                    Rect::from_center_size(radio_center + Vec2::new(0.0, 62.0 * sign), s),
+                    |ui: &mut egui::Ui| {
+                        ui.horizontal(|ui| {
+                            ui.weak("SNR: ");
+                            ui.monospace(format!("{snr:+>3.0}"));
+                            ui.weak("dB");
+                        })
+                        .response
+                    },
+                );
+            }
+        }
+
+        ui.separator();
+
+        self.draw_peers(ui, &system);
     }
 }
