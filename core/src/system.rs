@@ -253,8 +253,9 @@ impl System {
     }
 
     pub fn set_param(&self, param_id: &str, param_type: MavParamType, param_value: f32) {
+        let p_id_b = param_id.as_bytes();
         let mut param_id_bytes = [0; 16];
-        param_id_bytes.copy_from_slice(param_id.as_bytes());
+        param_id_bytes[..p_id_b.len()].copy_from_slice(p_id_b);
 
         let cmd = ParamSet {
             target_system: self.system_id,

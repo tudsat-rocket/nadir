@@ -98,7 +98,9 @@ pub async fn download_params(
     // updated with the downloaded (saved to the system/vehicle) values.
     loop {
         if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
-            let id = String::from_utf8_lossy(&value.param_id).to_string();
+            let id = String::from_utf8_lossy(&value.param_id)
+                .trim_matches('\0')
+                .to_string();
             let mut progress = system.params.lock().unwrap();
             let ParamProgress::Complete(params) = &mut *progress else {
                 continue;
