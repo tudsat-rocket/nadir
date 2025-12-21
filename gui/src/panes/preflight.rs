@@ -171,8 +171,8 @@ impl PreflightPane {
 
         let sys_status = system.last_sys_status().ok().flatten();
         let autopilot_version = system.last_autopilot_version().ok().flatten();
-        let capabilities = autopilot_version
-            .map_or(MavProtocolCapability::empty(), |av| av.capabilities);
+        let capabilities =
+            autopilot_version.map_or(MavProtocolCapability::empty(), |av| av.capabilities);
 
         let w = f32::max(20.0, ui.available_width() - 10.0);
 
