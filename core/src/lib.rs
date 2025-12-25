@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use socketcan::{EmbeddedFrame as _, ExtendedId, Id, StandardId};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::{trace, warn};
 
 use maviola::asnc::prelude::*;
 use maviola::prelude::*;
@@ -12,18 +13,16 @@ use maviola::protocol::dialects::Ardupilotmega;
 use maviola::protocol::dialects::Common;
 use mavspec::rust::dialects::common::enums::MavSeverity;
 
-use db::Db;
-
 mod can_proxy;
 mod links;
 mod protocols;
 mod stats;
 mod system;
 
+use db::Db;
 pub use links::*;
 pub use protocols::params::{Param, ParamId, ParamProgress};
 pub use system::*;
-use tracing::{trace, warn};
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
@@ -187,12 +186,11 @@ impl Core {
                             _ => {}
                         }
 
-                        if let Err(e) = self.db.write_common_message(
-                            message.clone(),
-                            frame.clone(),
-                            callback.clone(),
-                        ) {
-                            tracing::error!("Failed to process common message: {e:?}");
+                        if let Err(e) =
+                            self.db
+                                .write_message(frame.system_id(), frame.component_id(), &message)
+                        {
+                            tracing::error!("Failed to process message: {e:?}");
                         }
 
                         let links = self.links.lock().unwrap();
@@ -209,19 +207,30 @@ impl Core {
                             )
                         });
 
-                        system.notify_of_message(message, frame, callback, link.endpoint.clone());
+                        system.notify_of_common_message(
+                            message,
+                            frame,
+                            callback,
+                            link.endpoint.clone(),
+                        );
                     } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
-                        match message {
-                            Ardupilotmega::Ahrs(_) => {}
-                            Ardupilotmega::Ahrs2(_) => {}
-                            Ardupilotmega::AoaSsa(_) => {}
-                            Ardupilotmega::EkfStatusReport(_) => {}
-                            Ardupilotmega::Meminfo(_) => {}
-                            Ardupilotmega::EscTelemetry1To4(_) => {}
-                            Ardupilotmega::Wind(_) => {}
-                            Ardupilotmega::Simstate(_) => {}
-                            msg => tracing::info!("{:?}", msg),
+                        if let Err(e) =
+                            self.db
+                                .write_message(frame.system_id(), frame.component_id(), &message)
+                        {
+                            tracing::error!("Failed to process message: {e:?}");
                         }
+
+                        let links = self.links.lock().unwrap();
+                        let link = links.get(&link_id).unwrap();
+
+                        let mut systems = self.systems.lock().unwrap();
+                        let system_id = frame.system_id();
+                        let Some(system) = systems.get_mut(&system_id) else {
+                            continue;
+                        };
+
+                        system.notify_of_frame(frame, callback, link.endpoint.clone());
                     }
 
                     let mut links = self.links.lock().unwrap();

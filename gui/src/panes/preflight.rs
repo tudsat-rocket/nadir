@@ -4,7 +4,7 @@ use egui::Vec2;
 use mavspec::rust::dialects::common::enums::{
     MavProtocolCapability, MavSysStatusSensor, MavSysStatusSensorExtended,
 };
-use mavspec::rust::dialects::common::messages::SysStatus;
+use mavspec::rust::dialects::common::messages::{AutopilotVersion, SysStatus};
 
 use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING};
 use crate::panes::TreeBehavior;
@@ -169,8 +169,8 @@ impl PreflightPane {
             return;
         };
 
-        let sys_status = system.last_sys_status().ok().flatten();
-        let autopilot_version = system.last_autopilot_version().ok().flatten();
+        let sys_status = system.last_message::<SysStatus>().ok();
+        let autopilot_version = system.last_message::<AutopilotVersion>().ok();
         let capabilities =
             autopilot_version.map_or(MavProtocolCapability::empty(), |av| av.capabilities);
 

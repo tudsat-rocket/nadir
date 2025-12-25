@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
+use maviola::protocol::MessageSpec;
 use mavspec::rust::dialects::common::messages::CanFrame;
 
 #[derive(Clone)]
@@ -14,9 +15,32 @@ pub enum DbError {
     Query(#[from] rusqlite::Error),
 }
 
+pub trait MessageExt: MessageSpec {
+    fn table(&self) -> &str;
+    fn rows(&self) -> &[&str];
+
+    fn insert(
+        &self,
+        conn: &rusqlite::Connection,
+        system_id: u8,
+        component_id: u8,
+    ) -> Result<(), rusqlite::Error>;
+
+    fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error>
+    where
+        Self: Sized;
+}
+
 macro_rules! define_message_tables {
     ($conn:expr, $dialect:expr) => {
         for message in $dialect.messages() {
+            use maviola::prelude::Dialect;
+
+            // Skip messages from common in other dialects derived from it
+            if $dialect.name() != "common" && mavspec::rust::dialects::Common::message_info(message.id()).is_ok() {
+                continue;
+            }
+
             let columns: Vec<String> = message
                 .fields()
                 .iter()
@@ -94,6 +118,7 @@ impl Db {
 
         let protocol = mavspec::definitions::protocol();
         define_message_tables!(conn, protocol.get_dialect_by_name("common").unwrap());
+        define_message_tables!(conn, protocol.get_dialect_by_name("ardupilotmega").unwrap());
 
         Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -102,6 +127,91 @@ impl Db {
 
     pub fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
         self.conn.lock().unwrap()
+    }
+
+    pub fn write_message<M: MessageExt>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+        msg: &M,
+    ) -> Result<(), DbError> {
+        let conn = self.conn();
+        conn.busy_timeout(std::time::Duration::from_millis(10))?;
+        msg.insert(&conn, system_id, component_id)?;
+        Ok(())
+    }
+
+    pub fn last_message<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+    ) -> Result<M, DbError> {
+        puffin::profile_function!();
+
+        let conn = self.conn();
+        conn.busy_timeout(std::time::Duration::from_millis(10))?;
+
+        let query = format!(
+            "SELECT {} FROM {}
+                WHERE system_id=:system_id AND component_id=:component_id
+                ORDER BY received_at DESC
+                LIMIT 1",
+            M::default().rows().join(","),
+            M::default().table(),
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+        let msg = stmt.query_one(
+            &[(":system_id", &system_id), (":component_id", &component_id)],
+            |row| M::from_row(row),
+        )?;
+
+        Ok(msg)
+    }
+
+    pub fn count_message<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+    ) -> Result<usize, DbError> {
+        let conn = self.conn();
+        conn.busy_timeout(std::time::Duration::from_millis(10))?;
+
+        let mut stmt = conn.prepare(&format!(
+            "SELECT COUNT(*) FROM {}
+                WHERE system_id=:system_id AND component_id=:component_id",
+            M::default().table()
+        ))?;
+
+        let count = stmt.query_one(
+            &[(":system_id", &system_id), (":component_id", &component_id)],
+            |row| row.get(0),
+        )?;
+
+        Ok(count)
+    }
+
+    pub fn count_message_by_name(
+        &self,
+        message_name: &str,
+        system_id: u8,
+        component_id: u8,
+    ) -> Result<usize, DbError> {
+        let conn = self.conn();
+        conn.busy_timeout(std::time::Duration::from_millis(10))?;
+
+        let table_name = format!("messages_{}", message_name.to_lowercase());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT COUNT(*) FROM {table_name}
+                WHERE system_id=:system_id AND component_id=:component_id",
+        ))?;
+
+        let count = stmt.query_one(
+            &[(":system_id", &system_id), (":component_id", &component_id)],
+            |row| row.get(0),
+        )?;
+
+        Ok(count)
     }
 
     // TODO: replace with macro-generated get-all methods
@@ -130,7 +240,46 @@ impl Db {
 
         Ok(rows.filter_map(std::result::Result::ok).collect())
     }
+
+    pub fn common_timeseries_by_name_for_system(
+        &self,
+        msg_name: &str,
+        field_name: &str,
+        system_and_component_ids: (u8, u8),
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        _until: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<(chrono::DateTime<chrono::Utc>, f64)>, DbError> {
+        puffin::profile_function!(msg_name.to_owned() + "." + field_name);
+
+        let conn = self.conn();
+        let system_id = system_and_component_ids.0;
+        let component_id = system_and_component_ids.1;
+        let lower_case = msg_name.to_lowercase();
+
+        let since = since.unwrap_or_default();
+
+        // Look Ma, SQL injection
+        let query = format!(
+            "SELECT received_at, {field_name} FROM messages_{lower_case}
+                    WHERE system_id=?1 AND component_id=?2 AND received_at >= ?3
+                    ORDER BY received_at ASC"
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+        let rows = stmt.query_map(
+            rusqlite::params![&system_id, &component_id, &since],
+            |row| {
+                let timestamp: chrono::DateTime<chrono::Utc> = row.get(0)?;
+                let value: f64 = row.get(1)?;
+                Ok((timestamp, value))
+            },
+        )?;
+
+        let timeseries = rows.collect::<Result<Vec<(chrono::DateTime<chrono::Utc>, f64)>, _>>()?;
+
+        Ok(timeseries)
+    }
 }
 
-macros::generate_message_writers!();
-macros::generate_message_readers!();
+macros::implement_message_ext_for_dialect!("common", mavspec::rust::dialects::common);
+macros::implement_message_ext_for_dialect!("ardupilotmega", mavspec::rust::dialects::ardupilotmega);

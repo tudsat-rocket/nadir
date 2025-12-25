@@ -8,7 +8,7 @@ use egui::{
     Align, Align2, Color32, CornerRadius, FontFamily, FontId, Pos2, Rect, Sense, Shape, Stroke,
     TextFormat, Vec2,
 };
-use mavspec::rust::dialects::common::messages::{LocalPositionNed, VfrHud};
+use mavspec::rust::dialects::common::messages::{Attitude, LocalPositionNed, VfrHud};
 
 pub struct ArtificialHorizon {
     system: System,
@@ -355,13 +355,13 @@ impl ArtificialHorizon {
 
 impl egui::Widget for ArtificialHorizon {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let attitude = self.system.last_attitude().ok().flatten();
+        let attitude = self.system.last_message::<Attitude>().ok();
         let pitch = attitude.as_ref().map_or(0.0, |a| a.pitch);
         let roll = attitude.as_ref().map_or(0.0, |a| a.roll);
         let yaw = attitude.as_ref().map_or(0.0, |a| a.yaw);
 
-        let local_position = self.system.last_local_position_ned().ok().flatten();
-        let vfr_hud = self.system.last_vfr_hud().ok().flatten();
+        let local_position = self.system.last_message::<LocalPositionNed>().ok();
+        let vfr_hud = self.system.last_message::<VfrHud>().ok();
 
         let (response, mut painter) = ui.allocate_painter(ui.available_size(), Sense::empty());
 

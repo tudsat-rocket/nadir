@@ -8,7 +8,10 @@ use std::collections::HashMap;
 
 use eframe::egui;
 use egui::{Color32, CornerRadius, Frame, Pos2, Rect, Shape, Stroke, Style, Ui, Vec2, Widget};
-use mavspec::rust::dialects::common::enums::MavCmd;
+use mavspec::rust::dialects::common::{
+    enums::MavCmd,
+    messages::{GlobalPositionInt, HomePosition, PositionTargetGlobalInt},
+};
 use walkers::{
     HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol},
@@ -246,7 +249,7 @@ impl MapPane {
 
         let system_positions: HashMap<u8, (System, Position, f64, f64)> = systems
             .filter_map(|s| {
-                s.last_global_position_int().unwrap_or_default().map(|gps| {
+                s.last_message::<GlobalPositionInt>().ok().map(|gps| {
                     let s_id = s.system_id;
                     let pos = Position::new(
                         f64::from(gps.lon) / 10_000_000.0,
@@ -322,7 +325,7 @@ impl MapPane {
                 });
             }
 
-            if let Some(target) = system.last_target_global_int().ok().flatten() {
+            if let Ok(target) = system.last_message::<PositionTargetGlobalInt>() {
                 if let Some((_s, pos, ..)) = system_positions.get(&system.system_id) {
                     map = map.with_plugin(LinePlugin {
                         a: *pos,
@@ -345,7 +348,7 @@ impl MapPane {
                 }]));
             }
 
-            if let Some(home) = system.last_home_position().ok().flatten() {
+            if let Ok(home) = system.last_message::<HomePosition>() {
                 map = map.with_plugin(Places::new(vec![LabeledSymbol {
                     position: Position::new(
                         f64::from(home.longitude) / 10_000_000.0,

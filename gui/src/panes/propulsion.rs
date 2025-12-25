@@ -2,6 +2,7 @@ use core::{ParamProgress, System};
 
 use egui::{Button, Color32, DragValue, Frame, Grid, Image, Margin, Pos2, Rect, Stroke, Vec2};
 use mavspec::rust::dialects::common::enums::MavType;
+use mavspec::rust::dialects::common::messages::{BatteryStatus, Heartbeat, ServoOutputRaw};
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
 
 use crate::panes::TreeBehavior;
@@ -33,7 +34,7 @@ impl PropulsionPane {
 
     #[allow(clippy::similar_names)]
     fn draw_servos(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
-        let Some(servos) = system.last_servo_output_raw().ok().flatten() else {
+        let Ok(servos) = system.last_message::<ServoOutputRaw>() else {
             return;
         };
 
@@ -172,7 +173,7 @@ impl PropulsionPane {
     fn draw_rotors(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
         let n = square.width();
 
-        let Some(servos) = system.last_servo_output_raw().ok().flatten() else {
+        let Ok(servos) = system.last_message::<ServoOutputRaw>() else {
             return;
         };
 
@@ -274,7 +275,7 @@ impl PropulsionPane {
     }
 
     fn draw_battery(&mut self, ui: &mut egui::Ui, system: &System, pos: Pos2) {
-        let Some(battery) = system.last_battery_status().ok().flatten() else {
+        let Ok(battery) = system.last_message::<BatteryStatus>() else {
             return;
         };
 
@@ -303,7 +304,7 @@ impl PropulsionPane {
     fn draw_frame(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
         let n = square.width();
 
-        let Some(heartbeat) = system.last_heartbeat().ok().flatten() else {
+        let Ok(heartbeat) = system.last_message::<Heartbeat>() else {
             return;
         };
 
@@ -428,7 +429,7 @@ impl PropulsionPane {
             return;
         };
 
-        let Some(heartbeat) = system.last_heartbeat().ok().flatten() else {
+        let Ok(heartbeat) = system.last_message::<Heartbeat>() else {
             return;
         };
 

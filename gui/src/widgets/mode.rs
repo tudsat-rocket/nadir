@@ -1,7 +1,7 @@
 use core::System;
 
 use egui::RichText;
-use mavspec::rust::dialects::common::enums::MavModeFlag;
+use mavspec::rust::dialects::common::{enums::MavModeFlag, messages::Heartbeat};
 
 pub struct ModeDisplay {
     system: System,
@@ -24,7 +24,7 @@ impl ModeDisplay {
 
 impl egui::Widget for ModeDisplay {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let Some(heartbeat) = self.system.last_heartbeat().ok().flatten() else {
+        let Ok(heartbeat) = self.system.last_message::<Heartbeat>() else {
             return ui.label("");
         };
 

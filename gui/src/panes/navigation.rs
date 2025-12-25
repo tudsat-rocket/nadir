@@ -39,7 +39,7 @@ impl NavigationPane {
                 ui.add_space(5.0);
                 ui.weak("🏁 Target Data");
                 ui.add_space(5.0);
-                if let Some(target) = system.last_target_global_int().ok().flatten() {
+                if let Ok(target) = system.last_message::<PositionTargetGlobalInt>() {
                     let PositionTargetGlobalInt {
                         time_boot_ms: _,
                         coordinate_frame,
