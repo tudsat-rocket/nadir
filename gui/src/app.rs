@@ -6,6 +6,7 @@ use maviola::asnc::node::Event;
 use maviola::prelude::V2;
 use mavspec::rust::dialects::Common;
 use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
+use mavspec::rust::dialects::common::messages::Heartbeat;
 
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
@@ -183,7 +184,7 @@ impl eframe::App for App {
                             View::System(*system_id),
                             system.icon(),
                         );
-                    } else if let Some(heartbeat) = system.last_heartbeat().ok().flatten() {
+                    } else if let Ok(heartbeat) = system.last_message::<Heartbeat>() {
                         ui.horizontal(|ui| {
                             ui.monospace(format!("0x{system_id:02x}"));
                             ui.label(system.icon());

@@ -13,13 +13,10 @@ use mavspec::rust::dialects::common::enums::{
     MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
 };
 use mavspec::rust::dialects::common::messages::{
-    Attitude, AutopilotVersion, AvailableModes, BatteryStatus, CommandInt, CommandLong,
-    GlobalPositionInt, HomePosition, LinkNodeStatus, ParamSet, PositionTargetGlobalInt,
-    RadioStatus, ServoOutputRaw, SysStatus, VfrHud,
+    AvailableModes, CommandInt, CommandLong, Heartbeat, ParamSet,
 };
-use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
-use db::{Db, DbError};
+use db::{Db, DbError, MessageExt};
 use mavspec::rust::dialects::Common;
 
 use crate::protocols::params::ParamProgress;
@@ -90,68 +87,18 @@ impl System {
         system
     }
 
+    pub fn last_message<M: MessageExt + Default>(&self) -> Result<M, DbError> {
+        self.db.last_message(self.system_id, 0x1)
+    }
+
+    #[deprecated]
     pub fn last_heartbeat(&self) -> Result<Option<Heartbeat>, DbError> {
-        self.db.last_heartbeat_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_sys_status(&self) -> Result<Option<SysStatus>, DbError> {
-        self.db.last_sys_status_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_autopilot_version(&self) -> Result<Option<AutopilotVersion>, DbError> {
-        self.db
-            .last_autopilot_version_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_global_position_int(&self) -> Result<Option<GlobalPositionInt>, DbError> {
-        self.db
-            .last_global_position_int_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_local_position_ned(&self) -> Result<Option<LocalPositionNed>, DbError> {
-        self.db
-            .last_local_position_ned_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_attitude(&self) -> Result<Option<Attitude>, DbError> {
-        self.db.last_attitude_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_vfr_hud(&self) -> Result<Option<VfrHud>, DbError> {
-        self.db.last_vfr_hud_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_servo_output_raw(&self) -> Result<Option<ServoOutputRaw>, DbError> {
-        self.db
-            .last_servo_output_raw_for_system((self.system_id, 0x1))
-    }
-
-    // TODO: properly handle multiple batteries / different instance IDs
-    pub fn last_battery_status(&self) -> Result<Option<BatteryStatus>, DbError> {
-        self.db
-            .last_battery_status_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_target_global_int(&self) -> Result<Option<PositionTargetGlobalInt>, DbError> {
-        self.db
-            .last_position_target_global_int_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_home_position(&self) -> Result<Option<HomePosition>, DbError> {
-        self.db.last_home_position_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_radio_status_for_system(&self) -> Result<Option<RadioStatus>, DbError> {
-        self.db.last_radio_status_for_system((self.system_id, 0x1))
-    }
-
-    pub fn last_link_node_status_for_system(&self) -> Result<Option<LinkNodeStatus>, DbError> {
-        self.db
-            .last_link_node_status_for_system((self.system_id, 0x1))
+        // TODO: cache last heartbeat, don't go through the database for this.
+        self.last_message().map(Some)
     }
 
     pub fn mav_type(&self) -> MavType {
-        match self.last_heartbeat().unwrap_or(None).map(|hb| hb.type_) {
+        match self.last_message::<Heartbeat>().ok().map(|hb| hb.type_) {
             Some(mt) => mt,
             None => MavType::Generic,
         }
@@ -277,7 +224,7 @@ impl System {
         self.send_message(&cmd);
     }
 
-    pub fn notify_of_message(
+    pub fn notify_of_common_message(
         &mut self,
         message: Common,
         frame: &Frame<V2>,
@@ -285,7 +232,15 @@ impl System {
         endpoint: Arc<Mutex<Endpoint<V2>>>,
     ) {
         let _ = self.message_sender.send(message);
+        self.notify_of_frame(frame, callback, endpoint);
+    }
 
+    pub fn notify_of_frame(
+        &mut self,
+        frame: &Frame<V2>,
+        callback: &Callback<V2>,
+        endpoint: Arc<Mutex<Endpoint<V2>>>,
+    ) {
         let mut conninfo = self.conn.lock().unwrap();
 
         conninfo.callback = callback.clone();
@@ -320,7 +275,7 @@ impl System {
     }
 
     pub fn current_mode_info(&self) -> Option<AvailableModes> {
-        let heartbeat = self.last_heartbeat().ok().flatten()?;
+        let heartbeat = self.last_message::<Heartbeat>().ok()?;
 
         if heartbeat
             .base_mode

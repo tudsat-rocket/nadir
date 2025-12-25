@@ -1,6 +1,6 @@
 use mavspec::rust::dialects::ardupilotmega::enums::PlaneMode;
 use mavspec::rust::dialects::common::enums::{MavAutopilot, MavModeFlag, MavStandardMode, MavType};
-use mavspec::rust::dialects::common::messages::Heartbeat;
+use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
 
 use eframe::egui;
 use egui::{Align, Button, Color32, Frame, Layout, RichText, Separator, Vec2};
@@ -25,16 +25,16 @@ impl StatusPane {
             return;
         };
 
-        let local_position = system.last_local_position_ned().ok().flatten();
+        let local_position = system.last_message::<LocalPositionNed>().ok();
 
-        let Some(Heartbeat {
+        let Ok(Heartbeat {
             type_: mav_type,
             autopilot,
             base_mode,
             custom_mode,
             system_status,
             mavlink_version: _,
-        }) = system.last_heartbeat().unwrap_or_default()
+        }) = system.last_message::<Heartbeat>()
         else {
             return;
         };

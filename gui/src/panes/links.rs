@@ -3,6 +3,7 @@ use core::System;
 use eframe::egui;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
 use maviola::core::io::ChannelDetails;
+use mavspec::rust::dialects::common::messages::{LinkNodeStatus, RadioStatus};
 
 use crate::{
     colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING},
@@ -158,16 +159,11 @@ impl LinksPane {
             .sum::<f32>()
             / down_packets;
 
-        let radio_status = system.last_radio_status_for_system().ok().flatten();
+        let radio_status = system.last_message::<RadioStatus>().ok();
 
-        let local_uplink_quality = system
-            .last_link_node_status_for_system()
-            .ok()
-            .flatten()
-            .map(|lns| {
-                (lns.messages_received as f32)
-                    / ((lns.messages_received + lns.messages_lost) as f32)
-            });
+        let local_uplink_quality = system.last_message::<LinkNodeStatus>().ok().map(|lns| {
+            (lns.messages_received as f32) / ((lns.messages_received + lns.messages_lost) as f32)
+        });
         let local_downlink_quality = Some(1.0 - down_packet_loss);
 
         let remote_uplink_quality = radio_status

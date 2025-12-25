@@ -12,12 +12,20 @@ pub struct PlotPane {
 }
 
 macro_rules! draw_field_selector {
-    ($ui:expr, $behavior:expr, $active:expr, $dialect:expr) => {
-        let mut message_names: Vec<_> = $dialect.messages().into_iter().map(|m| m.name()).collect();
+    ($ui:expr, $behavior:expr, $active:expr, $dialect_name:expr) => {
+        let protocol = mavspec::definitions::protocol();
+        let common = protocol.get_dialect_by_name("common").unwrap();
+        let dialect = protocol.get_dialect_by_name($dialect_name).unwrap();
+
+        let mut message_names: Vec<_> = dialect.messages().into_iter().map(|m| m.name()).collect();
         message_names.sort();
 
         for message_name in message_names {
-            let message = $dialect.get_message_by_name(message_name).unwrap();
+            if $dialect_name != "common" && common.get_message_by_name(&message_name).is_some() {
+                continue;
+            }
+
+            let message = dialect.get_message_by_name(message_name).unwrap();
 
             let crate::views::View::System(system_id) = $behavior.active_view else {
                 continue;
@@ -26,7 +34,7 @@ macro_rules! draw_field_selector {
             let count = $behavior
                 .core
                 .db
-                .common_count_by_name_for_system(message.name(), (system_id, 1))
+                .count_message_by_name(message.name(), system_id, 1)
                 .unwrap_or(0);
             if count == 0 {
                 continue;
@@ -76,9 +84,6 @@ impl PlotPane {
     }
 
     pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let protocol = mavspec::definitions::protocol();
-        let dialect = protocol.get_dialect_by_name("common").unwrap();
-
         let View::System(system_id) = behavior.active_view else {
             return;
         };
@@ -91,7 +96,13 @@ impl PlotPane {
                         let width = f32::min(ui.available_width() * 0.4, 300.0);
                         ui.set_width(width);
 
-                        draw_field_selector!(ui, behavior, &mut self.active_fields, dialect);
+                        draw_field_selector!(ui, behavior, &mut self.active_fields, "common");
+                        draw_field_selector!(
+                            ui,
+                            behavior,
+                            &mut self.active_fields,
+                            "ardupilotmega"
+                        );
                     });
                 });
 
