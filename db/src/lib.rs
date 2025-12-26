@@ -285,5 +285,13 @@ impl Db {
     }
 }
 
-macros::implement_message_ext_for_dialect!("common", mavspec::rust::dialects::common);
-macros::implement_message_ext_for_dialect!("ardupilotmega", mavspec::rust::dialects::ardupilotmega);
+macros::implement_message_ext_for_dialect!(
+    "common",
+    mavspec::rust::dialects::Common,
+    mavspec::rust::dialects::common
+);
+macros::implement_message_ext_for_dialect!(
+    "ardupilotmega",
+    mavspec::rust::dialects::Ardupilotmega,
+    mavspec::rust::dialects::ardupilotmega
+);
