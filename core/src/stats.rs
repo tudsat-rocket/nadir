@@ -52,7 +52,7 @@ impl ChannelStats {
         let mut total: u64 = 0;
         for p2 in self.rx_last_1s.iter().skip(1) {
             let diff = p2.1.wrapping_sub(p.1);
-            missed += u64::from(diff - 1);
+            missed += u64::max(u64::from(diff), 1) - 1;
             total += u64::from(diff);
             p = p2;
         }
