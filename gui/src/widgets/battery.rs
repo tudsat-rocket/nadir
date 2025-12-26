@@ -1,4 +1,4 @@
-use egui::{CornerRadius, Frame, Sense, Vec2};
+use egui::{Align, CornerRadius, Frame, Layout, Sense, Vec2};
 
 use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING};
 
@@ -40,38 +40,26 @@ impl egui::Widget for BatteryIndicator {
                     fill_rect.set_top(fill_rect.bottom() - self.soc * fill_rect.height());
                     painter.rect_filled(fill_rect, CornerRadius::ZERO, color);
 
-                    egui::Grid::new(ui.next_auto_id())
-                        .num_columns(2)
-                        .show(ui, |ui| {
-                            ui.weak("#");
-                            ui.label(format!("{}", self.id));
-                            ui.end_row();
+                    ui.with_layout(Layout::top_down(Align::RIGHT), |ui| {
+                        ui.weak(format!("#{}", self.id));
+                        ui.add_space(5.0);
 
-                            ui.weak("SoC");
-                            ui.colored_label(color, format!("{:>3.0}%", self.soc * 100.0));
-                            ui.end_row();
+                        ui.colored_label(color, format!("{:>3.0}%", self.soc * 100.0));
 
-                            if let Some(u) = self.voltage {
-                                ui.weak("Vlt.");
-                                ui.colored_label(color, format!("{u:.1}V"));
-                                ui.end_row();
-                            }
+                        if let Some(u) = self.voltage {
+                            ui.colored_label(color, format!("{u:.1}V"));
+                        }
 
-                            if let Some(i) = self.current {
-                                ui.weak("Cur.");
-                                ui.colored_label(color, format!("{i:.1}A"));
-                                ui.end_row();
-                            }
+                        if let Some(i) = self.current {
+                            ui.colored_label(color, format!("{i:.1}A"));
+                        }
 
-                            if let Some(cap) = self.consumed {
-                                ui.weak("Con.");
-                                ui.label(format!("{cap:.0}"));
-                                ui.end_row();
-                                ui.weak("");
-                                ui.weak("mAh");
-                                ui.end_row();
-                            }
-                        });
+                        if let Some(cap) = self.consumed {
+                            ui.add_space(5.0);
+                            ui.label(format!("{cap:.0}"));
+                            ui.weak("mAh");
+                        }
+                    });
                 });
             })
             .response
