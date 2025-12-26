@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use maviola::protocol::MessageSpec;
-use mavspec::rust::dialects::common::messages::CanFrame;
 
 #[derive(Clone)]
 pub struct Db {
@@ -169,6 +168,39 @@ impl Db {
         Ok(msg)
     }
 
+    pub fn all_messages<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+        puffin::profile_function!();
+
+        let conn = self.conn();
+        conn.busy_timeout(std::time::Duration::from_millis(10))?;
+
+        let query = format!(
+            "SELECT {}, received_at FROM {}
+                WHERE system_id=:system_id AND component_id=:component_id
+                ORDER BY received_at ASC",
+            M::default().rows().join(","),
+            M::default().table(),
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+        let rows = stmt
+            .query_map(
+                &[(":system_id", &system_id), (":component_id", &component_id)],
+                |row| {
+                    let m = M::from_row(row)?;
+                    let t: DateTime<Utc> = row.get(M::default().rows().len())?;
+                    Ok((t, m))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    }
+
     pub fn count_message<M: MessageExt + Default>(
         &self,
         system_id: u8,
@@ -214,46 +246,18 @@ impl Db {
         Ok(count)
     }
 
-    // TODO: replace with macro-generated get-all methods
-    pub fn can_frames_for_system(
-        &self,
-        system_and_component_ids: (u8, u8),
-    ) -> Result<Vec<(DateTime<Utc>, CanFrame)>, DbError> {
-        let system_id = system_and_component_ids.0;
-        let component_id = system_and_component_ids.1;
-
-        let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT received_at, bus, id, len, data FROM messages_can_frame WHERE system_id=?1 AND component_id=?2")?;
-        let rows = stmt.query_map(rusqlite::params![&system_id, &component_id,], |row| {
-            Ok((
-                row.get(0)?,
-                CanFrame {
-                    target_system: 0xff,
-                    target_component: 0xff,
-                    bus: row.get(1)?,
-                    id: row.get(2)?,
-                    len: row.get(3)?,
-                    data: row.get(4)?,
-                },
-            ))
-        })?;
-
-        Ok(rows.filter_map(std::result::Result::ok).collect())
-    }
-
-    pub fn common_timeseries_by_name_for_system(
+    pub fn timeseries_by_name(
         &self,
         msg_name: &str,
         field_name: &str,
-        system_and_component_ids: (u8, u8),
+        system_id: u8,
+        component_id: u8,
         since: Option<chrono::DateTime<chrono::Utc>>,
         _until: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Vec<(chrono::DateTime<chrono::Utc>, f64)>, DbError> {
         puffin::profile_function!(msg_name.to_owned() + "." + field_name);
 
         let conn = self.conn();
-        let system_id = system_and_component_ids.0;
-        let component_id = system_and_component_ids.1;
         let lower_case = msg_name.to_lowercase();
 
         let since = since.unwrap_or_default();
