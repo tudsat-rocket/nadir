@@ -3,7 +3,7 @@
 use chrono::TimeDelta;
 use eframe::egui;
 use eframe::egui::PointerButton;
-use egui::Color32;
+use egui::{Color32, TextStyle};
 use egui_plot::{Corner, Legend};
 
 use maviola::protocol::{ComponentId, SystemId};
@@ -83,6 +83,7 @@ impl egui::Widget for Plot<'_> {
 
         let legend = Legend::default()
             .background_alpha(0.5)
+            .text_style(TextStyle::Small)
             .position(Corner::LeftTop);
 
         // Weaken the text color, used for the grid lines.
