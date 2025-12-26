@@ -141,10 +141,11 @@ impl egui::Widget for Plot<'_> {
                 let id = format!("{}.{}", line.message_name, line.field_name);
                 let name = line.alias.unwrap_or(id);
 
-                let timeseries = match self.core.db.common_timeseries_by_name_for_system(
+                let timeseries = match self.core.db.timeseries_by_name(
                     &line.message_name,
                     &line.field_name,
-                    (line.system_id, line.component_id),
+                    line.system_id,
+                    line.component_id,
                     Some(since),
                     None,
                 ) {

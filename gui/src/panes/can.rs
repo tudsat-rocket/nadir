@@ -89,11 +89,7 @@ impl CanProbePane {
 
                 ui.separator();
 
-                let mut frames = behavior
-                    .core
-                    .db
-                    .can_frames_for_system((system_id, 0x01))
-                    .unwrap();
+                let mut frames = system.all_messages::<CanFrame>().unwrap_or_default();
 
                 let table = TableBuilder::new(ui)
                     .striped(true)

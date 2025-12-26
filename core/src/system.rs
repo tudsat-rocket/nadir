@@ -2,6 +2,7 @@ use core::f32;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use maviola::asnc::node::Callback;
 use maviola::core::io::{ChannelId, ChannelInfo};
 use maviola::prelude::Frame;
@@ -88,7 +89,13 @@ impl System {
     }
 
     pub fn last_message<M: MessageExt + Default>(&self) -> Result<M, DbError> {
-        self.db.last_message(self.system_id, 0x1)
+        self.db.last_message(self.system_id, 0x01)
+    }
+
+    pub fn all_messages<M: MessageExt + Default>(
+        &self,
+    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+        self.db.all_messages(self.system_id, 0x01)
     }
 
     #[deprecated]
