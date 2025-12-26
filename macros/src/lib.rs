@@ -11,6 +11,8 @@ use mavinspect::protocol::{MavType, MessageField};
 struct MacroInput {
     dialect_name: syn::LitStr,
     comma: syn::Token![,],
+    dialect_type: syn::Path,
+    comma2: syn::Token![,],
     dialect_mod: syn::Path,
 }
 
@@ -19,6 +21,8 @@ impl syn::parse::Parse for MacroInput {
         Ok(Self {
             dialect_name: input.parse()?,
             comma: input.parse()?,
+            dialect_type: input.parse()?,
+            comma2: input.parse()?,
             dialect_mod: input.parse()?,
         })
     }
@@ -28,6 +32,7 @@ impl syn::parse::Parse for MacroInput {
 pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
     let input = parse_macro_input!(args as MacroInput);
     let dialect_name = input.dialect_name.value();
+    let dialect_type = input.dialect_type;
     let dialect_mod = input.dialect_mod;
 
     let protocol = mavspec::definitions::protocol();
@@ -65,13 +70,6 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
             }
         })
         .collect();
-
-    #[allow(clippy::unimplemented)]
-    let dialect_type = match dialect_name.as_str() {
-        "common" => quote!(mavspec::rust::dialects::Common),
-        "ardupilotmega" => quote!(mavspec::rust::dialects::Ardupilotmega),
-        _ => unimplemented!(),
-    };
 
     // We derive `MessageExt` for the main enum for each dialect as well. We only use the insertion
     // functionality of that right now, maybe that should be refactored into a separate trait.
@@ -257,10 +255,10 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         component_id: u8
                     ) -> Result<(), rusqlite::Error> {
                         let query = format!(
-                            "INSERT INTO messages_{}
+                            "INSERT INTO {}
                                 (received_at, system_id, component_id, {})
                                 VALUES (:received_at, :system_id, :component_id, {})",
-                            #lower_case,
+                            #table_name,
                             #row_names_list,
                             #param_names_list,
                         );
