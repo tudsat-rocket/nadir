@@ -51,6 +51,15 @@ impl egui::Widget for BatteryIndicator {
                         }
 
                         if let Some(i) = self.current {
+                            const I_MIN: f32 = 0.1;
+                            const I_MAX: f32 = 10.0;
+                            let i_log = (f32::max(i / I_MAX, I_MIN).log2() - I_MIN.log2())
+                                / (-I_MIN.log2());
+
+                            let color = ui.visuals().weak_text_color().lerp_to_gamma(
+                                ui.visuals().strong_text_color(),
+                                f32::min(i_log, 1.0),
+                            );
                             ui.colored_label(color, format!("{i:.1}A"));
                         }
 
