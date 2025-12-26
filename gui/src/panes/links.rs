@@ -281,7 +281,7 @@ impl LinksPane {
                     |ui: &mut egui::Ui| {
                         ui.horizontal(|ui| {
                             ui.weak("RSSI:");
-                            ui.monospace(format!("{rssi:+>3.0}"));
+                            ui.monospace(format!("{rssi:>+3.0}"));
                             ui.weak("dBm");
                         })
                         .response
@@ -295,7 +295,7 @@ impl LinksPane {
                     |ui: &mut egui::Ui| {
                         ui.horizontal(|ui| {
                             ui.weak("SNR: ");
-                            ui.monospace(format!("{snr:+>3.0}"));
+                            ui.monospace(format!("{snr:>+3.0}"));
                             ui.weak("dB");
                         })
                         .response
