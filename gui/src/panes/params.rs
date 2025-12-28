@@ -53,16 +53,16 @@ impl PaneUi for ParamsPane {
 
                     let mut param_ids: Vec<_> = params
                         .keys()
-                        .cloned()
                         .filter(|id| id.to_lowercase().contains(&self.search.to_lowercase()))
                         .filter(|id| {
                             if self.filter_changed {
-                                let p = params.get(id).unwrap();
+                                let p = params.get(*id).unwrap();
                                 p.value != p.downloaded_value
                             } else {
                                 true
                             }
                         })
+                        .cloned()
                         .collect();
                     param_ids.sort();
 

@@ -1,17 +1,22 @@
 use core::f32;
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use maviola::protocol::ComponentId;
-use mavspec::rust::dialects::{
-    Common,
-    common::{
-        enums::{MavParamType, MavResult},
-        messages::ParamRequestList,
+use mavspec::rust::{
+    default_dialect::messages::ParamValue,
+    dialects::{
+        Common,
+        common::{
+            enums::{MavParamType, MavResult},
+            messages::{ParamRequestList, ParamRequestRead},
+        },
     },
 };
-use tokio::time::timeout;
 
-use crate::System;
+use crate::{
+    System,
+    protocols::{Gatherable, gather},
+};
 
 pub type ParamId = String;
 
@@ -31,6 +36,56 @@ pub enum ParamProgress {
     Complete(HashMap<ParamId, Param>),
 }
 
+impl Gatherable for ParamValue {
+    type InitialRequest = ParamRequestList;
+    type SpecificRequest = ParamRequestRead;
+
+    fn index(&self) -> usize {
+        self.param_index as usize
+    }
+
+    fn count(&self) -> usize {
+        self.param_count as usize
+    }
+
+    fn unpack(msg: Common) -> Option<Self> {
+        match msg {
+            Common::ParamValue(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
+    fn initial_request(system_id: u8, component_id: u8) -> Self::InitialRequest {
+        ParamRequestList {
+            target_system: system_id,
+            target_component: component_id,
+        }
+    }
+
+    fn specific_request(system_id: u8, component_id: u8, index: usize) -> Self::SpecificRequest {
+        ParamRequestRead {
+            target_system: system_id,
+            target_component: component_id,
+            param_id: [0x00; 16],
+            param_index: index as i16,
+        }
+    }
+}
+
+impl From<ParamValue> for Param {
+    fn from(value: ParamValue) -> Self {
+        let id = String::from_utf8_lossy(&value.param_id).to_string();
+        let trimmed = id.trim_matches('\0').to_string();
+
+        Param {
+            id: trimmed,
+            param_type: value.param_type,
+            value: value.param_value,
+            downloaded_value: value.param_value,
+        }
+    }
+}
+
 pub async fn download_params(
     system: System,
     component_id: ComponentId,
@@ -44,54 +99,31 @@ pub async fn download_params(
     //    }
     //};
 
-    tracing::debug!(system_id = system.system_id, "Downloading params");
+    let params = system.params.clone();
+    let result = gather(
+        &system,
+        component_id,
+        &mut message_rx,
+        Some(Box::new(move |received, total| {
+            *params.lock().unwrap() = ParamProgress::Progress(received, total);
+        })),
+    )
+    .await;
 
-    // First we download a complete list of parameters...
-    // TODO: more robust behaviour for failures, manually redownload missed params, etc.
-    system.send_message(&ParamRequestList {
-        target_system: system.system_id,
-        target_component: component_id,
-    });
+    match result {
+        Ok(params_vec) => {
+            let map: HashMap<_, _> = params_vec
+                .into_iter()
+                .map(|p: ParamValue| {
+                    let param: Param = p.into();
+                    (param.id.clone(), param)
+                })
+                .collect();
 
-    let mut number_params: Option<usize> = None;
-    let mut params: HashMap<ParamId, Param> = HashMap::new();
-    while number_params.is_none_or(|num| params.len() < num) {
-        match timeout(Duration::from_millis(1000), async {
-            loop {
-                if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
-                    return value;
-                }
-            }
-        })
-        .await
-        {
-            Ok(param) => {
-                let id = String::from_utf8_lossy(&param.param_id).to_string();
-                let count = param.param_count as usize;
-                number_params = Some(count);
-                params.insert(
-                    id.trim_matches('\0').to_string(),
-                    Param {
-                        id,
-                        param_type: param.param_type,
-                        value: param.param_value,
-                        downloaded_value: param.param_value,
-                    },
-                );
-
-                *system.params.lock().unwrap() =
-                    ParamProgress::Progress(param.param_index as usize, count);
-            }
-            Err(e) => {
-                // TODO: back off here, or check MAVLink capabilities first?
-                tracing::error!("Parameter download failed ({e:?}), retrying in 5s.");
-                tokio::time::sleep(Duration::from_millis(5000)).await;
-                break;
-            }
+            *system.params.lock().unwrap() = ParamProgress::Complete(map);
         }
+        Err(res) => *system.params.lock().unwrap() = ParamProgress::Failed(res),
     }
-
-    *system.params.lock().unwrap() = ParamProgress::Complete(params);
 
     // Now we maintain the list. If a change is made from the UI, the system responds with another
     // PARAM_VALUE message, so we listen for these from this task and keep our parameter storage
