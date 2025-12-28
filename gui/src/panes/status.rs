@@ -1,3 +1,5 @@
+use core::System;
+
 use mavspec::rust::dialects::ardupilotmega::enums::PlaneMode;
 use mavspec::rust::dialects::common::enums::{MavAutopilot, MavModeFlag, MavStandardMode, MavType};
 use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
@@ -6,8 +8,8 @@ use eframe::egui;
 use egui::{Align, Button, Color32, Frame, Layout, RichText, Separator, Vec2};
 
 use crate::colors::COLOR_INDICATOR_WARNING;
+use crate::panes::PaneUi;
 use crate::widgets::{AutopilotLogo, MavStateIndicator, ModeDisplay, ModeDropdown};
-use crate::{panes::TreeBehavior, views::View};
 
 pub struct StatusPane {}
 
@@ -15,16 +17,14 @@ impl StatusPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
+impl PaneUi for StatusPane {
+    fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
+        0.0
+    }
 
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
-
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         let local_position = system.last_message::<LocalPositionNed>().ok();
 
         let Ok(Heartbeat {
@@ -57,7 +57,7 @@ impl StatusPane {
 
                 ui.horizontal(|ui| {
                     ui.weak("System");
-                    ui.monospace(format!("0x{system_id:02}"));
+                    ui.monospace(format!("0x{:02}", system.system_id));
                     ui.add_space(5.0);
                     ui.add(MavStateIndicator(system_status));
                     ui.add_space(5.0);

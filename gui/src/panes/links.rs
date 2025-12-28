@@ -7,8 +7,7 @@ use mavspec::rust::dialects::common::messages::{LinkNodeStatus, RadioStatus};
 
 use crate::{
     colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING},
-    panes::TreeBehavior,
-    views::View,
+    panes::PaneUi,
 };
 
 pub struct LinksPane {}
@@ -19,43 +18,37 @@ impl LinksPane {
     }
 
     fn draw_peers(&mut self, ui: &mut egui::Ui, system: &System) {
-        ui.horizontal(|ui| {
-            ui.add_space(5.0);
-            ui.weak("🖧 Links");
-        });
+        ui.weak("🖧 Links");
 
         for (info, _) in system.channels() {
-            ui.horizontal(|ui| {
-                ui.add_space(5.0);
-                match info.details() {
-                    ChannelDetails::TcpClient { server_addr } => {
-                        ui.horizontal(|ui| {
-                            ui.weak("TCP");
-                            ui.label(format!("{server_addr}"));
-                        });
-                    }
-                    ChannelDetails::UdpServer {
-                        server_addr,
-                        peer_addr,
-                    } => {
-                        ui.horizontal(|ui| {
-                            ui.weak("UDP");
-                            ui.label(format!("{server_addr}"));
-                            ui.weak("↔");
-                            ui.label(format!("{peer_addr}"));
-                        });
-                    }
-                    ChannelDetails::SerialPort { path, baud_rate: _ } => {
-                        ui.horizontal(|ui| {
-                            ui.weak("USB");
-                            ui.label(path.clone());
-                        });
-                    }
-                    _ => {
-                        tracing::warn!("unimplemented channelinfo");
-                    }
+            match info.details() {
+                ChannelDetails::TcpClient { server_addr } => {
+                    ui.horizontal(|ui| {
+                        ui.weak("TCP");
+                        ui.label(format!("{server_addr}"));
+                    });
                 }
-            });
+                ChannelDetails::UdpServer {
+                    server_addr,
+                    peer_addr,
+                } => {
+                    ui.horizontal(|ui| {
+                        ui.weak("UDP");
+                        ui.label(format!("{server_addr}"));
+                        ui.weak("↔");
+                        ui.label(format!("{peer_addr}"));
+                    });
+                }
+                ChannelDetails::SerialPort { path, baud_rate: _ } => {
+                    ui.horizontal(|ui| {
+                        ui.weak("USB");
+                        ui.label(path.clone());
+                    });
+                }
+                _ => {
+                    tracing::warn!("unimplemented channelinfo");
+                }
+            }
         }
     }
 
@@ -118,16 +111,10 @@ impl LinksPane {
 
         ui.colored_label(color, format!("{:.0}%", 100.0 * lq.unwrap_or(0.0)))
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
-
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
-
+impl PaneUi for LinksPane {
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         let up_packets: f32 = system
             .channels()
             .iter_mut()
@@ -175,7 +162,7 @@ impl LinksPane {
 
         let (response, painter) =
             ui.allocate_painter(Vec2::new(ui.available_width(), 150.0), Sense::empty());
-        let rect = response.rect.shrink(20.0);
+        let rect = response.rect.shrink(10.0);
 
         let icon_font = FontId::proportional(18.0);
         let weak = ui.visuals().weak_text_color();

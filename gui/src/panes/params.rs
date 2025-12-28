@@ -1,9 +1,9 @@
 use eframe::egui;
 use egui::{Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, Vec2};
 
-use core::ParamProgress;
+use core::{ParamProgress, System};
 
-use crate::{panes::TreeBehavior, views::View};
+use crate::panes::PaneUi;
 
 pub struct ParamsPane {}
 
@@ -11,16 +11,14 @@ impl ParamsPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
+impl PaneUi for ParamsPane {
+    fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
+        0.0
+    }
 
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
-
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         let mut params = system.params.lock().unwrap();
         match &mut *params {
             ParamProgress::Unknown => {

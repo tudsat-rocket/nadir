@@ -1,6 +1,8 @@
+use core::System;
+
 use eframe::egui;
 
-use crate::panes::TreeBehavior;
+use crate::panes::PaneUi;
 
 pub struct MessagesPane {}
 
@@ -8,8 +10,10 @@ impl MessagesPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, _behavior: &mut TreeBehavior) {
+impl PaneUi for MessagesPane {
+    fn system_ui(&mut self, ui: &mut egui::Ui, _system: System) {
         ui.centered_and_justified(|ui| {
             ui.weak("To be implemented: display all received message types");
         });

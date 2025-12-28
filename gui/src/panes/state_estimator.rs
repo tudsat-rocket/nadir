@@ -1,4 +1,4 @@
-use crate::panes::TreeBehavior;
+use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
 use crate::widgets::{Plot, PlotLine};
 
@@ -8,8 +8,10 @@ impl StateEstimatorPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+impl PaneUi for StateEstimatorPane {
+    fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
         let View::System(system_id) = behavior.active_view else {
             return;
         };
