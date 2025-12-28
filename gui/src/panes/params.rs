@@ -1,15 +1,23 @@
 use eframe::egui;
-use egui::{Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, Vec2};
+use egui::{
+    Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, TextEdit, Vec2,
+};
 
 use core::{ParamProgress, System};
 
 use crate::panes::PaneUi;
 
-pub struct ParamsPane {}
+pub struct ParamsPane {
+    pub search: String,
+    pub filter_changed: bool,
+}
 
 impl ParamsPane {
     pub fn new(_ctx: &egui::Context) -> Self {
-        Self {}
+        Self {
+            search: String::new(),
+            filter_changed: false,
+        }
     }
 }
 
@@ -29,11 +37,33 @@ impl PaneUi for ParamsPane {
                 ui.add(pb);
             }
             ParamProgress::Complete(params) => {
+                ui.horizontal(|ui| {
+                    ui.add_space(5.0);
+                    ui.set_height(25.0);
+                    ui.weak("Filter");
+                    ui.add(TextEdit::singleline(&mut self.search));
+                    ui.checkbox(&mut self.filter_changed, "Only Show Changed");
+                });
+
+                ui.separator();
+
                 ScrollArea::vertical().show(ui, |ui| {
                     let w = ui.available_width();
                     ui.set_width(w);
 
-                    let mut param_ids: Vec<_> = params.keys().cloned().collect();
+                    let mut param_ids: Vec<_> = params
+                        .keys()
+                        .cloned()
+                        .filter(|id| id.to_lowercase().contains(&self.search.to_lowercase()))
+                        .filter(|id| {
+                            if self.filter_changed {
+                                let p = params.get(id).unwrap();
+                                p.value != p.downloaded_value
+                            } else {
+                                true
+                            }
+                        })
+                        .collect();
                     param_ids.sort();
 
                     let param_id_chunks = param_ids.chunk_by(|a, b| {
@@ -42,24 +72,17 @@ impl PaneUi for ParamsPane {
                         a_cat == b_cat
                     });
 
+                    let button_w = f32::max(w * 0.15, 50.0);
+                    let spacing = ui.spacing().item_spacing;
+                    let col_w = f32::max(50.0, (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0);
+                    let col_h = 20.0;
+
                     for chunk in param_id_chunks {
                         let cat = chunk[0].split_once('_').map_or(chunk[0].as_str(), |s| s.0);
                         CollapsingHeader::new(cat)
-                            .default_open(true)
+                            .default_open(false)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-
                                 Grid::new(ui.next_auto_id()).striped(true).show(ui, |ui| {
-                                    ui.set_width(ui.available_width());
-
-                                    let button_w = 100.0;
-                                    let spacing = ui.spacing().item_spacing;
-                                    let col_w = f32::max(
-                                        200.0,
-                                        (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0,
-                                    );
-                                    let col_h = 20.0;
-
                                     for param_id in chunk {
                                         let param = params.get_mut(param_id).unwrap();
                                         ui.vertical(|ui| {
