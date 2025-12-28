@@ -3,7 +3,7 @@ use egui::{
     Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, TextEdit, Vec2,
 };
 
-use core::{ParamProgress, System};
+use core::{ParamProgress, ParamVal, System};
 
 use crate::panes::PaneUi;
 
@@ -95,7 +95,17 @@ impl PaneUi for ParamsPane {
                                         });
                                         ui.add_sized(
                                             Vec2::new(col_w, col_h),
-                                            DragValue::new(&mut param.value),
+                                            match param.value {
+                                                ParamVal::Int8(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint8(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int16(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint16(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int32(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint32(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int64(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint64(ref mut u) => DragValue::new(u),
+                                                ParamVal::Float32(ref mut f) => DragValue::new(f),
+                                            },
                                         );
                                         ui.horizontal(|ui| {
                                             let size = Vec2::new(button_w, col_h);
@@ -113,11 +123,7 @@ impl PaneUi for ParamsPane {
                                                     .add_sized(size, Button::new("💾 Save"))
                                                     .clicked()
                                                 {
-                                                    system.set_param(
-                                                        param_id,
-                                                        param.param_type,
-                                                        param.value,
-                                                    );
+                                                    system.set_param(param_id, param.value);
                                                 }
                                             }
                                         });

@@ -94,8 +94,8 @@ impl PropulsionPane {
                 .show(ui, |ui| {
                     ui.add(Dial {
                         value: f32::from(servos.servo3_raw),
-                        min: mins[2].unwrap_or(1000.0),
-                        max: maxs[2].unwrap_or(2000.0),
+                        min: mins[2].map_or(1000.0, core::ParamVal::as_float),
+                        max: maxs[2].map_or(2000.0, core::ParamVal::as_float),
                         absolute_min: 1000.0,
                         absolute_max: 2000.0,
                         trim: None,
@@ -135,11 +135,11 @@ impl PropulsionPane {
                                     Vec2::new(80.0, 50.0),
                                     Dial {
                                         value: f32::from(all_servos[i]),
-                                        min: mins[i].unwrap_or(1000.0),
-                                        max: maxs[i].unwrap_or(2000.0),
+                                        min: mins[i].map_or(1000.0, core::ParamVal::as_float),
+                                        max: maxs[i].map_or(2000.0, core::ParamVal::as_float),
                                         absolute_min: 1000.0,
                                         absolute_max: 2000.0,
-                                        trim: trims[i],
+                                        trim: trims[i].map(core::ParamVal::as_float),
                                     },
                                 );
                             });
@@ -185,17 +185,25 @@ impl PropulsionPane {
             return;
         };
 
-        let count = i32::from_be_bytes(count_param.value.to_be_bytes());
+        let count = count_param.value.as_unsigned_int();
 
         let Some(px): Option<Vec<f32>> = (0..count)
-            .map(|i| params.get(&format!("CA_ROTOR{i}_PX")).map(|p| p.value))
+            .map(|i| {
+                params
+                    .get(&format!("CA_ROTOR{i}_PX"))
+                    .map(|p| p.value.as_float())
+            })
             .collect()
         else {
             return;
         };
 
         let Some(py): Option<Vec<f32>> = (0..count)
-            .map(|i| params.get(&format!("CA_ROTOR{i}_PY")).map(|p| p.value))
+            .map(|i| {
+                params
+                    .get(&format!("CA_ROTOR{i}_PY"))
+                    .map(|p| p.value.as_float())
+            })
             .collect()
         else {
             return;
@@ -298,15 +306,18 @@ impl PropulsionPane {
             return;
         };
 
-        let positions = match (frame_class.value, frame_type.value) {
+        let positions = match (
+            frame_class.value.as_unsigned_int(),
+            frame_type.value.as_unsigned_int(),
+        ) {
             // Quad Plus & X
-            (1.0, 0.0) => vec![
+            (1, 0) => vec![
                 Vec2::new(1.0, 0.0),
                 Vec2::new(-1.0, 0.0),
                 Vec2::new(0.0, -1.0),
                 Vec2::new(0.0, 1.0),
             ],
-            (1.0, 1.0) => vec![
+            (1, 1) => vec![
                 Vec2::new(0.95, -0.95),
                 Vec2::new(-0.95, 0.95),
                 Vec2::new(-0.95, -0.95),

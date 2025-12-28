@@ -27,7 +27,7 @@ TODO: not implemented
 |--------------------------|------------------|
 | Heartbeat                | ✔️ Supported     |
 | Mission                  | ❌ Not Supported |
-| Parameters               | 🚧 Basic Support |
+| Parameters               | ✔️ Supported     |
 | Command                  | 🚧 Basic Support |
 | Manual Control / RC      | ❌ Not Supported |
 | Camera (v2)              | ❌ Not Supported |

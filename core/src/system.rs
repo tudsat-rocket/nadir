@@ -10,17 +10,18 @@ use maviola::prelude::Message;
 use maviola::prelude::V2;
 use maviola::prelude::{CallbackApi as _, Endpoint};
 use maviola::protocol::SystemId;
+use mavspec::rust::default_dialect::enums::MavProtocolCapability;
 use mavspec::rust::dialects::common::enums::{
-    MavCmd, MavFrame, MavModeFlag, MavParamType, MavStandardMode, MavType,
+    MavAutopilot, MavCmd, MavFrame, MavModeFlag, MavStandardMode, MavType,
 };
 use mavspec::rust::dialects::common::messages::{
-    AvailableModes, CommandInt, CommandLong, Heartbeat, ParamSet,
+    AutopilotVersion, AvailableModes, CommandInt, CommandLong, Heartbeat, ParamSet,
 };
 
 use db::{Db, DbError, MessageExt};
 use mavspec::rust::dialects::Common;
 
-use crate::protocols::params::ParamProgress;
+use crate::protocols::params::{ParamEncoding, ParamProgress, ParamVal};
 use crate::stats::ChannelStats;
 
 pub struct SystemConnection {
@@ -127,6 +128,22 @@ impl System {
         }
     }
 
+    pub fn parameter_encoding(&self) -> Option<ParamEncoding> {
+        let heartbeat = self.last_message::<Heartbeat>().ok()?;
+        let av = self.last_message::<AutopilotVersion>().ok()?;
+
+        match (heartbeat.autopilot, av.capabilities) {
+            (MavAutopilot::Ardupilotmega, _) => Some(ParamEncoding::Cast),
+            (_, cap) if cap.contains(MavProtocolCapability::PARAM_ENCODE_BYTEWISE) => {
+                Some(ParamEncoding::Bytewise)
+            }
+            (_, cap) if cap.contains(MavProtocolCapability::PARAM_ENCODE_C_CAST) => {
+                Some(ParamEncoding::Cast)
+            }
+            _ => None,
+        }
+    }
+
     pub fn send_message(&self, message: &dyn Message) {
         let mut connection = self.conn.lock().unwrap();
 
@@ -215,10 +232,16 @@ impl System {
         self.send_message(&cmd);
     }
 
-    pub fn set_param(&self, param_id: &str, param_type: MavParamType, param_value: f32) {
+    pub fn set_param(&self, param_id: &str, value: ParamVal) {
+        let Some(encoding) = self.parameter_encoding() else {
+            return; // TODO
+        };
+
         let p_id_b = param_id.as_bytes();
         let mut param_id_bytes = [0; 16];
         param_id_bytes[..p_id_b.len()].copy_from_slice(p_id_b);
+
+        let (param_type, param_value) = value.encode(encoding);
 
         let cmd = ParamSet {
             target_system: self.system_id,
