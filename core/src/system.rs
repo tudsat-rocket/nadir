@@ -166,7 +166,7 @@ impl System {
         let cmd = CommandInt {
             target_system: self.system_id,
             target_component: 0x01,
-            frame: MavFrame::GlobalTerrainAltInt,
+            frame: MavFrame::GlobalRelativeAltInt,
             command: MavCmd::DoReposition,
             current: 0,
             autocontinue: 0,
