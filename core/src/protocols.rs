@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
+use db::MessageExt;
 use maviola::{prelude::Message, protocol::ComponentId};
 use mavspec::rust::dialects::{Common, common::enums::MavResult};
 use tokio::time::timeout;
@@ -26,9 +27,9 @@ pub mod params;
 ///     - `LOG_ENTRY`: <https://mavlink.io/en/messages/common.html#LOG_REQUEST_LIST>
 ///
 /// Might have to be adjusted for mission download.
-pub trait Gatherable: Message + Sized {
-    type InitialRequest: Message + Debug;
-    type SpecificRequest: Message + Debug;
+pub trait Gatherable: Message + MessageExt + Sized {
+    type InitialRequest: Message + MessageExt + Debug;
+    type SpecificRequest: Message + MessageExt + Debug;
 
     fn index(&self) -> usize;
 

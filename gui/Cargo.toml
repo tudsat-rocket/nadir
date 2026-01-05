@@ -12,6 +12,7 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+convert_case = { workspace = true }
 
 mavspec = { workspace = true }
 maviola = { workspace = true }

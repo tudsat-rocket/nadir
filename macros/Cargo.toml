@@ -12,10 +12,11 @@ proc-macro = true
 tracing = { workspace = true }
 
 mavspec = { workspace = true }
-mavinspect = { version = "0.6.6" }
+mavinspect = { workspace = true }
+convert_case = { workspace = true }
+
 quote = "1.0.42"
 syn = "2.0.111"
-convert_case = "0.10.0"
 
 [lints]
 workspace = true

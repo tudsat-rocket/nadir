@@ -1,5 +1,6 @@
 use core::f32;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
@@ -144,7 +145,7 @@ impl System {
         }
     }
 
-    pub fn send_message(&self, message: &dyn Message) {
+    pub fn send_message<M: Message + MessageExt + Debug>(&self, message: &M) {
         let mut connection = self.conn.lock().unwrap();
 
         let frame = {
@@ -155,6 +156,11 @@ impl System {
         let channel_id = connection.callback.channel_id();
         if let Some((_, stats)) = connection.channels.get_mut(&channel_id) {
             stats.push_sent(frame.body_length());
+        }
+
+        // TODO: build a better way to track sent commands
+        if message.id() == 75 || message.id() == 76 {
+            let _ = self.db.write_message(self.system_id, 0x01, message);
         }
 
         if let Err(e) = connection.callback.respond(&frame) {

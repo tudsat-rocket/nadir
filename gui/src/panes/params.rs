@@ -1,6 +1,7 @@
 use eframe::egui;
 use egui::{
-    Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, TextEdit, Vec2,
+    Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, TextEdit,
+    TextStyle, Vec2,
 };
 
 use core::{ParamProgress, ParamVal, System};
@@ -27,14 +28,30 @@ impl PaneUi for ParamsPane {
     }
 
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        for style in [
+            TextStyle::Button,
+            TextStyle::Body,
+            TextStyle::Monospace,
+            TextStyle::Heading,
+        ] {
+            ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;
+        }
+
+        ui.spacing_mut().item_spacing.y = 2.0;
+
         let mut params = system.params.lock().unwrap();
         match &mut *params {
             ParamProgress::Unknown => {
                 ui.label("");
             }
             ParamProgress::Progress(i, count) => {
-                let pb = ProgressBar::new(*i as f32 / *count as f32).show_percentage();
-                ui.add(pb);
+                ui.centered_and_justified(|ui| {
+                    let pb = ProgressBar::new(*i as f32 / *count as f32).show_percentage();
+                    ui.add_sized(
+                        Vec2::new(f32::max(ui.available_width(), 70.0) - 50.0, 20.0),
+                        pb,
+                    );
+                });
             }
             ParamProgress::Complete(params) => {
                 ui.horizontal(|ui| {
@@ -75,7 +92,7 @@ impl PaneUi for ParamsPane {
                     let button_w = f32::max(w * 0.15, 50.0);
                     let spacing = ui.spacing().item_spacing;
                     let col_w = f32::max(50.0, (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0);
-                    let col_h = 20.0;
+                    let col_h = 14.0;
 
                     for chunk in param_id_chunks {
                         let cat = chunk[0].split_once('_').map_or(chunk[0].as_str(), |s| s.0);
