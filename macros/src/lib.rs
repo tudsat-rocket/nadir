@@ -170,6 +170,8 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         },
                         (_, Some(_)) if is_field_bitmask(f) => quote!{ #param_name: self.#var_ident.bits() },
                         (_, Some(_)) => quote!{ #param_name: self.#var_ident.value() },
+                        (MavType::Float, _) => quote!{ #param_name: self.#var_ident.to_bits() },
+                        (MavType::Double, _) => quote!{ #param_name: self.#var_ident.to_bits() },
                         _ => quote!{ #param_name: self.#var_ident }
                     }
                 })
@@ -228,6 +230,8 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         (_, Some(_)) => {
                             quote! { #var_ident: row.get::<usize, u8>(#i)?.try_into().unwrap() }
                         }
+                        (MavType::Float, _) => quote! { #var_ident: f32::from_bits(row.get::<usize, u32>(#i)?) },
+                        (MavType::Double, _) => quote! { #var_ident: f64::from_bits(row.get::<usize, u64>(#i)?) },
                         _ => quote! { #var_ident: row.get(#i)? }
                     }
                 })
