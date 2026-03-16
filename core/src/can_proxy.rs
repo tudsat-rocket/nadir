@@ -7,15 +7,18 @@ use tokio::{sync::mpsc::Receiver, task};
 use socketcan::CanAddr;
 use socketcan::tokio::CanSocket;
 
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 pub fn spawn_can_proxy(
     tx_receiver: Receiver<socketcan::CanFrame>,
     rx_publisher: Sender<socketcan::CanFrame>,
 ) {
     let mut can_socket = CanAddr::from_iface("vcan0").and_then(|addr| CanSocket::open_addr(&addr));
-    while can_socket.is_err() {
+    if can_socket.is_err() {
         warn!("could not connect to SocketCan socket, retrying");
+    }
+    while can_socket.is_err() {
+        debug!("could not connect to SocketCan socket, retrying");
         sleep(Duration::from_secs(3));
         can_socket = CanAddr::from_iface("vcan0").and_then(|addr| CanSocket::open_addr(&addr));
     }

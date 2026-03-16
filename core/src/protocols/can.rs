@@ -35,12 +35,9 @@ pub async fn forward_to_socketcan(
 
         let frame = socketcan::CanFrame::new(id, &can_frame.data[..(can_frame.len as usize)])
             .expect("can frame creation should not have failed");
-        if let Err(e) = socketcan_tx
+        let _ = socketcan_tx
             .send_timeout(frame, Duration::from_millis(1))
-            .await
-        {
-            tracing::error!("Failed to forward CAN frame: {e:?}");
-        }
+            .await;
     }
 }
 
