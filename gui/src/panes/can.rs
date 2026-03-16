@@ -73,17 +73,40 @@ impl CanProbePane {
                         .add_sized(Vec2::new(button_w, h), Button::new("Send ➡"))
                         .clicked()
                     {
-                        let data: Vec<u8> = vec![0x00, 0x01];
-                        let mut buffer = [0x00; 8];
-                        buffer[..data.len()].copy_from_slice(&data);
-                        system.send_message(&CanFrame {
-                            target_system: system_id,
-                            target_component: 0x01,
-                            bus: 1,
-                            id: self.id_to_send,
-                            len: data.len() as u8,
-                            data: buffer,
-                        });
+                        // string to hex conversion
+                        if self.hex_to_send.len() > 16
+                            || !self.hex_to_send.len().is_multiple_of(2)
+                            || !self.hex_to_send.chars().all(|c| c.is_ascii_hexdigit())
+                        {
+                            // string invalid
+                            tracing::warn!("hex string not a valid can message body");
+                        } else {
+                            let data: Vec<u8> = self
+                                .hex_to_send
+                                .as_bytes()
+                                .chunks(2)
+                                .map(|pair| {
+                                    let hi = (pair[0] as char).to_digit(16).unwrap_or_default();
+                                    let lo = (pair[1] as char).to_digit(16).unwrap_or_default();
+                                    ((hi << 4) | lo) as u8
+                                })
+                                .collect();
+                            let mut buffer = [0x00; 8];
+                            buffer[..data.len()].copy_from_slice(&data);
+                            tracing::info!(
+                                "sending can message: id: {:x}, body: {:?}",
+                                &self.id_to_send,
+                                &data
+                            );
+                            system.send_message(&CanFrame {
+                                target_system: system_id,
+                                target_component: 0x01,
+                                bus: 1,
+                                id: self.id_to_send,
+                                len: data.len() as u8,
+                                data: buffer,
+                            });
+                        }
                     }
                 });
 
