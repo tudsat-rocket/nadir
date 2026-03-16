@@ -8,6 +8,7 @@ use tokio::time::timeout;
 
 use crate::System;
 
+pub mod can;
 pub mod heartbeat;
 pub mod intervals;
 pub mod modes;

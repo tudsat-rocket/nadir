@@ -4,6 +4,8 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
+use tokio::sync::{broadcast, mpsc};
+
 use maviola::asnc::node::Callback;
 use maviola::core::io::{ChannelId, ChannelInfo};
 use maviola::prelude::Frame;
@@ -35,7 +37,7 @@ pub struct SystemConnection {
 pub struct System {
     pub system_id: SystemId,
     pub db: Db,
-    pub message_sender: tokio::sync::broadcast::Sender<Common>,
+    pub message_sender: broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
@@ -47,6 +49,10 @@ impl System {
         db: Db,
         callback: Callback<V2>,
         endpoint: Arc<Mutex<Endpoint<V2>>>,
+        can_proxy: Option<(
+            mpsc::Sender<socketcan::CanFrame>,
+            broadcast::Sender<socketcan::CanFrame>,
+        )>,
     ) -> Self {
         let available_modes = Arc::new(Mutex::new(None));
         let params = Arc::new(Mutex::new(ParamProgress::Unknown));
@@ -59,7 +65,7 @@ impl System {
         let system = System {
             system_id,
             db,
-            message_sender,
+            message_sender: message_sender.clone(),
             conn: Arc::new(Mutex::new(SystemConnection {
                 callback,
                 endpoint,
@@ -86,6 +92,18 @@ impl System {
             0x01,
             receiver3,
         )));
+
+        if let Some((tx_sender, rx_publisher)) = can_proxy {
+            std::mem::drop(tokio::spawn(crate::protocols::can::forward_to_socketcan(
+                message_sender.subscribe(),
+                tx_sender,
+            )));
+
+            std::mem::drop(tokio::spawn(crate::protocols::can::subscribe_to_socketcan(
+                system.clone(),
+                rx_publisher.subscribe(),
+            )));
+        }
 
         system
     }

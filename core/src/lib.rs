@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use socketcan::{EmbeddedFrame as _, ExtendedId, Id, StandardId};
-use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{trace, warn};
+use tokio::sync::broadcast;
+use tokio::sync::mpsc::{self, Receiver};
 
 use maviola::asnc::prelude::*;
 use maviola::prelude::*;
@@ -36,7 +35,10 @@ pub struct Core {
     pub systems: Arc<Mutex<HashMap<SystemId, System>>>,
     pub links: Arc<Mutex<HashMap<LinkId, Link>>>,
     pub plot_origin: chrono::DateTime<chrono::Utc>,
-    pub can_proxy: Option<Sender<socketcan::CanFrame>>,
+    pub can_proxy: Option<(
+        mpsc::Sender<socketcan::CanFrame>,
+        broadcast::Sender<socketcan::CanFrame>,
+    )>,
 }
 
 #[derive(Default)]
@@ -70,8 +72,15 @@ impl CoreBuilder {
     pub fn spawn(self) -> Core {
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-        let (to_can_socket_proxy, from_can_socket_proxy) =
+        // Clonable channel for sending CAN frames received via MAVLink to socketcan. Sender is
+        // cloned for every connected system
+        let (socketcan_tx_sender, socketcan_tx_receiver) =
             tokio::sync::mpsc::channel::<socketcan::CanFrame>(32);
+
+        // Broadcast channel for sending CAN frames received via socketcan to connected MAVLink
+        // systems. Each system can subscribe to this.
+        let (socketcan_rx_publisher, _) =
+            tokio::sync::broadcast::channel::<socketcan::CanFrame>(32);
 
         let core = Core {
             event_sender: tx,
@@ -79,18 +88,15 @@ impl CoreBuilder {
             db: Db::init(),
             systems: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(HashMap::new())),
-            can_proxy: Some(to_can_socket_proxy),
+            can_proxy: Some((socketcan_tx_sender, socketcan_rx_publisher.clone())),
         };
 
-        let cloned_core = core.clone();
+        let c = core.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
 
-            // can socket
-            let c = cloned_core.clone();
             rt.spawn(async move {
-                // NOTE: ignore errors for now
-                can_proxy::spawn_can_proxy(from_can_socket_proxy, cloned_core);
+                can_proxy::spawn_can_proxy(socketcan_tx_receiver, socketcan_rx_publisher);
             });
 
             rt.block_on(c.run(self.links, self.autoconnect_usb, rx, self.on_event));
@@ -132,9 +138,25 @@ impl Core {
                         continue;
                     }
 
+                    let mut links = self.links.lock().unwrap();
+                    let link = links.get(&link_id).unwrap();
+
+                    let mut systems = self.systems.lock().unwrap();
+                    let system_id = frame.system_id();
+                    let system = systems.entry(system_id).or_insert_with(|| {
+                        System::new(
+                            system_id,
+                            self.db.clone(),
+                            callback.clone(),
+                            link.endpoint.clone(),
+                            self.can_proxy.clone(),
+                        )
+                    });
+
                     if let Ok(message) = frame.decode::<Common>() {
-                        match &message {
-                            Common::Statustext(inner) => match inner.severity {
+                        // TODO: move this to its own protocol task as well to get it out of here
+                        if let Common::Statustext(inner) = &message {
+                            match inner.severity {
                                 MavSeverity::Debug => tracing::debug!(
                                     system_id = frame.system_id(),
                                     component_id = frame.component_id(),
@@ -162,28 +184,7 @@ impl Core {
                                     "{}",
                                     &String::from_utf8_lossy(&inner.text),
                                 ),
-                            },
-                            Common::CanFrame(can_frame) => {
-                                trace!("mavlink can frame received");
-                                if let Some(can_sender) = &self.can_proxy {
-                                    let id = if can_frame.id > 0x1FFF_FFFF {
-                                        warn!("received illegal can id: {}", can_frame.id);
-                                        return;
-                                    } else if can_frame.id > 0b111_1111_1111 {
-                                        Id::Extended(ExtendedId::new(can_frame.id).unwrap())
-                                    } else {
-                                        Id::Standard(StandardId::new(can_frame.id as u16).unwrap())
-                                    };
-
-                                    let frame = socketcan::CanFrame::new(
-                                        id,
-                                        &can_frame.data[..(can_frame.len as usize)],
-                                    )
-                                    .expect("can frame creation should not have failed");
-                                    let _ = can_sender.send(frame).await;
-                                }
                             }
-                            _ => {}
                         }
 
                         if let Err(e) =
@@ -192,20 +193,6 @@ impl Core {
                         {
                             tracing::error!("Failed to process message: {e:?}");
                         }
-
-                        let links = self.links.lock().unwrap();
-                        let link = links.get(&link_id).unwrap();
-
-                        let mut systems = self.systems.lock().unwrap();
-                        let system_id = frame.system_id();
-                        let system = systems.entry(system_id).or_insert_with(|| {
-                            System::new(
-                                system_id,
-                                self.db.clone(),
-                                callback.clone(),
-                                link.endpoint.clone(),
-                            )
-                        });
 
                         system.notify_of_common_message(
                             message,
@@ -221,19 +208,9 @@ impl Core {
                             tracing::error!("Failed to process message: {e:?}");
                         }
 
-                        let links = self.links.lock().unwrap();
-                        let link = links.get(&link_id).unwrap();
-
-                        let mut systems = self.systems.lock().unwrap();
-                        let system_id = frame.system_id();
-                        let Some(system) = systems.get_mut(&system_id) else {
-                            continue;
-                        };
-
                         system.notify_of_frame(frame, callback, link.endpoint.clone());
                     }
 
-                    let mut links = self.links.lock().unwrap();
                     let link = links.get_mut(&link_id).unwrap();
                     link.stats.push_received(frame.body_length());
                 }
