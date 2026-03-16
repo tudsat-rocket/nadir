@@ -291,7 +291,7 @@ impl eframe::App for App {
         }
 
         ctx.input(|input| {
-            if input.key_down(Key::Num0) {
+            if input.key_down(Key::Num0) && input.modifiers.contains(Modifiers::CTRL) {
                 self.active_view = View::Overview;
             }
 

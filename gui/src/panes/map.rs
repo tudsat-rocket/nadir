@@ -13,11 +13,14 @@ use mavspec::rust::dialects::common::{
     messages::{GlobalPositionInt, HomePosition, PositionTargetGlobalInt},
 };
 use walkers::{
-    HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
+    HttpOptions, HttpTiles, Map, MapMemory, Plugin, Position, Projector,
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol},
 };
 
-use crate::{panes::TreeBehavior, views::View};
+use crate::{
+    panes::{PaneUi, TreeBehavior},
+    views::View,
+};
 
 pub struct MapPane {
     osm_tiles: HttpTiles,
@@ -160,8 +163,14 @@ impl MapPane {
             ..Default::default()
         }
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+impl PaneUi for MapPane {
+    fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
+        0.0
+    }
+
+    fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
         let tiles = match self.mapbox_tiles.as_mut() {
             Some(tiles) if self.satellite => tiles,
             _ => &mut self.osm_tiles,

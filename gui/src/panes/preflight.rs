@@ -1,4 +1,4 @@
-use core::ParamProgress;
+use core::{ParamProgress, System};
 
 use egui::Vec2;
 use mavspec::rust::dialects::common::enums::{
@@ -7,8 +7,7 @@ use mavspec::rust::dialects::common::enums::{
 use mavspec::rust::dialects::common::messages::{AutopilotVersion, SysStatus};
 
 use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING};
-use crate::panes::TreeBehavior;
-use crate::views::View;
+use crate::panes::PaneUi;
 
 pub struct PreflightPane {}
 
@@ -159,16 +158,10 @@ impl PreflightPane {
                     });
             });
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
-
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
-
+impl PaneUi for PreflightPane {
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         let sys_status = system.last_message::<SysStatus>().ok();
         let autopilot_version = system.last_message::<AutopilotVersion>().ok();
         let capabilities =
@@ -180,11 +173,7 @@ impl PreflightPane {
             return;
         }
 
-        ui.add_space(10.0);
-
         ui.horizontal_centered(|ui| {
-            ui.add_space(10.0);
-
             ui.vertical(|ui| {
                 if let Some(ss) = sys_status.as_ref() {
                     self.sys_status_checks_ui(ui, ss);

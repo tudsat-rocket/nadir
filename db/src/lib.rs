@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
+use mavinspect::protocol::MavType;
 use maviola::protocol::MessageSpec;
 
 #[derive(Clone)]
@@ -53,19 +54,10 @@ macro_rules! define_message_tables {
                     };
 
                     let coltype = match f.r#type() {
-                        MavType::UInt8 => "INTEGER",
-                        MavType::UInt16 => "INTEGER",
-                        MavType::UInt32 => "INTEGER",
-                        MavType::UInt64 => "INTEGER",
-                        MavType::Int8 => "INTEGER",
-                        MavType::Int16 => "INTEGER",
-                        MavType::Int32 => "INTEGER",
-                        MavType::Int64 => "INTEGER",
-                        MavType::Char => "INTEGER",
-                        MavType::UInt8MavlinkVersion => "INTEGER",
-                        MavType::Float => "FLOAT",
-                        MavType::Double => "REAL",
                         MavType::Array(_type, _len) => "BLOB",
+                        // Since SQLite doesn't properly handle NaN, we store even floats
+                        // as integers.
+                        _ => "INTEGER",
                     };
 
                     format!("{colname} {coltype}")
@@ -262,6 +254,20 @@ impl Db {
 
         let since = since.unwrap_or_default();
 
+        let protocol = mavspec::definitions::protocol();
+        let Some(field) = ["common", "ardupilotmega"]
+            .iter()
+            .filter_map(|dn| {
+                let dialect = protocol.get_dialect_by_name(dn).unwrap();
+                dialect
+                    .get_message_by_name(&msg_name)
+                    .and_then(|msg| msg.get_field_by_name(field_name))
+            })
+            .next()
+        else {
+            unreachable!();
+        };
+
         // Look Ma, SQL injection
         let query = format!(
             "SELECT received_at, {field_name} FROM messages_{lower_case}
@@ -274,7 +280,12 @@ impl Db {
             rusqlite::params![&system_id, &component_id, &since],
             |row| {
                 let timestamp: chrono::DateTime<chrono::Utc> = row.get(0)?;
-                let value: f64 = row.get(1)?;
+                let int: u64 = row.get(1)?;
+                let value = match field.r#type() {
+                    MavType::Float => f32::from_bits(int as u32) as f64,
+                    MavType::Double => f64::from_bits(int),
+                    _ => int as f64,
+                };
                 Ok((timestamp, value))
             },
         )?;

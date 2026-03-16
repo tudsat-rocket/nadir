@@ -2,7 +2,7 @@ use eframe::egui;
 use egui::Align;
 
 use crate::{
-    panes::TreeBehavior,
+    panes::{PaneUi, TreeBehavior},
     views::View,
     widgets::{Plot, PlotLine},
 };
@@ -82,8 +82,10 @@ impl PlotPane {
             ],
         }
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+impl PaneUi for PlotPane {
+    fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
         let View::System(system_id) = behavior.active_view else {
             return;
         };

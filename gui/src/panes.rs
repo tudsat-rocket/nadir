@@ -1,6 +1,7 @@
+use egui::{Align, Layout};
 use egui_tiles::SimplificationOptions;
 
-use core::Core;
+use core::{Core, System};
 
 mod can;
 mod commands;
@@ -57,6 +58,50 @@ pub enum Pane {
     Preflight(PreflightPane),
     Navigation(NavigationPane),
     Placeholder(String),
+}
+
+pub trait PaneUi {
+    fn system_ui(&mut self, _ui: &mut egui::Ui, _system: System) {}
+
+    fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
+        5.0
+    }
+
+    fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+        let View::System(system_id) = behavior.active_view else {
+            return;
+        };
+
+        let Some(system) = behavior.core.system(system_id) else {
+            return;
+        };
+
+        self.system_ui(ui, system);
+    }
+
+    fn outer_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+        let inset = self.inset(ui);
+        let rect = ui.clip_rect();
+        let inner_rect = rect.shrink(inset);
+        if inner_rect.width() < 10.0 || inner_rect.height() < 10.0 {
+            return;
+        }
+
+        ui.place(inner_rect, |ui: &mut egui::Ui| {
+            let mut ui = egui::Ui::new(
+                ui.ctx().clone(),
+                ui.id().with("inner"),
+                egui::UiBuilder::new()
+                    .layer_id(ui.layer_id())
+                    .layout(Layout::top_down(Align::LEFT))
+                    .max_rect(inner_rect),
+            );
+
+            self.pane_ui(&mut ui, behavior);
+
+            ui.response()
+        });
+    }
 }
 
 impl std::fmt::Display for Pane {
@@ -123,20 +168,20 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         puffin::profile_function!(format!("{}", pane));
 
         match pane {
-            Pane::Map(p) => p.pane_ui(ui, self),
-            Pane::Status(p) => p.pane_ui(ui, self),
-            Pane::StateEstimator(p) => p.pane_ui(ui, self),
-            Pane::Sensors(p) => p.pane_ui(ui, self),
-            Pane::Plot(p) => p.pane_ui(ui, self),
-            Pane::Messages(p) => p.pane_ui(ui, self),
-            Pane::Commands(p) => p.pane_ui(ui, self),
-            Pane::CanProbe(p) => p.pane_ui(ui, self),
-            Pane::Links(p) => p.pane_ui(ui, self),
-            Pane::Horizon(p) => p.pane_ui(ui, self),
-            Pane::Params(p) => p.pane_ui(ui, self),
-            Pane::Propulsion(p) => p.pane_ui(ui, self),
-            Pane::Preflight(p) => p.pane_ui(ui, self),
-            Pane::Navigation(p) => p.pane_ui(ui, self),
+            Pane::Map(p) => p.outer_ui(ui, self),
+            Pane::Status(p) => p.outer_ui(ui, self),
+            Pane::StateEstimator(p) => p.outer_ui(ui, self),
+            Pane::Sensors(p) => p.outer_ui(ui, self),
+            Pane::Plot(p) => p.outer_ui(ui, self),
+            Pane::Messages(p) => p.outer_ui(ui, self),
+            Pane::Commands(p) => p.outer_ui(ui, self),
+            Pane::CanProbe(p) => p.outer_ui(ui, self),
+            Pane::Links(p) => p.outer_ui(ui, self),
+            Pane::Horizon(p) => p.outer_ui(ui, self),
+            Pane::Params(p) => p.outer_ui(ui, self),
+            Pane::Propulsion(p) => p.outer_ui(ui, self),
+            Pane::Preflight(p) => p.outer_ui(ui, self),
+            Pane::Navigation(p) => p.outer_ui(ui, self),
             Pane::Placeholder(_) => {
                 ui.centered_and_justified(|ui| {
                     ui.weak("To be implemented.");

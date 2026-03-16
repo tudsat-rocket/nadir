@@ -1937,6 +1937,7 @@ name = "gui"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "convert_case",
  "core",
  "eframe",
  "egui",

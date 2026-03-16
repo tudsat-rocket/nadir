@@ -7,8 +7,7 @@ use mavspec::rust::dialects::common::messages::{
 };
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
 
-use crate::panes::TreeBehavior;
-use crate::views::View;
+use crate::panes::PaneUi;
 use crate::widgets::{BatteryIndicator, Dial};
 
 pub struct PropulsionPane {
@@ -19,8 +18,6 @@ pub struct PropulsionPane {
     pub servo_cycles: u32,
     pub servo_cycle_time: u32,
 }
-
-const FRAME_SPACING: f32 = 10.0;
 
 impl PropulsionPane {
     pub fn new(_ctx: &egui::Context) -> Self {
@@ -97,8 +94,8 @@ impl PropulsionPane {
                 .show(ui, |ui| {
                     ui.add(Dial {
                         value: f32::from(servos.servo3_raw),
-                        min: mins[2].unwrap_or(1000.0),
-                        max: maxs[2].unwrap_or(2000.0),
+                        min: mins[2].map_or(1000.0, core::ParamVal::as_float),
+                        max: maxs[2].map_or(2000.0, core::ParamVal::as_float),
                         absolute_min: 1000.0,
                         absolute_max: 2000.0,
                         trim: None,
@@ -138,11 +135,11 @@ impl PropulsionPane {
                                     Vec2::new(80.0, 50.0),
                                     Dial {
                                         value: f32::from(all_servos[i]),
-                                        min: mins[i].unwrap_or(1000.0),
-                                        max: maxs[i].unwrap_or(2000.0),
+                                        min: mins[i].map_or(1000.0, core::ParamVal::as_float),
+                                        max: maxs[i].map_or(2000.0, core::ParamVal::as_float),
                                         absolute_min: 1000.0,
                                         absolute_max: 2000.0,
-                                        trim: trims[i],
+                                        trim: trims[i].map(core::ParamVal::as_float),
                                     },
                                 );
                             });
@@ -188,17 +185,25 @@ impl PropulsionPane {
             return;
         };
 
-        let count = i32::from_be_bytes(count_param.value.to_be_bytes());
+        let count = count_param.value.as_unsigned_int();
 
         let Some(px): Option<Vec<f32>> = (0..count)
-            .map(|i| params.get(&format!("CA_ROTOR{i}_PX")).map(|p| p.value))
+            .map(|i| {
+                params
+                    .get(&format!("CA_ROTOR{i}_PX"))
+                    .map(|p| p.value.as_float())
+            })
             .collect()
         else {
             return;
         };
 
         let Some(py): Option<Vec<f32>> = (0..count)
-            .map(|i| params.get(&format!("CA_ROTOR{i}_PY")).map(|p| p.value))
+            .map(|i| {
+                params
+                    .get(&format!("CA_ROTOR{i}_PY"))
+                    .map(|p| p.value.as_float())
+            })
             .collect()
         else {
             return;
@@ -301,15 +306,18 @@ impl PropulsionPane {
             return;
         };
 
-        let positions = match (frame_class.value, frame_type.value) {
+        let positions = match (
+            frame_class.value.as_unsigned_int(),
+            frame_type.value.as_unsigned_int(),
+        ) {
             // Quad Plus & X
-            (1.0, 0.0) => vec![
+            (1, 0) => vec![
                 Vec2::new(1.0, 0.0),
                 Vec2::new(-1.0, 0.0),
                 Vec2::new(0.0, -1.0),
                 Vec2::new(0.0, 1.0),
             ],
-            (1.0, 1.0) => vec![
+            (1, 1) => vec![
                 Vec2::new(0.95, -0.95),
                 Vec2::new(-0.95, 0.95),
                 Vec2::new(-0.95, -0.95),
@@ -469,21 +477,26 @@ impl PropulsionPane {
     }
 
     fn draw_controls(&mut self, ui: &mut egui::Ui, _system: &System, _square: Rect) {
-        ui.add_space(5.0);
+        let first_col_width = 20.0;
+        let c = f32::min(
+            f32::max(ui.available_width() - first_col_width, first_col_width),
+            80.0,
+        );
 
         ui.vertical(|ui| {
             ui.weak("⚙ Motor Test");
             ui.add_space(5.0);
 
-            let c = (ui.available_width() - FRAME_SPACING) / 2.0;
             Grid::new(ui.next_auto_id())
-                .min_col_width(c)
+                .num_columns(2)
+                .min_col_width(first_col_width)
+                .spacing(Vec2::new(0.0, ui.spacing().item_spacing.y))
                 .show(ui, |ui| {
-                    ui.weak("Motor");
+                    ui.weak("＃");
                     ui.add_sized(Vec2::new(c, 20.0), DragValue::new(&mut self.motor_id));
                     ui.end_row();
 
-                    ui.weak("Throttle");
+                    ui.weak("⏩");
                     ui.add_sized(
                         Vec2::new(c, 20.0),
                         DragValue::new(&mut self.motor_test_throttle).suffix("%"),
@@ -504,15 +517,16 @@ impl PropulsionPane {
             ui.weak("⟳ Set Servo");
             ui.add_space(5.0);
 
-            let c = (ui.available_width() - FRAME_SPACING) / 2.0;
             Grid::new(ui.next_auto_id())
-                .min_col_width(c)
+                .num_columns(2)
+                .min_col_width(first_col_width)
+                .spacing(Vec2::new(0.0, ui.spacing().item_spacing.y))
                 .show(ui, |ui| {
-                    ui.weak("Servo");
+                    ui.weak("＃");
                     ui.add_sized(Vec2::new(c, 20.0), DragValue::new(&mut self.servo_id));
                     ui.end_row();
 
-                    ui.weak("Throttle");
+                    ui.weak("🏁");
                     ui.add_sized(
                         Vec2::new(c, 20.0),
                         DragValue::new(&mut self.servo_pulse_width).suffix("µs"),
@@ -533,15 +547,16 @@ impl PropulsionPane {
             ui.weak("🔃 Wiggle Servo");
             ui.add_space(5.0);
 
-            let c = (ui.available_width() - FRAME_SPACING) / 2.0;
             Grid::new(ui.next_auto_id())
-                .min_col_width(c)
+                .num_columns(2)
+                .min_col_width(first_col_width)
+                .spacing(Vec2::new(0.0, ui.spacing().item_spacing.y))
                 .show(ui, |ui| {
-                    ui.weak("Cycles");
+                    ui.weak("❌");
                     ui.add_sized(Vec2::new(c, 20.0), DragValue::new(&mut self.servo_cycles));
                     ui.end_row();
 
-                    ui.weak("Cycle Time");
+                    ui.weak("⏱");
                     ui.add_sized(
                         Vec2::new(c, 20.0),
                         DragValue::new(&mut self.servo_cycle_time).suffix("ms"),
@@ -554,16 +569,10 @@ impl PropulsionPane {
                 });
         });
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
-
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
-
+impl PaneUi for PropulsionPane {
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         let Ok(heartbeat) = system.last_message::<Heartbeat>() else {
             return;
         };
@@ -579,35 +588,29 @@ impl PropulsionPane {
         }
 
         let rect = ui.clip_rect();
-        let n = f32::min(rect.width(), rect.height()) - 2.0 * FRAME_SPACING;
+        let n = f32::min(rect.width(), rect.height());
 
         if rect.width() > rect.height() {
-            let square = Rect::from_two_pos(
-                rect.left_top() + Vec2::splat(FRAME_SPACING),
-                rect.left_top() + Vec2::splat(n),
-            );
+            let square = Rect::from_two_pos(rect.left_top(), rect.left_top() + Vec2::splat(n));
 
-            ui.add_space(FRAME_SPACING);
             ui.horizontal(|ui| {
-                ui.add_space(FRAME_SPACING);
                 self.draw_frame(ui, &system, square);
 
                 ui.vertical(|ui| {
-                    ui.set_width(f32::max(10.0, ui.available_width() - FRAME_SPACING));
+                    ui.set_width(f32::max(10.0, ui.available_width()));
                     self.draw_controls(ui, &system, square);
                 });
             });
         } else {
             let mut square = rect.shrink2(Vec2::new((rect.width() - n) / 2.0, 0.0));
-            square.set_top(rect.top() + FRAME_SPACING);
+            square.set_top(rect.top());
             square.set_bottom(rect.top() + n);
 
-            ui.add_space(FRAME_SPACING);
             ui.vertical_centered(|ui| {
                 self.draw_frame(ui, &system, square);
 
                 ui.horizontal(|ui| {
-                    ui.set_height(f32::max(10.0, ui.available_height() - FRAME_SPACING));
+                    ui.set_height(f32::max(10.0, ui.available_height()));
                     self.draw_controls(ui, &system, square);
                 });
             });

@@ -1,6 +1,8 @@
+use core::System;
+
 use egui::{CornerRadius, Frame, Vec2};
 
-use crate::{panes::TreeBehavior, views::View, widgets::ArtificialHorizon};
+use crate::{panes::PaneUi, widgets::ArtificialHorizon};
 
 pub struct HorizonPane {}
 
@@ -8,16 +10,14 @@ impl HorizonPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
+}
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
+impl PaneUi for HorizonPane {
+    fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
+        0.0
+    }
 
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
-
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         Frame::dark_canvas(ui.style())
             .corner_radius(CornerRadius::ZERO)
             .show(ui, |ui| {

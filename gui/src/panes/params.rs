@@ -1,25 +1,43 @@
 use eframe::egui;
-use egui::{Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, Vec2};
+use egui::{
+    Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, TextEdit,
+    TextStyle, Vec2,
+};
 
-use core::ParamProgress;
+use core::{ParamProgress, ParamVal, System};
 
-use crate::{panes::TreeBehavior, views::View};
+use crate::panes::PaneUi;
 
-pub struct ParamsPane {}
+pub struct ParamsPane {
+    pub search: String,
+    pub filter_changed: bool,
+}
 
 impl ParamsPane {
     pub fn new(_ctx: &egui::Context) -> Self {
-        Self {}
+        Self {
+            search: String::new(),
+            filter_changed: false,
+        }
+    }
+}
+
+impl PaneUi for ParamsPane {
+    fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
+        0.0
     }
 
-    pub fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
-            return;
-        };
+    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        for style in [
+            TextStyle::Button,
+            TextStyle::Body,
+            TextStyle::Monospace,
+            TextStyle::Heading,
+        ] {
+            ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;
+        }
 
-        let Some(system) = behavior.core.system(system_id) else {
-            return;
-        };
+        ui.spacing_mut().item_spacing.y = 2.0;
 
         let mut params = system.params.lock().unwrap();
         match &mut *params {
@@ -27,15 +45,42 @@ impl ParamsPane {
                 ui.label("");
             }
             ParamProgress::Progress(i, count) => {
-                let pb = ProgressBar::new(*i as f32 / *count as f32).show_percentage();
-                ui.add(pb);
+                ui.centered_and_justified(|ui| {
+                    let pb = ProgressBar::new(*i as f32 / *count as f32).show_percentage();
+                    ui.add_sized(
+                        Vec2::new(f32::max(ui.available_width(), 70.0) - 50.0, 20.0),
+                        pb,
+                    );
+                });
             }
             ParamProgress::Complete(params) => {
+                ui.horizontal(|ui| {
+                    ui.add_space(5.0);
+                    ui.set_height(25.0);
+                    ui.weak("Filter");
+                    ui.add(TextEdit::singleline(&mut self.search));
+                    ui.checkbox(&mut self.filter_changed, "Only Show Changed");
+                });
+
+                ui.separator();
+
                 ScrollArea::vertical().show(ui, |ui| {
                     let w = ui.available_width();
                     ui.set_width(w);
 
-                    let mut param_ids: Vec<_> = params.keys().cloned().collect();
+                    let mut param_ids: Vec<_> = params
+                        .keys()
+                        .filter(|id| id.to_lowercase().contains(&self.search.to_lowercase()))
+                        .filter(|id| {
+                            if self.filter_changed {
+                                let p = params.get(*id).unwrap();
+                                p.value != p.downloaded_value
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect();
                     param_ids.sort();
 
                     let param_id_chunks = param_ids.chunk_by(|a, b| {
@@ -44,24 +89,17 @@ impl ParamsPane {
                         a_cat == b_cat
                     });
 
+                    let button_w = f32::max(w * 0.15, 50.0);
+                    let spacing = ui.spacing().item_spacing;
+                    let col_w = f32::max(50.0, (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0);
+                    let col_h = 14.0;
+
                     for chunk in param_id_chunks {
                         let cat = chunk[0].split_once('_').map_or(chunk[0].as_str(), |s| s.0);
                         CollapsingHeader::new(cat)
-                            .default_open(true)
+                            .default_open(false)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-
                                 Grid::new(ui.next_auto_id()).striped(true).show(ui, |ui| {
-                                    ui.set_width(ui.available_width());
-
-                                    let button_w = 100.0;
-                                    let spacing = ui.spacing().item_spacing;
-                                    let col_w = f32::max(
-                                        200.0,
-                                        (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0,
-                                    );
-                                    let col_h = 20.0;
-
                                     for param_id in chunk {
                                         let param = params.get_mut(param_id).unwrap();
                                         ui.vertical(|ui| {
@@ -74,7 +112,17 @@ impl ParamsPane {
                                         });
                                         ui.add_sized(
                                             Vec2::new(col_w, col_h),
-                                            DragValue::new(&mut param.value),
+                                            match param.value {
+                                                ParamVal::Int8(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint8(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int16(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint16(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int32(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint32(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int64(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint64(ref mut u) => DragValue::new(u),
+                                                ParamVal::Float32(ref mut f) => DragValue::new(f),
+                                            },
                                         );
                                         ui.horizontal(|ui| {
                                             let size = Vec2::new(button_w, col_h);
@@ -92,11 +140,7 @@ impl ParamsPane {
                                                     .add_sized(size, Button::new("💾 Save"))
                                                     .clicked()
                                                 {
-                                                    system.set_param(
-                                                        param_id,
-                                                        param.param_type,
-                                                        param.value,
-                                                    );
+                                                    system.set_param(param_id, param.value);
                                                 }
                                             }
                                         });
