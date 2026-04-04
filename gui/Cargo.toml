@@ -26,6 +26,7 @@ egui_extras = { workspace = true }
 egui_tiles = "0.13"
 egui-notify = "0.20"
 egui_tracing = { git = "https://github.com/KoffeinFlummi/egui_tracing", branch = "egui0.32" }
+rfd = "0.17.2"
 walkers = "0.46"
 
 # profiling feature

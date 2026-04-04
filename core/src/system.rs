@@ -1,5 +1,5 @@
-use core::f32;
 use std::collections::HashMap;
+use std::f32;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +24,7 @@ use mavspec::rust::dialects::common::messages::{
 use db::{Db, DbError, MessageExt};
 use mavspec::rust::dialects::Common;
 
+use crate::protocols::logs::{FlightLogUiState, LogDlCommand};
 use crate::protocols::params::{ParamEncoding, ParamProgress, ParamVal};
 use crate::stats::ChannelStats;
 
@@ -41,6 +42,8 @@ pub struct System {
     pub conn: Arc<Mutex<SystemConnection>>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
+    pub logs: Arc<Mutex<FlightLogUiState>>,
+    pub log_cmd_tx: Arc<Mutex<mpsc::Sender<LogDlCommand>>>,
 }
 
 impl System {
@@ -56,11 +59,15 @@ impl System {
     ) -> Self {
         let available_modes = Arc::new(Mutex::new(None));
         let params = Arc::new(Mutex::new(ParamProgress::Unknown));
+        let logs = Arc::new(Mutex::new(FlightLogUiState::default()));
 
         // TODO: dialects
         let (message_sender, receiver) = tokio::sync::broadcast::channel::<Common>(5);
         let receiver2 = message_sender.subscribe();
         let receiver3 = message_sender.subscribe();
+        let receiver_logs = message_sender.subscribe();
+
+        let (log_cmd_tx, log_cmd_rx) = tokio::sync::mpsc::channel::<LogDlCommand>(1);
 
         let system = System {
             system_id,
@@ -73,6 +80,8 @@ impl System {
             })),
             available_modes,
             params,
+            logs,
+            log_cmd_tx: Arc::new(Mutex::new(log_cmd_tx)),
         };
 
         std::mem::drop(tokio::spawn(crate::protocols::heartbeat::send_heartbeats(
@@ -91,6 +100,13 @@ impl System {
             system.clone(),
             0x01,
             receiver3,
+        )));
+
+        std::mem::drop(tokio::spawn(crate::protocols::logs::run_log_worker(
+            system.clone(),
+            0x01,
+            receiver_logs,
+            log_cmd_rx,
         )));
 
         if let Some((tx_sender, rx_publisher)) = can_proxy {

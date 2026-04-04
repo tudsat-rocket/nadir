@@ -11,6 +11,7 @@ use crate::System;
 pub mod can;
 pub mod heartbeat;
 pub mod intervals;
+pub mod logs;
 pub mod modes;
 pub mod params;
 
@@ -32,14 +33,21 @@ pub trait Gatherable: Message + MessageExt + Sized {
     type InitialRequest: Message + MessageExt + Debug;
     type SpecificRequest: Message + MessageExt + Debug;
 
+    /// Index of itself in the complete collection.
     fn index(&self) -> usize;
 
+    /// Total size of the complete collection.
     fn count(&self) -> usize;
 
+    /// Filter function for extraction Self from a stream of messages of type [`Common`].
     fn unpack(msg: Common) -> Option<Self>;
 
+    /// Mavlink Message that promts the Vehicle to send a complete collection of elements of type
+    /// Self.
     fn initial_request(system_id: u8, component_id: u8) -> Self::InitialRequest;
 
+    /// Mavlink Message that promts the Vehicle to send a range of the complete collection of type
+    /// Self.
     fn specific_request(system_id: u8, component_id: u8, index: usize) -> Self::SpecificRequest;
 }
 

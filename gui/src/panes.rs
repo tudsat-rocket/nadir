@@ -7,6 +7,7 @@ mod can;
 mod commands;
 mod horizon;
 mod links;
+mod logs;
 mod map;
 mod messages;
 mod navigation;
@@ -22,6 +23,7 @@ pub use can::CanProbePane;
 pub use commands::CommandsPane;
 pub use horizon::HorizonPane;
 pub use links::LinksPane;
+pub use logs::LogsPane;
 pub use map::MapPane;
 pub use messages::MessagesPane;
 pub use navigation::NavigationPane;
@@ -57,6 +59,7 @@ pub enum Pane {
     Propulsion(PropulsionPane),
     Preflight(PreflightPane),
     Navigation(NavigationPane),
+    FlightLogs(LogsPane),
     Placeholder(String),
 }
 
@@ -121,6 +124,7 @@ impl std::fmt::Display for Pane {
             Pane::Propulsion(_) => "Propulsion".into(),
             Pane::Preflight(_) => "Preflight".into(),
             Pane::Navigation(_) => "Navigation".into(),
+            Pane::FlightLogs(_) => "Flight Logs".into(),
             Pane::Placeholder(s) => s.into(),
         };
         f.write_str(&name)
@@ -182,6 +186,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::Propulsion(p) => p.outer_ui(ui, self),
             Pane::Preflight(p) => p.outer_ui(ui, self),
             Pane::Navigation(p) => p.outer_ui(ui, self),
+            Pane::FlightLogs(p) => p.outer_ui(ui, self),
             Pane::Placeholder(_) => {
                 ui.centered_and_justified(|ui| {
                     ui.weak("To be implemented.");

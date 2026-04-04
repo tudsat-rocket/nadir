@@ -36,6 +36,9 @@
             libudev-zero
             gtk3
             atkmm
+            # for rfd
+            zenity
+            xdg-desktop-portal
           ]
           ++ [ rustToolchain ];
         LD_LIBRARY_PATH =
@@ -62,6 +65,9 @@
       {
         devShells.default = pkgs.mkShell {
           inherit nativeBuildInputs buildInputs LD_LIBRARY_PATH;
+          shellHook = ''
+            export LD_LIBRARY_PATH="${pkgs.dbus.lib}/lib:$LD_LIBRARY_PATH"
+          '';
         };
 
         formatter = pkgs.nixfmt-rfc-style;

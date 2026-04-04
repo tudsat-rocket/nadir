@@ -1,4 +1,4 @@
-use core::f32;
+use std::f32;
 use std::{collections::HashMap, time::Duration};
 
 use maviola::protocol::ComponentId;
@@ -42,8 +42,10 @@ pub enum ParamVal {
 
 impl ParamVal {
     pub fn decode(param_type: MavParamType, raw: f32, encoding: ParamEncoding) -> Self {
-        use MavParamType::{Real32, Real64, Int8, Uint8, Int16, Uint16, Int32, Uint32, Int64, Uint64};
-        use ParamEncoding::{Cast, Bytewise};
+        use MavParamType::{
+            Int8, Int16, Int32, Int64, Real32, Real64, Uint8, Uint16, Uint32, Uint64,
+        };
+        use ParamEncoding::{Bytewise, Cast};
 
         match (encoding, param_type) {
             // Unclear why a "Real64" type even exists, considering the actual type of the raw
@@ -69,7 +71,7 @@ impl ParamVal {
     }
 
     pub fn encode(self, encoding: ParamEncoding) -> (MavParamType, f32) {
-        use ParamEncoding::{Cast, Bytewise};
+        use ParamEncoding::{Bytewise, Cast};
 
         match (encoding, self) {
             (_, Self::Float32(f)) => (MavParamType::Real32, f),
@@ -83,7 +85,9 @@ impl ParamVal {
             (Cast, Self::Uint64(u)) => (MavParamType::Uint64, u as f32),
             (Bytewise, Self::Int8(i)) => (MavParamType::Int8, f32::from_bits(i32::from(i) as u32)),
             (Bytewise, Self::Uint8(u)) => (MavParamType::Uint8, f32::from_bits(u32::from(u))),
-            (Bytewise, Self::Int16(i)) => (MavParamType::Int16, f32::from_bits(i32::from(i) as u32)),
+            (Bytewise, Self::Int16(i)) => {
+                (MavParamType::Int16, f32::from_bits(i32::from(i) as u32))
+            }
             (Bytewise, Self::Uint16(u)) => (MavParamType::Uint16, f32::from_bits(u32::from(u))),
             (Bytewise, Self::Int32(i)) => (MavParamType::Int32, f32::from_bits(i as u32)),
             (Bytewise, Self::Uint32(u)) => (MavParamType::Uint32, f32::from_bits(u)),
