@@ -1,5 +1,5 @@
-use core::f32;
 use std::collections::VecDeque;
+use std::f32;
 use std::time::Instant;
 
 #[derive(Clone, Debug, Default)]

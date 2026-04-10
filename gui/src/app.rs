@@ -67,6 +67,7 @@ impl App {
         let commands = tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx)));
         let params = tiles.insert_pane(Pane::Params(ParamsPane::new(ctx)));
         let can = tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx)));
+        let flight_log = tiles.insert_pane(Pane::FlightLogs(LogsPane::new(ctx)));
 
         let link_and_horizon = tiles.insert_horizontal_tile(vec![link, horizon]);
         let info_top_tabs = tiles.insert_tab_tile(vec![status, components]);
@@ -74,7 +75,8 @@ impl App {
         let top_split = tiles.insert_horizontal_tile(vec![link_and_horizon, info_top_tabs]);
 
         let top_left_tabs = tiles.insert_tab_tile(vec![propulsion, params]);
-        let bottom_left_tabs = tiles.insert_tab_tile(vec![commands, messages, plot, can]);
+        let bottom_left_tabs =
+            tiles.insert_tab_tile(vec![commands, messages, plot, can, flight_log]);
 
         let top_right_tabs = tiles.insert_tab_tile(vec![preflight, navigation, mission]);
         let bottom_right_tabs = tiles.insert_tab_tile(vec![state, sensors]);

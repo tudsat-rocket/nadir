@@ -20,6 +20,7 @@ mod system;
 
 use db::Db;
 pub use links::*;
+pub use protocols::logs::types::*;
 pub use protocols::params::{Param, ParamId, ParamProgress, ParamVal};
 pub use system::*;
 
