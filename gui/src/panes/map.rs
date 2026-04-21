@@ -1,20 +1,16 @@
 //! Contains our map widget, based on the walkers crate.
 
-#![allow(dead_code)]
-#![allow(unused)]
-
 use core::System;
 use std::collections::HashMap;
 
 use eframe::egui;
-use egui::{Color32, CornerRadius, Frame, Pos2, Rect, Shape, Stroke, Style, Ui, Vec2, Widget};
-use mavspec::rust::dialects::common::{
-    enums::MavCmd,
-    messages::{GlobalPositionInt, HomePosition, PositionTargetGlobalInt},
+use egui::{Color32, Frame, Pos2, Rect, Shape, Stroke, Ui, Vec2};
+use mavspec::rust::dialects::common::messages::{
+    GlobalPositionInt, Heartbeat, HomePosition, PositionTargetGlobalInt,
 };
 use walkers::{
-    HttpOptions, HttpTiles, Map, MapMemory, Plugin, Position, Projector,
-    extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol},
+    HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
+    extras::{LabeledSymbol, LabeledSymbolStyle, Places, Symbol},
 };
 
 use crate::{
@@ -22,18 +18,22 @@ use crate::{
     views::View,
 };
 
+#[derive(Clone, Copy)]
+struct PathPoint {
+    altitude: f64,
+    custom_mode: u32,
+}
+
 pub struct MapPane {
     osm_tiles: HttpTiles,
     mapbox_tiles: Option<HttpTiles>,
     memory: MapMemory,
     satellite: bool,
-    position_source: PositionSource,
     visualization: Visualization,
-    show_gizmos: bool,
-    gradient_lookup: Vec<Color32>,
-    //estimated_positions: Vec<(Position, (f64, Vector3<f32>, FlightMode, f32))>,
-    //gps_positions: Vec<(Position, (f64, Vector3<f32>, FlightMode, f32))>,
-    cached_state: Option<(f64, usize)>,
+    gradient: Vec<Color32>,
+    system_paths: HashMap<u8, Vec<(Position, PathPoint)>>,
+    /// Message counts used to invalidate path cache
+    path_counts: HashMap<u8, usize>,
 }
 
 struct NavigationPlugin {
@@ -43,10 +43,10 @@ struct NavigationPlugin {
 impl walkers::Plugin for NavigationPlugin {
     fn run(
         self: Box<Self>,
-        ui: &mut Ui,
+        _ui: &mut Ui,
         response: &egui::Response,
         projector: &Projector,
-        map_memory: &MapMemory,
+        _map_memory: &MapMemory,
     ) {
         if let Some(screen_pos) = response.interact_pointer_pos()
             && response.secondary_clicked()
@@ -70,9 +70,9 @@ impl walkers::Plugin for LinePlugin {
     fn run(
         self: Box<Self>,
         ui: &mut Ui,
-        response: &egui::Response,
+        _response: &egui::Response,
         projector: &Projector,
-        map_memory: &MapMemory,
+        _map_memory: &MapMemory,
     ) {
         let a_pos = projector.project(self.a);
         let b_pos = projector.project(self.b);
@@ -114,24 +114,17 @@ impl MapPane {
         // We default to satellite view if we have one.
         let satellite = mapbox_tiles.is_some();
 
-        let gradient_lookup = (0..=1000)
-            //.map(|i| colorgrad::sinebow().at((i as f64) / 1000.0).to_rgba8())
-            //.map(|color| Color32::from_rgb(color[0], color[1], color[2]))
-            .map(|color| Color32::RED)
-            .collect();
+        let gradient = build_gradient(1001);
 
         Self {
             osm_tiles,
             mapbox_tiles,
             memory: MapMemory::default(),
             satellite,
-            position_source: PositionSource::Gps,
             visualization: Visualization::Altitude,
-            show_gizmos: true,
-            gradient_lookup,
-            //estimated_positions: Vec::new(),
-            //gps_positions: Vec::new(),
-            cached_state: None,
+            gradient,
+            system_paths: HashMap::new(),
+            path_counts: HashMap::new(),
         }
     }
 
@@ -176,67 +169,57 @@ impl PaneUi for MapPane {
             _ => &mut self.osm_tiles,
         };
 
-        let detached_pos = self.memory.detached();
-
         let rect = ui.clip_rect();
 
-        //let position = self
-        //    .vehicle_position
-        //    .map(|(pos, ..)| pos)
-        //    .unwrap_or(Position::new(8.68519, 49.861445));
-        //let gradient_lookup = self.state.gradient_lookup.clone();
-        //let pos_source = self.state.position_source;
+        let system_ids = behavior.core.known_system_ids();
 
-        //let vis_plugin = match self.state.visualization {
-        //    Visualization::Altitude => Path {
-        //        values: &self.vehicle_positions,
-        //        stroke_callback: Box::new(move |(alt, _att, _fm, _var)| {
-        //            let f = alt / GRADIENT_MAX_ALT;
-        //            let i = (f * (gradient_lookup.len() as f64)) as usize;
-        //            Stroke {
-        //                width: (1.0 + (alt / GRADIENT_MAX_ALT) * 10.0) as f32,
-        //                color: gradient_lookup[usize::min(i, gradient_lookup.len() - 1)],
-        //            }
-        //        }),
-        //    },
-        //    Visualization::FlightMode => Path {
-        //        values: &self.vehicle_positions,
-        //        stroke_callback: Box::new(move |(alt, _att, fm, _var)| Stroke {
-        //            width: (1.0 + (alt / GRADIENT_MAX_ALT) * 10.0) as f32,
-        //            color: fm.color(),
-        //        }),
-        //    },
-        //    Visualization::Attitude => Path {
-        //        values: &self.vehicle_positions,
-        //        stroke_callback: Box::new(move |(alt, att, _fm, _var)| {
-        //            let color = Color32::from_rgb(
-        //                (256.0 * (att.x + 1.0) / 2.0) as u8,
-        //                (256.0 * (att.y + 1.0) / 2.0) as u8,
-        //                (256.0 * (att.z + 1.0) / 2.0) as u8,
-        //            );
-        //            Stroke {
-        //                width: (1.0 + (alt / GRADIENT_MAX_ALT) * 10.0) as f32,
-        //                color,
-        //            }
-        //        }),
-        //    },
-        //    Visualization::Uncertainty => Path {
-        //        values: &self.vehicle_positions,
-        //        stroke_callback: Box::new(move |(alt, _att, _fm, var)| {
-        //            let f = if pos_source == PositionSource::Estimate {
-        //                f32::min(*var, 5.0) / 5.0
-        //            } else {
-        //                var / 10.00
-        //            };
-        //            let i = ((0.3 - f64::min(f as f64, 1.0) * 0.3) * (gradient_lookup.len() as f64))
-        //                as usize;
-        //            Stroke {
-        //                width: (1.0 + (alt / GRADIENT_MAX_ALT) * 10.0) as f32,
-        //                color: gradient_lookup[usize::min(i, gradient_lookup.len() - 1)],
-        //            }
-        //        }),
-        //    },
-        //};
+        // Update cached paths for each system when new messages arrive
+        for s_id in &system_ids {
+            if let Some(system) = behavior.core.system(*s_id) {
+                let count = system
+                    .db
+                    .count_message::<GlobalPositionInt>(system.system_id, 0x01)
+                    .unwrap_or(0);
+                let stale = self.path_counts.get(s_id) != Some(&count);
+                if stale && count > 0 {
+                    if let Ok(gps_msgs) = system.all_messages::<GlobalPositionInt>() {
+                        // Join with heartbeat timeline to get flight mode per point
+                        let heartbeats = system.all_messages::<Heartbeat>().unwrap_or_default();
+
+                        let mut hb_idx = 0;
+                        let path = gps_msgs
+                            .iter()
+                            .map(|(ts, gps)| {
+                                // Advance heartbeat index to the last one at or before this GPS timestamp
+                                while hb_idx + 1 < heartbeats.len()
+                                    && heartbeats[hb_idx + 1].0 <= *ts
+                                {
+                                    hb_idx += 1;
+                                }
+                                let custom_mode = heartbeats
+                                    .get(hb_idx)
+                                    .map(|(_, hb)| hb.custom_mode)
+                                    .unwrap_or(0);
+
+                                let pos = Position::new(
+                                    f64::from(gps.lon) / 10_000_000.0,
+                                    f64::from(gps.lat) / 10_000_000.0,
+                                );
+                                (
+                                    pos,
+                                    PathPoint {
+                                        altitude: f64::from(gps.relative_alt) / 1000.0,
+                                        custom_mode,
+                                    },
+                                )
+                            })
+                            .collect();
+                        self.system_paths.insert(*s_id, path);
+                        self.path_counts.insert(*s_id, count);
+                    }
+                }
+            }
+        }
 
         // TODO: configurable GCS position
         //let gcs_position = Some(Position::new(-8.292362108248733, 39.394546258787685));
@@ -246,7 +229,6 @@ impl PaneUi for MapPane {
         #[allow(clippy::unnecessary_literal_unwrap)]
         let center_position = gcs_position.unwrap();
 
-        let system_ids = behavior.core.known_system_ids();
         let systems = system_ids.iter().filter_map(|id| behavior.core.system(*id));
         let active_system_id = if let View::System(s_id) = behavior.active_view {
             Some(s_id)
@@ -307,8 +289,40 @@ impl PaneUi for MapPane {
             ..Default::default()
         };
 
+        // Build path plugins for each system
+        let gradient = self.gradient.clone();
+        let vis = self.visualization;
+        let paths: Vec<Path<'_, PathPoint>> = self
+            .system_paths
+            .values()
+            .filter(|p| p.len() >= 2)
+            .map(|path_data| {
+                let gradient = gradient.clone();
+                Path {
+                    values: path_data,
+                    stroke_callback: Box::new(move |pt: &PathPoint| match vis {
+                        Visualization::Altitude => {
+                            let f = (pt.altitude / GRADIENT_MAX_ALT).clamp(0.0, 1.0);
+                            let i = (f * (gradient.len() - 1) as f64) as usize;
+                            Stroke {
+                                width: (1.5 + f * 4.0) as f32,
+                                color: gradient[i],
+                            }
+                        }
+                        Visualization::FlightMode => Stroke {
+                            width: 3.0,
+                            color: mode_color(pt.custom_mode),
+                        },
+                    }),
+                }
+            })
+            .collect();
+
         let mut map = walkers::Map::new(Some(tiles), &mut self.memory, center_position);
-        //.with_plugin(PathPlugin::new(vec![vis_plugin]))
+
+        if !paths.is_empty() {
+            map = map.with_plugin(PathPlugin::new(paths));
+        }
 
         if let Some(gcs_pos) = gcs_position {
             map = map.with_plugin(Places::new(vec![LabeledSymbol {
@@ -372,175 +386,72 @@ impl PaneUi for MapPane {
 
         map = map.with_plugin(Places::new(places));
 
-        let response = ui.add(map);
+        let _response = ui.add(map);
 
-        //if self.state.show_gizmos {
-        //    if let Some(q) = self.orientation {
-        //        let viewport = ui.clip_rect();
-
-        //        // Fun type conversion bullshit
-        //        let rotation: mint::Quaternion<f64> = q.cast::<f64>().into();
-        //        let rotation: transform_gizmo_egui::mint::Quaternion<f64> = rotation.into();
-
-        //        let view_matrix =
-        //            DMat4::look_at_rh(DVec3::new(0., 0., 1.), DVec3::ZERO, DVec3::new(0., 1., 0.));
-        //        let projection_matrix = DMat4::orthographic_rh(
-        //            viewport.left() as f64,
-        //            viewport.right() as f64,
-        //            -viewport.bottom() as f64,
-        //            -viewport.top() as f64,
-        //            0.1,
-        //            1000.0,
-        //        );
-
-        //        // We use viewport pixel coordinates (obtained from the Map projector)
-        //        // for the rendering of the gizmo, but we need to invert the y axis,
-        //        // since screen coordinates are Y down
-        //        let projector = Projector::new(viewport, &self.state.memory, position);
-        //        let viewport_pos = projector.project(position);
-        //        let translation = DVec3::new(viewport_pos.x as f64, -viewport_pos.y as f64, 0.0);
-        //        let transform =
-        //            Transform::from_scale_rotation_translation(DVec3::ONE, rotation, translation);
-
-        //        let visuals = GizmoVisuals {
-        //            inactive_alpha: 1.0,
-        //            highlight_alpha: 1.0,
-        //            gizmo_size: 50.0,
-        //            ..Default::default()
-        //        };
-
-        //        let config = GizmoConfig {
-        //            viewport,
-        //            view_matrix: view_matrix.into(),
-        //            projection_matrix: projection_matrix.into(),
-        //            modes: GizmoMode::all_translate(),
-        //            orientation: transform_gizmo_egui::GizmoOrientation::Local,
-        //            visuals,
-        //            ..Default::default()
-        //        };
-
-        //        Gizmo::new(config).interact(ui, &[transform]);
-        //    }
-        //}
-
-        //// Panel for resetting map to vehicle position
-        //let reset_rect = Rect::from_two_pos(
-        //    rect.right_bottom() + Vec2::new(-10.0, -10.0),
-        //    rect.right_bottom() + Vec2::new(-40.0, -40.0),
-        //);
-        //ui.put(reset_rect, |ui: &mut egui::Ui| {
-        //    Frame::window(ui.style())
-        //        .show(ui, |ui| {
-        //            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-        //                let detached_pos = self.state.memory.detached();
-        //                let pos = detached_pos.or(self.vehicle_position.map(|(p, ..)| p));
-        //                let coords = pos.map(|p| format!("{:.6},{:.6}", p.y(), p.x()));
-
-        //                ui.add_enabled_ui(detached_pos.is_some(), |ui| {
-        //                    if ui.button("⌖").clicked() {
-        //                        self.state.memory.follow_my_position();
-        //                    }
-        //                });
-
-        //                ui.add_enabled_ui(coords.is_some(), |ui| {
-        //                    if ui.button("📋").clicked() {
-        //                        ui.ctx().copy_text(coords.clone().unwrap_or_default());
-        //                    }
-        //                });
-
-        //                if detached_pos.is_some() {
-        //                    ui.monospace(coords.unwrap_or_default());
-        //                }
-        //            })
-        //            .response
-        //        })
-        //        .response
-        //});
-
-        //// Panel for selecting path visualizations
-        //let map_type_rect = Rect::from_two_pos(
-        //    rect.left_top() + Vec2::new(10.0, 10.0),
-        //    rect.left_top() + Vec2::new(100.0, 40.0),
-        //);
-        //ui.put(map_type_rect, |ui: &mut egui::Ui| {
-        //    Frame::window(ui.style())
-        //        .show(ui, |ui| {
-        //            ui.horizontal(|ui| {
-        //                ui.selectable_value(
-        //                    &mut self.state.position_source,
-        //                    PositionSource::Estimate,
-        //                    "🗠",
-        //                );
-        //                ui.selectable_value(
-        //                    &mut self.state.position_source,
-        //                    PositionSource::Gps,
-        //                    "🌍",
-        //                );
-        //                ui.separator();
-        //                ui.selectable_value(
-        //                    &mut self.state.visualization,
-        //                    Visualization::Altitude,
-        //                    "⬍",
-        //                );
-        //                ui.selectable_value(
-        //                    &mut self.state.visualization,
-        //                    Visualization::FlightMode,
-        //                    "🏷",
-        //                );
-        //                ui.selectable_value(
-        //                    &mut self.state.visualization,
-        //                    Visualization::Attitude,
-        //                    "🔃",
-        //                );
-        //                ui.selectable_value(
-        //                    &mut self.state.visualization,
-        //                    Visualization::Uncertainty,
-        //                    "⁉",
-        //                );
-        //            });
-        //        })
-        //        .response
-        //});
-
-        //// Panel for switching between gizmos and position tags
-        //let gizmo_rect = Rect::from_two_pos(
-        //    rect.right_top() + Vec2::new(-10.0, 10.0),
-        //    rect.right_top() + Vec2::new(-100.0, 40.0),
-        //);
-        //ui.put(gizmo_rect, |ui: &mut egui::Ui| {
-        //    Frame::window(ui.style())
-        //        .show(ui, |ui| {
-        //            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-        //                ui.selectable_value(&mut self.state.show_gizmos, false, "📋");
-        //                ui.selectable_value(&mut self.state.show_gizmos, true, "🔃");
-        //            });
-        //        })
-        //        .response
-        //});
-
-        // TODO: attribution
-
-        //response
+        // Visualization selector overlay
+        let vis_rect = Rect::from_two_pos(
+            rect.left_top() + Vec2::new(10.0, 10.0),
+            rect.left_top() + Vec2::new(160.0, 40.0),
+        );
+        ui.put(vis_rect, |ui: &mut egui::Ui| {
+            Frame::window(ui.style())
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut self.visualization,
+                            Visualization::Altitude,
+                            "Altitude",
+                        );
+                        ui.selectable_value(
+                            &mut self.visualization,
+                            Visualization::FlightMode,
+                            "Flight Mode",
+                        );
+                    });
+                })
+                .response
+        });
     }
 }
 
-// use crate::Backend;
-// use crate::settings::AppSettings;
-// use crate::utils::telemetry_ext::ColorExt;
-
 const GRADIENT_MAX_ALT: f64 = 10000.0;
 
-pub struct Path<'a, T> {
-    values: &'a Vec<(Position, T)>,
-    stroke_callback: Box<dyn Fn(&T) -> egui::Stroke>,
+/// Blue -> Cyan -> Green -> Yellow -> Red heat-map
+fn gradient_color(t: f64) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let (r, g, b) = if t < 0.25 {
+        let s = t / 0.25;
+        (0.0, s, 1.0)
+    } else if t < 0.5 {
+        let s = (t - 0.25) / 0.25;
+        (0.0, 1.0, 1.0 - s)
+    } else if t < 0.75 {
+        let s = (t - 0.5) / 0.25;
+        (s, 1.0, 0.0)
+    } else {
+        let s = (t - 0.75) / 0.25;
+        (1.0, 1.0 - s, 0.0)
+    };
+    Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
-pub struct PathPlugin<'a, T> {
+fn build_gradient(steps: usize) -> Vec<Color32> {
+    (0..steps)
+        .map(|i| gradient_color(i as f64 / (steps - 1) as f64))
+        .collect()
+}
+
+struct Path<'a, T> {
+    values: &'a [(Position, T)],
+    stroke_callback: Box<dyn Fn(&T) -> Stroke>,
+}
+
+struct PathPlugin<'a, T> {
     paths: Vec<Path<'a, T>>,
 }
 
 impl<'a, T> PathPlugin<'a, T> {
-    pub fn new(paths: Vec<Path<'a, T>>) -> Self {
+    fn new(paths: Vec<Path<'a, T>>) -> Self {
         Self { paths }
     }
 }
@@ -550,14 +461,14 @@ impl<T> Plugin for PathPlugin<'_, T> {
         self: Box<Self>,
         ui: &mut Ui,
         _response: &egui::Response,
-        projector: &walkers::Projector,
-        _memory: &walkers::MapMemory,
+        projector: &Projector,
+        _memory: &MapMemory,
     ) {
         for p in &self.paths {
             let screen_positions: Vec<_> = p
                 .values
                 .iter()
-                .map(|(p, val)| (projector.project(*p).to_pos2(), val))
+                .map(|(pos, val)| (projector.project(*pos).to_pos2(), val))
                 .collect();
             for segment in screen_positions.windows(2) {
                 ui.painter().line_segment(
@@ -570,15 +481,25 @@ impl<T> Plugin for PathPlugin<'_, T> {
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum PositionSource {
-    Estimate,
-    Gps,
-}
-
-#[derive(PartialEq, Clone, Copy)]
 enum Visualization {
     Altitude,
     FlightMode,
-    Attitude,
-    Uncertainty,
+}
+
+/// Deterministic color for a custom_mode value. Uses a set of distinct hues
+/// so that different flight modes are visually distinguishable.
+fn mode_color(custom_mode: u32) -> Color32 {
+    const PALETTE: &[Color32] = &[
+        Color32::from_rgb(31, 119, 180),
+        Color32::from_rgb(255, 127, 14),
+        Color32::from_rgb(44, 160, 44),
+        Color32::from_rgb(214, 39, 40),
+        Color32::from_rgb(148, 103, 189),
+        Color32::from_rgb(140, 86, 75),
+        Color32::from_rgb(227, 119, 194),
+        Color32::from_rgb(127, 127, 127),
+        Color32::from_rgb(188, 189, 34),
+        Color32::from_rgb(23, 190, 207),
+    ];
+    PALETTE[custom_mode as usize % PALETTE.len()]
 }
