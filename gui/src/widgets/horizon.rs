@@ -10,8 +10,12 @@ use egui::{
 };
 use mavspec::rust::dialects::common::messages::{Attitude, LocalPositionNed, VfrHud};
 
+use crate::panes::{PositionSource, VelocityMode};
+
 pub struct ArtificialHorizon {
     system: System,
+    source: PositionSource,
+    velocity_mode: VelocityMode,
 }
 
 const COLOR_GROUND: Color32 = Color32::from_rgb(0x7d, 0x52, 0x33);
@@ -19,9 +23,11 @@ const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
 const N: usize = 16;
 
 impl ArtificialHorizon {
-    pub fn new(system: &System) -> Self {
+    pub fn new(system: &System, source: PositionSource, velocity_mode: VelocityMode) -> Self {
         Self {
             system: system.clone(),
+            source,
+            velocity_mode,
         }
     }
 
@@ -230,6 +236,7 @@ impl ArtificialHorizon {
         value: f32,
         side: f32,
         throttle: Option<f32>,
+        allow_negative: bool,
     ) {
         const POINTS_PER_UNIT: f32 = 4.0;
         const COLOR_DIAL: Color32 = Color32::from_rgb(0xc0, 0xc0, 0xc0);
@@ -237,10 +244,19 @@ impl ArtificialHorizon {
         let rect = painter.clip_rect();
         let center_side = rect.center() + Vec2::new(rect.width() * 0.5 * side, 0.0);
 
-        for tick in (0..100 * ((value + 200.0) / 100.0) as u32).step_by(2) {
-            let len = if tick % 100 == 0 {
+        let min_tick = if allow_negative {
+            ((value.min(0.0) - 200.0) as i32) / 100 * 100
+        } else {
+            0
+        };
+        let max_tick = ((value + 200.0) as i32) / 100 * 100 + 100;
+
+        let mut tick = min_tick - (min_tick.rem_euclid(2));
+        while tick <= max_tick {
+            let abs_tick = tick.unsigned_abs();
+            let len = if abs_tick % 100 == 0 {
                 18.0
-            } else if tick % 10 == 0 {
+            } else if abs_tick % 10 == 0 {
                 14.0
             } else {
                 10.0
@@ -252,10 +268,10 @@ impl ArtificialHorizon {
                     center_side - Vec2::new(0.0, y),
                     center_side - Vec2::new(len * side, y),
                 ],
-                Stroke::new(if tick % 50 == 0 { 2.0 } else { 1.0 }, Color32::WHITE),
+                Stroke::new(if abs_tick % 50 == 0 { 2.0 } else { 1.0 }, Color32::WHITE),
             );
 
-            if tick % 50 == 0 {
+            if abs_tick % 50 == 0 {
                 painter.text(
                     center_side - Vec2::new((len + 5.0) * side, y),
                     if side > 0.0 {
@@ -263,11 +279,12 @@ impl ArtificialHorizon {
                     } else {
                         Align2::LEFT_CENTER
                     },
-                    format!("{tick:0}"),
+                    format!("{tick}"),
                     FontId::monospace(12.0),
                     Color32::WHITE,
                 );
             }
+            tick += 2;
         }
 
         if let Some(throttle) = throttle {
@@ -288,13 +305,14 @@ impl ArtificialHorizon {
             Stroke::new(4.0, COLOR_DIAL),
         );
 
+        let box_left = if side > 0.0 { -87.0 } else { 80.0 };
         painter.add(Shape::convex_polygon(
             vec![
-                center_side + Vec2::new(-80.0 * side, -12.0),
+                center_side + Vec2::new(box_left, -12.0),
                 center_side + Vec2::new(-20.0 * side, -12.0),
                 center_side + Vec2::new(-8.0 * side, 0.0),
                 center_side + Vec2::new(-20.0 * side, 12.0),
-                center_side + Vec2::new(-80.0 * side, 12.0),
+                center_side + Vec2::new(box_left, 12.0),
             ],
             Color32::BLACK,
             Stroke::new(1.0, Color32::WHITE),
@@ -326,13 +344,16 @@ impl ArtificialHorizon {
         &self,
         painter: &mut egui::Painter,
         local_position: Option<&LocalPositionNed>,
+        vfr_hud: Option<&VfrHud>,
     ) {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
-        let altitude = local_position.as_ref().map_or(0.0, |v| -v.z);
-        let _climb = local_position.as_ref().map_or(0.0, |v| -v.vz);
-        self.draw_side_dial(painter, altitude, 1.0, None);
+        let altitude = match self.source {
+            PositionSource::LocalPositionNed => local_position.map_or(0.0, |v| -v.z),
+            PositionSource::VfrHud => vfr_hud.map_or(0.0, |v| v.alt),
+        };
+        self.draw_side_dial(painter, altitude, 1.0, None, false);
     }
 
     fn draw_velocity_dial(
@@ -347,9 +368,19 @@ impl ArtificialHorizon {
         let throttle = vfr_hud
             .map(|v| f32::from(v.throttle) / 100.0)
             .unwrap_or_default();
-        let velocity =
-            local_position.map_or(0.0, |v| (v.vx.powi(2) + v.vy.powi(2) + v.vz.powi(2)).sqrt());
-        self.draw_side_dial(painter, velocity, -1.0, Some(throttle));
+        let velocity = match self.velocity_mode {
+            VelocityMode::Speed => match self.source {
+                PositionSource::LocalPositionNed => local_position
+                    .map_or(0.0, |v| (v.vx.powi(2) + v.vy.powi(2) + v.vz.powi(2)).sqrt()),
+                PositionSource::VfrHud => vfr_hud.map_or(0.0, |v| v.airspeed),
+            },
+            VelocityMode::Climb => match self.source {
+                PositionSource::LocalPositionNed => local_position.map_or(0.0, |v| -v.vz),
+                PositionSource::VfrHud => vfr_hud.map_or(0.0, |v| v.climb),
+            },
+        };
+        let allow_negative = self.velocity_mode == VelocityMode::Climb;
+        self.draw_side_dial(painter, velocity, -1.0, Some(throttle), allow_negative);
     }
 }
 
@@ -407,7 +438,7 @@ impl egui::Widget for ArtificialHorizon {
         painter.circle_filled(compass_center, radius + 20.0 + 5.0, Color32::BLACK);
         self.draw_compass(&mut painter, yaw, compass_center, radius + 20.0);
 
-        self.draw_altitude_dial(&mut painter, local_position.as_ref());
+        self.draw_altitude_dial(&mut painter, local_position.as_ref(), vfr_hud.as_ref());
         self.draw_velocity_dial(&mut painter, local_position.as_ref(), vfr_hud.as_ref());
 
         response

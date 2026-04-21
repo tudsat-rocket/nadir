@@ -119,6 +119,7 @@ impl PaneUi for PlotPane {
                         alias: None,
                         unit: None, // TODO
                         color: None,
+                        scale: None,
                     })
                     .collect();
 

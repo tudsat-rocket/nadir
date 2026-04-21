@@ -21,7 +21,7 @@ mod status;
 
 pub use can::CanProbePane;
 pub use commands::CommandsPane;
-pub use horizon::HorizonPane;
+pub use horizon::{HorizonPane, VelocityMode};
 pub use links::LinksPane;
 pub use logs::LogsPane;
 pub use map::MapPane;
@@ -38,10 +38,43 @@ pub use status::StatusPane;
 use crate::views::View;
 use crate::widgets::SharedPlotState;
 
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum PositionSource {
+    #[default]
+    LocalPositionNed,
+    VfrHud,
+}
+
+impl PositionSource {
+    pub const ALL: [PositionSource; 2] = [PositionSource::LocalPositionNed, PositionSource::VfrHud];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::LocalPositionNed => "Local",
+            Self::VfrHud => "MSL (HUD)",
+        }
+    }
+
+    pub fn message_name(&self) -> &'static str {
+        match self {
+            Self::LocalPositionNed => "LOCAL_POSITION_NED",
+            Self::VfrHud => "VFR_HUD",
+        }
+    }
+
+    pub fn has_data(&self, core: &Core, system_id: u8) -> bool {
+        core.db
+            .count_message_by_name(self.message_name(), system_id, 1)
+            .unwrap_or(0)
+            > 0
+    }
+}
+
 pub struct TreeBehavior<'a> {
     pub core: Core,
     pub active_view: View,
     pub shared_plot_state: &'a mut SharedPlotState,
+    pub position_source: &'a mut PositionSource,
 }
 
 pub enum Pane {

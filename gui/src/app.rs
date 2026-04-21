@@ -20,6 +20,7 @@ pub struct App {
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
     shared_plot_state: SharedPlotState,
+    position_source: PositionSource,
     active_view: View,
     never_connected: bool,
     sidebar_collapsed: bool,
@@ -105,6 +106,7 @@ impl App {
             toasts: egui_notify::Toasts::default().with_anchor(egui_notify::Anchor::BottomRight),
             tiles_tree,
             shared_plot_state: SharedPlotState::new(),
+            position_source: PositionSource::default(),
             active_view: View::Overview,
             never_connected: true,
             sidebar_collapsed: false,
@@ -361,6 +363,7 @@ impl eframe::App for App {
                         shared_plot_state: &mut self.shared_plot_state,
                         core: self.core.clone(),
                         active_view: self.active_view,
+                        position_source: &mut self.position_source,
                     };
                     self.tiles_tree.ui(&mut behavior, ui);
                 }

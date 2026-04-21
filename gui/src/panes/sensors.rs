@@ -39,6 +39,7 @@ impl SensorsPane {
                     alias: None,
                     unit: None,
                     color: None,
+                    scale: None,
                 });
             }
         }
@@ -94,6 +95,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -103,6 +105,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -112,6 +115,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -121,6 +125,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -130,6 +135,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -139,6 +145,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                     ],
                     &behavior.core,
@@ -157,6 +164,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -166,6 +174,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                         PlotLine {
                             system_id,
@@ -175,6 +184,7 @@ impl PaneUi for SensorsPane {
                             alias: None,
                             unit: None,
                             color: None,
+                            scale: None,
                         },
                     ],
                     &behavior.core,

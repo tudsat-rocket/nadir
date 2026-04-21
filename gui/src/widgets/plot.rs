@@ -51,6 +51,7 @@ pub struct PlotLine {
     pub alias: Option<String>,
     pub unit: Option<String>,
     pub color: Option<Color32>,
+    pub scale: Option<f64>,
 }
 
 pub struct Plot<'a> {
@@ -161,9 +162,10 @@ impl egui::Widget for Plot<'_> {
                     }
                 };
 
+                let scale = line.scale.unwrap_or(1.0);
                 let plot_data: Vec<_> = timeseries
                     .into_iter()
-                    .map(|(t, v)| [(t - self.core.plot_origin).as_seconds_f64(), v])
+                    .map(|(t, v)| [(t - self.core.plot_origin).as_seconds_f64(), v * scale])
                     .collect();
 
                 let mut l = egui_plot::Line::new(name, plot_data).width(1.0);
