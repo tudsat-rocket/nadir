@@ -1,8 +1,9 @@
 use core::System;
 
+use mavspec::rust::default_dialect::messages::BatteryStatus;
 use mavspec::rust::dialects::ardupilotmega::enums::PlaneMode;
 use mavspec::rust::dialects::common::enums::{MavAutopilot, MavModeFlag, MavStandardMode, MavType};
-use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed};
+use mavspec::rust::dialects::common::messages::{Heartbeat, LocalPositionNed, SysStatus};
 
 use eframe::egui;
 use egui::{Align, Button, Color32, Frame, Layout, RichText, Separator, Vec2};
@@ -56,12 +57,10 @@ impl PaneUi for StatusPane {
                 });
 
                 ui.horizontal(|ui| {
-                    ui.weak("System");
-                    ui.monospace(format!("0x{:02}", system.system_id));
+                    ui.label(format!("{icon} {mav_type:?}"));
+                    ui.monospace(format!("0x{:02x}", system.system_id));
                     ui.add_space(5.0);
                     ui.add(MavStateIndicator(system_status));
-                    ui.add_space(5.0);
-                    ui.label(format!("{icon} {mav_type:?}"));
                     ui.add_space(5.0);
                     ui.label(
                         local_position
@@ -98,15 +97,32 @@ impl PaneUi for StatusPane {
                         ui.vertical(|ui| {
                             ui.weak("♥ Vitals");
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new("🔋 98%, 12.5V")
+                                // TODO: properly handle multiple batteries
+                                if let Ok(battery) = system.last_message::<BatteryStatus>() {
+                                    let voltage = battery
+                                        .voltages
+                                        .iter()
+                                        .filter(|v| **v != u16::MAX)
+                                        .last()
+                                        .map(|v| format!(" {:.1}V", (*v as f32) / 1000.0));
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "🔋 {}%{}",
+                                            battery.battery_remaining,
+                                            voltage.unwrap_or_default()
+                                        ))
                                         .color(Color32::from_rgb(78, 154, 6)),
-                                );
-                                ui.separator();
-                                ui.label(
-                                    RichText::new("97%, 12.4V")
+                                    );
+                                } else if let Ok(sys_status) = system.last_message::<SysStatus>() {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "🔋 {}% {:.1}V",
+                                            sys_status.battery_remaining,
+                                            (sys_status.voltage_battery as f32) / 1000.0
+                                        ))
                                         .color(Color32::from_rgb(78, 154, 6)),
-                                );
+                                    );
+                                }
                             });
                             ui.label("💾 10%, 3.2/32.0 MiB");
                             ui.label("📡 11 sats, HDOP 0.9");
