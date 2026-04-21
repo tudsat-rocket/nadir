@@ -19,6 +19,7 @@ mod stats;
 mod system;
 
 use db::Db;
+pub use db::{MessageInstance, MessageSummary, format_message_label};
 pub use links::*;
 pub use protocols::logs::types::*;
 pub use protocols::params::{Param, ParamId, ParamProgress, ParamVal};

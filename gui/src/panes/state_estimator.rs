@@ -10,6 +10,7 @@ fn ned_vz(system_id: u8) -> PlotLine {
         system_id,
         component_id: 1,
         message_name: "LOCAL_POSITION_NED".to_owned(),
+        instance: None,
         field_name: "vz".to_owned(),
         alias: Some("LOCAL_POSITION_NED.vz (-NED)".to_owned()),
         unit: None,
@@ -24,6 +25,7 @@ fn altitude_lines(source: PositionSource, system_id: u8) -> Vec<PlotLine> {
             system_id,
             component_id: 1,
             message_name: "LOCAL_POSITION_NED".to_owned(),
+            instance: None,
             field_name: "z".to_owned(),
             alias: Some("LOCAL_POSITION_NED.z (-NED)".to_owned()),
             unit: None,
@@ -34,6 +36,7 @@ fn altitude_lines(source: PositionSource, system_id: u8) -> Vec<PlotLine> {
             system_id,
             component_id: 1,
             message_name: "VFR_HUD".to_owned(),
+            instance: None,
             field_name: "alt".to_owned(),
             alias: Some("VFR_HUD.alt".to_owned()),
             unit: None,
@@ -50,6 +53,7 @@ fn velocity_lines(source: PositionSource, system_id: u8) -> Vec<PlotLine> {
             system_id,
             component_id: 1,
             message_name: "VFR_HUD".to_owned(),
+            instance: None,
             field_name: "climb".to_owned(),
             alias: Some("VFR_HUD.climb".to_owned()),
             unit: None,
@@ -89,8 +93,9 @@ impl PaneUi for StateEstimatorPane {
 
         let alt_size = egui::Vec2::new(ui.available_width(), ui.available_height() * 0.57);
 
+        let alt_lines = altitude_lines(source, system_id);
         let altitude_plot = Plot::new(
-            altitude_lines(source, system_id),
+            &alt_lines,
             &behavior.core,
             behavior.shared_plot_state,
             (None, None),
@@ -99,8 +104,9 @@ impl PaneUi for StateEstimatorPane {
 
         let vel_size = egui::Vec2::new(ui.available_width(), ui.available_height());
 
+        let vel_lines = velocity_lines(source, system_id);
         let velocity_plot = Plot::new(
-            velocity_lines(source, system_id),
+            &vel_lines,
             &behavior.core,
             behavior.shared_plot_state,
             (None, None),

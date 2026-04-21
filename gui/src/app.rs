@@ -77,7 +77,7 @@ impl App {
 
         let top_left_tabs = tiles.insert_tab_tile(vec![propulsion, params]);
         let bottom_left_tabs =
-            tiles.insert_tab_tile(vec![commands, messages, plot, can, flight_log]);
+            tiles.insert_tab_tile(vec![messages, commands, plot, can, flight_log]);
 
         let top_right_tabs = tiles.insert_tab_tile(vec![preflight, navigation, mission]);
         let bottom_right_tabs = tiles.insert_tab_tile(vec![state, sensors]);

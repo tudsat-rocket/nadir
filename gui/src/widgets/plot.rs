@@ -6,6 +6,7 @@ use eframe::egui::PointerButton;
 use egui::{Color32, TextStyle};
 use egui_plot::{Corner, Legend};
 
+use core::{MessageInstance, format_message_label};
 use maviola::protocol::{ComponentId, SystemId};
 
 /// State shared by all linked plots
@@ -47,6 +48,7 @@ pub struct PlotLine {
     pub system_id: SystemId,
     pub component_id: ComponentId,
     pub message_name: String,
+    pub instance: Option<MessageInstance>,
     pub field_name: String,
     pub alias: Option<String>,
     pub unit: Option<String>,
@@ -55,7 +57,7 @@ pub struct PlotLine {
 }
 
 pub struct Plot<'a> {
-    lines: Vec<PlotLine>,
+    lines: &'a [PlotLine],
     core: &'a core::Core,
     shared: &'a mut SharedPlotState,
     ylimits: (Option<f32>, Option<f32>),
@@ -63,7 +65,7 @@ pub struct Plot<'a> {
 
 impl<'a> Plot<'a> {
     pub fn new(
-        lines: Vec<PlotLine>,
+        lines: &'a [PlotLine],
         core: &'a core::Core,
         shared: &'a mut SharedPlotState,
         ylimits: (Option<f32>, Option<f32>),
@@ -126,23 +128,29 @@ impl egui::Widget for Plot<'_> {
             plot = plot.include_y(max);
         }
 
-        //let attached_to_edge = self.shared.attached_to_edge;
         let ir = plot.show(ui, move |plot_ui| {
-            //if attached_to_edge {
-            //    plot_ui.set_auto_bounds(egui::Vec2b::new(true, true));
-            //}
+            #[cfg(feature = "profiling")]
+            puffin::profile_scope!("plot_data");
 
             let last_bounds = plot_ui.plot_bounds();
             let min_x = *last_bounds.range_x().start();
-            let max_x = *last_bounds.range_x().end();
+            let _max_x = *last_bounds.range_x().end();
 
             let since = self.core.plot_origin + TimeDelta::seconds(min_x as i64 - 5);
-            let _before = self.core.plot_origin + TimeDelta::seconds(max_x as i64 + 5);
 
             for line in self.lines {
-                let id = format!("{}.{}", line.message_name, line.field_name);
-                let name = line.alias.unwrap_or(id);
+                let labelled = format_message_label(&line.message_name, line.instance.as_ref());
+                let id = format!("{labelled}.{}", line.field_name);
+                let base_name = line.alias.as_deref().unwrap_or(&id);
+                let name = match line.unit.as_deref() {
+                    Some(unit) => format!("{base_name} [{unit}]"),
+                    None => base_name.to_owned(),
+                };
 
+                let instance_arg = line
+                    .instance
+                    .as_ref()
+                    .map(|i| (i.field.as_str(), i.value));
                 let timeseries = match self.core.db.timeseries_by_name(
                     &line.message_name,
                     &line.field_name,
@@ -150,12 +158,12 @@ impl egui::Widget for Plot<'_> {
                     line.component_id,
                     Some(since),
                     None,
+                    instance_arg,
                 ) {
                     Ok(timeseries) => timeseries,
                     Err(e) => {
                         tracing::error!(
-                            "Failed to plot {}.{}: {e:?}",
-                            line.message_name,
+                            "Failed to plot {labelled}.{}: {e:?}",
                             line.field_name
                         );
                         continue;

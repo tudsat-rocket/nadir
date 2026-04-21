@@ -50,7 +50,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
     };
     let _ = protocol;
 
-    let inner_message_match_arms: Vec<_> = dialect
+    let filtered_messages: Vec<_> = dialect
         .messages()
         .into_iter()
         // Ardupilot modifies some messages, we ignore those changes for now
@@ -64,6 +64,10 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                     && msg_spec.name() != "COMMAND_CANCEL"
                     && msg_spec.name() != "TRAJECTORY_REPRESENTATION_WAYPOINTS")
         })
+        .collect();
+
+    let type_idents: Vec<_> = filtered_messages
+        .iter()
         .map(|msg_spec| {
             let lower_case = msg_spec.name().to_lowercase();
             let type_name: String = lower_case
@@ -73,11 +77,33 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                     format!("{}{}", h.to_uppercase(), t)
                 })
                 .collect();
+            format_ident!("{}", type_name)
+        })
+        .collect();
 
-            let type_ident = format_ident!("{}", type_name);
-
+    let inner_message_match_arms: Vec<_> = type_idents
+        .iter()
+        .map(|type_ident| {
             quote! {
                 Self::#type_ident(inner) => inner.insert(conn, system_id, component_id)
+            }
+        })
+        .collect();
+
+    let inner_table_match_arms: Vec<_> = type_idents
+        .iter()
+        .map(|type_ident| {
+            quote! {
+                Self::#type_ident(inner) => inner.table()
+            }
+        })
+        .collect();
+
+    let inner_instance_match_arms: Vec<_> = type_idents
+        .iter()
+        .map(|type_ident| {
+            quote! {
+                Self::#type_ident(inner) => inner.instance_value()
             }
         })
         .collect();
@@ -87,11 +113,21 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
     let dialect_impl = quote! {
         impl MessageExt for #dialect_type {
             fn table(&self) -> &str {
-                unreachable!()
+                match self {
+                    #(#inner_table_match_arms),* ,
+                    _ => unimplemented!()
+                }
             }
 
             fn rows(&self) -> &[&str] {
                 unreachable!()
+            }
+
+            fn instance_value(&self) -> Option<i64> {
+                match self {
+                    #(#inner_instance_match_arms),* ,
+                    _ => None
+                }
             }
 
             fn insert<'a>(
@@ -165,6 +201,45 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 .iter()
                 .map(|varname| format!(":{varname}"))
                 .collect();
+
+            let instance_value_impl = msg_spec
+                .fields()
+                .iter()
+                .zip(var_names.iter())
+                .find(|(f, _)| f.instance())
+                .map_or_else(
+                    || quote! { None },
+                    |(f, varname)| {
+                        let var_ident = format_ident!("{}", varname);
+                        match (f.r#type(), f.r#enum()) {
+                            // String / array instance fields (e.g. DEBUG_VECT.name) don't
+                            // map to a single i64; the per-instance breakdown for them
+                            // simply collapses into the no-instance path.
+                            (MavType::Array(_, _), _) => quote! { None },
+                            (_, Some(_)) if is_field_bitmask(f) => quote! {
+                                Some(i64::from(self.#var_ident.bits()))
+                            },
+                            (_, Some(_)) => quote! {
+                                Some(i64::from(self.#var_ident.value()))
+                            },
+                            _ => quote! { Some(i64::from(self.#var_ident)) },
+                        }
+                    },
+                );
+
+            let instance_field_impl = msg_spec
+                .fields()
+                .iter()
+                .zip(row_names.iter())
+                .find(|(f, _)| f.instance())
+                .and_then(|(f, row_name)| match f.r#type() {
+                    MavType::Array(_, _) => None,
+                    _ => Some(row_name.clone()),
+                })
+                .map_or_else(
+                    || quote! { None },
+                    |row_name| quote! { Some(#row_name) },
+                );
 
             let param_assignments: Vec<_> = msg_spec
                 .fields()
@@ -268,6 +343,14 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         ]
                     }
 
+                    fn instance_value(&self) -> Option<i64> {
+                        #instance_value_impl
+                    }
+
+                    fn instance_field() -> Option<&'static str> {
+                        #instance_field_impl
+                    }
+
                     fn insert<'a>(
                         &'a self,
                         conn: &rusqlite::Connection,
@@ -307,9 +390,65 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
         })
         .collect();
 
+    let debug_fn_ident = format_ident!("last_message_debug_{}", dialect_name);
+    let debug_match_arms: Vec<_> = dialect
+        .messages()
+        .into_iter()
+        .filter(|msg_spec| {
+            // rapid lives in its own type universe (rapid-dialect generates its
+            // own `common` module), so the common-dialect MessageExt impls don't
+            // cover its inherited variants - emit impls for all rapid messages.
+            dialect.name() == "common"
+                || dialect_name == "rapid"
+                || common.get_message_by_id(msg_spec.id()).is_none()
+        })
+        .map(|msg_spec| {
+            let upper_case = msg_spec.name().to_string();
+            let lower_case = msg_spec.name().to_lowercase();
+            let type_name: String = lower_case
+                .split('_')
+                .map(|s| {
+                    let (h, t) = s.split_at(1);
+                    format!("{}{}", h.to_uppercase(), t)
+                })
+                .collect();
+
+            let type_ident = format_ident!("{}", type_name);
+
+            quote! {
+                #upper_case => db
+                    .last_message_filtered::<#dialect_mod::messages::#type_ident>(
+                        system_id,
+                        component_id,
+                        instance,
+                    )
+                    .map(|m| Some(format!("{m:#?}")))
+            }
+        })
+        .collect();
+
+    let debug_fn = quote! {
+        pub fn #debug_fn_ident(
+            db: &Db,
+            name: &str,
+            system_id: u8,
+            component_id: u8,
+            instance: Option<(&str, i64)>,
+        ) -> Result<Option<String>, DbError> {
+            match name {
+                #(#debug_match_arms),* ,
+                _ => {
+                    let _ = instance;
+                    Ok(None)
+                }
+            }
+        }
+    };
+
     quote! {
         #dialect_impl
         #(#message_impls)*
+        #debug_fn
     }
     .into()
 }

@@ -98,7 +98,9 @@ impl PaneUi for StatusPane {
                             ui.weak("♥ Vitals");
                             ui.horizontal(|ui| {
                                 // TODO: properly handle multiple batteries
-                                if let Ok(battery) = system.last_message::<BatteryStatus>() {
+                                if let Ok(battery) =
+                                    system.last_instance_message::<BatteryStatus>(1)
+                                {
                                     let voltage = battery
                                         .voltages
                                         .iter()

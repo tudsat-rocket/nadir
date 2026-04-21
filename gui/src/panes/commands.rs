@@ -287,9 +287,9 @@ impl PaneUi for CommandsPane {
                         row.col(|ui| {
                             let elapsed = Utc::now() - t;
                             let elapsed_log = elapsed.as_seconds_f32().log2();
-                            let color = ui.visuals().text_color().lerp_to_gamma(
+                            let color = ui.visuals().strong_text_color().lerp_to_gamma(
                                 ui.visuals().weak_text_color(),
-                                f32::min(elapsed_log, 1.0),
+                                ((elapsed_log + 4.0) / 5.0).clamp(0.0, 1.0),
                             );
                             ui.colored_label(
                                 color,
@@ -384,10 +384,10 @@ impl PaneUi for CommandsPane {
                         }
 
                         // TODO: acknowledgment status
-                        row.col(|ui| {
+                        row.col(|_ui| {
                             //ui.label("Failed");
                         });
-                        row.col(|ui| {
+                        row.col(|_ui| {
                             //ui.label("16:10:33");
                         });
                     });

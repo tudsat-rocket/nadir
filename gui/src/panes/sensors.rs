@@ -35,6 +35,7 @@ impl SensorsPane {
                     system_id,
                     component_id: 1,
                     message_name: msg.clone(),
+                    instance: None,
                     field_name: field,
                     alias: None,
                     unit: None,
@@ -56,24 +57,27 @@ impl PaneUi for SensorsPane {
 
         let size = egui::Vec2::new(ui.available_width(), ui.available_height() * 0.25);
 
+        let acc_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "acc");
         let acc_plot = Plot::new(
-            Self::sensor_plot_lines(system_id, "SCALED_IMU", "acc"),
+            &acc_lines,
             &behavior.core,
             behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, acc_plot);
 
+        let gyro_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "gyro");
         let gyro_plot = Plot::new(
-            Self::sensor_plot_lines(system_id, "SCALED_IMU", "gyro"),
+            &gyro_lines,
             &behavior.core,
             behavior.shared_plot_state,
             (None, None),
         );
         ui.add_sized(size, gyro_plot);
 
+        let mag_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "mag");
         let mag_plot = Plot::new(
-            Self::sensor_plot_lines(system_id, "SCALED_IMU", "mag"),
+            &mag_lines,
             &behavior.core,
             behavior.shared_plot_state,
             (None, None),
@@ -84,109 +88,119 @@ impl PaneUi for SensorsPane {
             egui::Layout::left_to_right(Align::TOP).with_cross_justify(true),
             |ui| {
                 let size = egui::Vec2::new(ui.available_width() * 0.5, ui.available_height());
-
+                let temp_lines = vec![
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_IMU".to_owned(),
+                        instance: None,
+                        field_name: "temperature".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_IMU2".to_owned(),
+                        instance: None,
+                        field_name: "temperature".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_IMU3".to_owned(),
+                        instance: None,
+                        field_name: "temperature".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_PRESSURE".to_owned(),
+                        instance: None,
+                        field_name: "temperature".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_PRESSURE2".to_owned(),
+                        instance: None,
+                        field_name: "temperature".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_PRESSURE3".to_owned(),
+                        instance: None,
+                        field_name: "temperature".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                ];
                 let temp_plot = Plot::new(
-                    vec![
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_IMU".to_owned(),
-                            field_name: "temperature".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_IMU2".to_owned(),
-                            field_name: "temperature".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_IMU3".to_owned(),
-                            field_name: "temperature".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_PRESSURE".to_owned(),
-                            field_name: "temperature".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_PRESSURE2".to_owned(),
-                            field_name: "temperature".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_PRESSURE3".to_owned(),
-                            field_name: "temperature".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                    ],
+                    &temp_lines,
                     &behavior.core,
                     behavior.shared_plot_state,
                     (None, None),
                 );
                 ui.add_sized(size, temp_plot);
 
+                let pres_lines = vec![
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_PRESSURE".to_owned(),
+                        instance: None,
+                        field_name: "press_abs".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_PRESSURE2".to_owned(),
+                        instance: None,
+                        field_name: "press_abs".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                    PlotLine {
+                        system_id,
+                        component_id: 1,
+                        message_name: "SCALED_PRESSURE3".to_owned(),
+                        instance: None,
+                        field_name: "press_abs".to_owned(),
+                        alias: None,
+                        unit: None,
+                        color: None,
+                        scale: None,
+                    },
+                ];
                 let pres_plot = Plot::new(
-                    vec![
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_PRESSURE".to_owned(),
-                            field_name: "press_abs".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_PRESSURE2".to_owned(),
-                            field_name: "press_abs".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                        PlotLine {
-                            system_id,
-                            component_id: 1,
-                            message_name: "SCALED_PRESSURE3".to_owned(),
-                            field_name: "press_abs".to_owned(),
-                            alias: None,
-                            unit: None,
-                            color: None,
-                            scale: None,
-                        },
-                    ],
+                    &pres_lines,
                     &behavior.core,
                     behavior.shared_plot_state,
                     (None, None),
