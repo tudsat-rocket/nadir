@@ -113,6 +113,8 @@ impl PreflightPane {
                                 ui.weak("💤 Disabled");
                             } else if healthy {
                                 ui.colored_label(COLOR_INDICATOR_GOOD, "✔");
+                            } else if stat == MavSysStatusSensor::MAV_SYS_STATUS_PREARM_CHECK {
+                                ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Not Ready");
                             } else {
                                 ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Unhealthy");
                             }
@@ -145,7 +147,9 @@ impl PreflightPane {
 
                             ui.weak(name_display);
 
-                            if !enabled {
+                            if !enabled && stat == MavSysStatusSensorExtended::MAV_SYS_STATUS_RECOVERY_SYSTEM {
+                                ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Disarmed");
+                            } else if !enabled {
                                 ui.weak("💤 Disabled");
                             } else if healthy {
                                 ui.colored_label(COLOR_INDICATOR_GOOD, "✔");
