@@ -295,7 +295,10 @@ impl eframe::App for App {
         }
 
         ctx.input(|input| {
-            if input.key_down(Key::Num0) && input.modifiers.contains(Modifiers::CTRL) {
+            if input.key_down(Key::Num0)
+                && input.modifiers.contains(Modifiers::CTRL)
+                && input.modifiers.contains(Modifiers::SHIFT)
+            {
                 self.active_view = View::Overview;
             }
 
@@ -314,6 +317,7 @@ impl eframe::App for App {
                 let sysid = (i + 1) as u8;
                 if input.key_down(*key)
                     && input.modifiers.contains(Modifiers::CTRL)
+                    && input.modifiers.contains(Modifiers::SHIFT)
                     && self.core.known_system_ids().contains(&sysid)
                 {
                     self.active_view = View::System(sysid);
