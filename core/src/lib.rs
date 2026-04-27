@@ -210,6 +210,24 @@ impl Core {
                         }
 
                         system.notify_of_frame(frame, callback, link.endpoint.clone());
+                    } else if let Ok(message) = frame.decode::<rapid_dialect::Rapid>() {
+                        if let Err(e) =
+                            self.db
+                                .write_message(frame.system_id(), frame.component_id(), &message)
+                        {
+                            tracing::error!("Failed to process message: {e:?}");
+                        }
+
+                        let links = self.links.lock().unwrap();
+                        let link = links.get(&link_id).unwrap();
+
+                        let mut systems = self.systems.lock().unwrap();
+                        let system_id = frame.system_id();
+                        let Some(system) = systems.get_mut(&system_id) else {
+                            continue;
+                        };
+
+                        system.notify_of_frame(frame, callback, link.endpoint.clone());
                     }
 
                     let link = links.get_mut(&link_id).unwrap();

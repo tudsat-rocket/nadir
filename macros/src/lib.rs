@@ -35,9 +35,20 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
     let dialect_type = input.dialect_type;
     let dialect_mod = input.dialect_mod;
 
-    let protocol = mavspec::definitions::protocol();
-    let common = protocol.get_dialect_by_name("common").unwrap();
-    let dialect = protocol.get_dialect_by_name(&dialect_name).unwrap();
+    // rapid lives in its own crate and ships its own parsed protocol; mavspec's
+    // bundled definitions only cover common, ardupilotmega, standard, minimal.
+    let (protocol, common, dialect) = if dialect_name == "rapid" {
+        let p = rapid_dialect::definitions::protocol();
+        let c = p.get_dialect_by_canonical_name("common").unwrap();
+        let d = p.get_dialect_by_canonical_name(&dialect_name).unwrap();
+        (p, c, d)
+    } else {
+        let p = mavspec::definitions::protocol();
+        let c = p.get_dialect_by_name("common").unwrap();
+        let d = p.get_dialect_by_name(&dialect_name).unwrap();
+        (p, c, d)
+    };
+    let _ = protocol;
 
     let inner_message_match_arms: Vec<_> = dialect
         .messages()
@@ -105,7 +116,12 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
         .messages()
         .into_iter()
         .filter(|msg_spec| {
-            dialect.name() == "common" || common.get_message_by_id(msg_spec.id()).is_none()
+            // rapid lives in its own type universe (rapid-dialect generates its
+            // own `common` module), so the common-dialect MessageExt impls don't
+            // cover its inherited variants - emit impls for all rapid messages.
+            dialect.name() == "common"
+                || dialect_name == "rapid"
+                || common.get_message_by_id(msg_spec.id()).is_none()
         })
         .map(|msg_spec| {
             let lower_case = msg_spec.name().to_lowercase();
@@ -345,5 +361,7 @@ fn is_field_bitmask(f: &MessageField) -> bool {
             | "GOPRO_HEARTBEAT_FLAGS"
             | "EKF_STATUS_FLAGS"
             | "VIDEO_STREAM_STATUS_FLAGS"
+            | "PRESSURE_VESSEL_FLAG"
+            | "ROCKET_CAPABILITY"
     )
 }

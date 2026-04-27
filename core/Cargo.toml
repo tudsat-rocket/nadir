@@ -14,6 +14,7 @@ tracing = { workspace = true }
 
 mavspec = { workspace = true }
 maviola = { workspace = true }
+rapid-dialect = { workspace = true }
 socketcan = { version = "3.5.0", features = [ "tokio" ] }
 tokio-serial = "5.4.5"
 

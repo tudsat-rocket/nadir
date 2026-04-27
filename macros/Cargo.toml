@@ -13,6 +13,7 @@ tracing = { workspace = true }
 
 mavspec = { workspace = true }
 mavinspect = { workspace = true }
+rapid-dialect = { workspace = true }
 convert_case = { workspace = true }
 
 quote = "1.0.42"

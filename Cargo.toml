@@ -26,6 +26,7 @@ convert_case = "0.10.0"
 mavinspect = { version = "0.6.6" }
 mavspec = { version = "0.6.7", features = ["definitions", "metadata", "std"] }
 maviola = { version = "0.3.0", features = ["async", "dlct-standard", "dlct-common", "dlct-ardupilotmega"] }
+rapid-dialect = { git = "https://github.com/tudsat-rocket/rapid-dialect", features = ["definitions"] }
 
 egui = { version = "0.32" }
 egui-wgpu = { version = "0.32" }

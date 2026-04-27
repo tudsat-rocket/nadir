@@ -16,6 +16,7 @@ convert_case = { workspace = true }
 
 mavspec = { workspace = true }
 maviola = { workspace = true }
+rapid-dialect = { workspace = true }
 
 egui = { workspace = true }
 egui-wgpu = { workspace = true }

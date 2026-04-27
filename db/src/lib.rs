@@ -110,6 +110,12 @@ impl Db {
         let protocol = mavspec::definitions::protocol();
         define_message_tables!(conn, protocol.get_dialect_by_name("common").unwrap());
         define_message_tables!(conn, protocol.get_dialect_by_name("ardupilotmega").unwrap());
+        define_message_tables!(
+            conn,
+            rapid_dialect::definitions::protocol()
+                .get_dialect_by_canonical_name("rapid")
+                .unwrap()
+        );
 
         Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -264,6 +270,13 @@ impl Db {
                     .and_then(|msg| msg.get_field_by_name(field_name))
             })
             .next()
+            .or_else(|| {
+                rapid_dialect::definitions::protocol()
+                    .get_dialect_by_canonical_name("rapid")
+                    .unwrap()
+                    .get_message_by_name(&msg_name)
+                    .and_then(|msg| msg.get_field_by_name(field_name))
+            })
         else {
             unreachable!();
         };
@@ -306,3 +319,4 @@ macros::implement_message_ext_for_dialect!(
     mavspec::rust::dialects::Ardupilotmega,
     mavspec::rust::dialects::ardupilotmega
 );
+macros::implement_message_ext_for_dialect!("rapid", rapid_dialect::Rapid, rapid_dialect::rapid);
