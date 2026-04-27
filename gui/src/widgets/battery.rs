@@ -8,6 +8,7 @@ pub struct BatteryIndicator {
     pub voltage: Option<f32>,
     pub current: Option<f32>,
     pub consumed: Option<f32>,
+    pub compact: bool,
 }
 
 impl egui::Widget for BatteryIndicator {
@@ -27,7 +28,7 @@ impl egui::Widget for BatteryIndicator {
                 ui.set_height(s.y);
 
                 ui.horizontal_top(|ui| {
-                    let bar_size = Vec2::new(15.0, ui.available_height());
+                    let bar_size = Vec2::new(8.0, ui.available_height());
                     let (response, painter) = ui.allocate_painter(bar_size, Sense::empty());
 
                     painter.rect_filled(
@@ -41,8 +42,10 @@ impl egui::Widget for BatteryIndicator {
                     painter.rect_filled(fill_rect, CornerRadius::ZERO, color);
 
                     ui.with_layout(Layout::top_down(Align::RIGHT), |ui| {
-                        ui.weak(format!("#{}", self.id));
-                        ui.add_space(5.0);
+                        if !self.compact {
+                            ui.weak(format!("#{}", self.id));
+                            ui.add_space(5.0);
+                        }
 
                         ui.colored_label(color, format!("{:>3.0}%", self.soc * 100.0));
 
@@ -63,10 +66,12 @@ impl egui::Widget for BatteryIndicator {
                             ui.colored_label(color, format!("{i:.1}A"));
                         }
 
-                        if let Some(cap) = self.consumed {
-                            ui.add_space(5.0);
-                            ui.label(format!("{cap:.0}"));
-                            ui.weak("mAh");
+                        if !self.compact {
+                            if let Some(cap) = self.consumed {
+                                ui.add_space(5.0);
+                                ui.label(format!("{cap:.0}"));
+                                ui.weak("mAh");
+                            }
                         }
                     });
                 });

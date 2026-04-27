@@ -1,438 +1,78 @@
-use core::{ParamProgress, System};
+use core::{MessageInstance, System};
 
-use egui::{Button, Color32, DragValue, Frame, Grid, Image, Margin, Pos2, Rect, Stroke, Vec2};
+use egui::{Button, Color32, DragValue, Frame, Image, Pos2, Rect, RichText, Vec2};
 use mavspec::rust::dialects::common::enums::MavType;
-use mavspec::rust::dialects::common::messages::{
-    BatteryStatus, Heartbeat, ServoOutputRaw, SysStatus,
-};
+use mavspec::rust::dialects::common::messages::{BatteryStatus, Heartbeat, SysStatus};
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
+use rapid_dialect::rapid::enums::ValveId;
 
-use crate::panes::PaneUi;
-use crate::widgets::{BatteryIndicator, Dial};
+use crate::colors::COLOR_INDICATOR_WARNING;
+use crate::panes::{PaneUi, TreeBehavior};
+use crate::views::View;
+use crate::widgets::{BatteryIndicator, Plot, PlotLine};
+
+mod arducopter;
+mod arduplane;
+mod px4;
+mod rocket;
 
 pub struct PropulsionPane {
-    pub motor_id: u32,
-    pub motor_test_throttle: f32,
-    pub servo_id: u32,
-    pub servo_pulse_width: u32,
-    pub servo_cycles: u32,
-    pub servo_cycle_time: u32,
+    pressurization_throttle: f32,
+    oxidizer_fill_throttle: f32,
+    main_throttle: f32,
+}
+
+enum ValveControl<'a> {
+    Pulse,
+    Throttle(&'a mut f32),
+}
+
+// TODO: properly handle multiple batteries / different instance IDs
+pub(super) fn battery_indicator(system: &System, compact: bool) -> Option<BatteryIndicator> {
+    if let Ok(battery) = system.last_instance_message::<BatteryStatus>(1) {
+        let voltage = battery
+            .voltages
+            .iter()
+            .filter(|v| **v > 0 && **v < u16::MAX)
+            .map(|v| f32::from(*v) / 1000.0)
+            .next_back();
+
+        Some(BatteryIndicator {
+            id: battery.id,
+            soc: f32::from(battery.battery_remaining) / 100.0,
+            voltage,
+            current: (battery.current_battery != -1)
+                .then_some(f32::from(battery.current_battery) / 1000.0),
+            consumed: (battery.current_consumed != -1).then_some(battery.current_consumed as f32),
+            compact,
+        })
+    } else if let Ok(status) = system.last_message::<SysStatus>() {
+        Some(BatteryIndicator {
+            id: 0,
+            soc: f32::from(status.battery_remaining) / 100.0,
+            voltage: Some(f32::from(status.voltage_battery) / 1000.0),
+            current: Some(f32::from(status.current_battery) / 100.0),
+            consumed: None,
+            compact,
+        })
+    } else {
+        None
+    }
 }
 
 impl PropulsionPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {
-            motor_id: 1,
-            motor_test_throttle: 10.0,
-            servo_id: 1,
-            servo_pulse_width: 1500,
-            servo_cycles: 3,
-            servo_cycle_time: 500,
-        }
-    }
-
-    #[allow(clippy::similar_names)]
-    fn draw_arduplane_servos(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
-        let Ok(servos) = system.last_message::<ServoOutputRaw>() else {
-            return;
-        };
-
-        let params = system.params.lock().unwrap();
-        let ParamProgress::Complete(ref params) = *params else {
-            return;
-        };
-
-        let mins: Vec<_> = (1..=6)
-            .map(|i| params.get(&format!("SERVO{i}_MIN")).map(|p| p.value))
-            .collect();
-        let maxs: Vec<_> = (1..=6)
-            .map(|i| params.get(&format!("SERVO{i}_MAX")).map(|p| p.value))
-            .collect();
-        let trims: Vec<_> = (1..=6)
-            .map(|i| params.get(&format!("SERVO{i}_TRIM")).map(|p| p.value))
-            .collect();
-
-        let motor_size = Vec2::new(130.0, 100.0);
-        let servo_size = Vec2::new(190.0, 60.0);
-
-        let motor1_rect = Rect::from_two_pos(
-            square.shrink(20.0).left_top(),
-            square.shrink(20.0).left_top() + motor_size,
-        );
-
-        let aileron_l_rect = Rect::from_two_pos(
-            square.shrink(20.0).left_center(),
-            square.shrink(20.0).left_center() + servo_size,
-        );
-
-        let rudder_l_rect = Rect::from_two_pos(
-            aileron_l_rect.left_bottom() + Vec2::new(0.0, 30.0),
-            aileron_l_rect.left_bottom() + Vec2::new(0.0, 30.0) + servo_size,
-        );
-
-        let rudder_r_rect = Rect::from_two_pos(
-            square.shrink(20.0).right_center() + Vec2::new(-servo_size.x, servo_size.y + 30.0),
-            square.shrink(20.0).right_center()
-                + Vec2::new(-servo_size.x, servo_size.y + 30.0)
-                + servo_size,
-        );
-
-        let all_servos = [
-            servos.servo1_raw,
-            servos.servo2_raw,
-            servos.servo3_raw,
-            servos.servo4_raw,
-            servos.servo5_raw,
-            servos.servo6_raw,
-            servos.servo7_raw,
-            servos.servo8_raw,
-        ];
-
-        ui.place(motor1_rect, |ui: &mut egui::Ui| {
-            egui::Frame::dark_canvas(ui.style())
-                .inner_margin(Margin::same(5))
-                .show(ui, |ui| {
-                    ui.add(Dial {
-                        value: f32::from(servos.servo3_raw),
-                        min: mins[2].map_or(1000.0, core::ParamVal::as_float),
-                        max: maxs[2].map_or(2000.0, core::ParamVal::as_float),
-                        absolute_min: 1000.0,
-                        absolute_max: 2000.0,
-                        trim: None,
-                    });
-
-                    egui::Grid::new(ui.next_auto_id())
-                        .num_columns(2)
-                        .min_col_width(10.0)
-                        .show(ui, |ui| {
-                            ui.weak("#");
-                            ui.monospace("3");
-                            ui.end_row();
-
-                            ui.weak("Fn");
-                            ui.label("Throttle");
-                            ui.end_row();
-                        });
-                })
-                .response
-        });
-
-        for (i, rect, function) in [
-            (0, aileron_l_rect, "Aileron"),
-            (1, rudder_l_rect, "Elevator"),
-            (3, rudder_r_rect, "Rudder"),
-        ] {
-            ui.place(rect, |ui: &mut egui::Ui| {
-                egui::Frame::dark_canvas(ui.style())
-                    .inner_margin(Margin::same(5))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-
-                        ui.horizontal_top(|ui| {
-                            ui.vertical(|ui| {
-                                ui.add_space(5.0);
-                                ui.add_sized(
-                                    Vec2::new(80.0, 50.0),
-                                    Dial {
-                                        value: f32::from(all_servos[i]),
-                                        min: mins[i].map_or(1000.0, core::ParamVal::as_float),
-                                        max: maxs[i].map_or(2000.0, core::ParamVal::as_float),
-                                        absolute_min: 1000.0,
-                                        absolute_max: 2000.0,
-                                        trim: trims[i].map(core::ParamVal::as_float),
-                                    },
-                                );
-                            });
-
-                            ui.vertical(|ui| {
-                                egui::Grid::new(ui.next_auto_id())
-                                    .num_columns(2)
-                                    .min_col_width(10.0)
-                                    .show(ui, |ui| {
-                                        ui.weak("#");
-                                        ui.monospace(format!("{}", i + 1));
-                                        ui.end_row();
-
-                                        ui.weak("Fn");
-                                        ui.label(function);
-                                        ui.end_row();
-
-                                        ui.weak("Rev");
-                                        ui.label("No"); // TODO
-                                        ui.end_row();
-                                    });
-                            });
-                        });
-                    })
-                    .response
-            });
-        }
-    }
-
-    fn draw_px4_rotors(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
-        let n = square.width();
-
-        let Ok(servos) = system.last_message::<ServoOutputRaw>() else {
-            return;
-        };
-
-        let params = system.params.lock().unwrap();
-        let ParamProgress::Complete(ref params) = *params else {
-            return;
-        };
-
-        let Some(count_param) = params.get("CA_ROTOR_COUNT") else {
-            return;
-        };
-
-        let count = count_param.value.as_unsigned_int();
-
-        let Some(px): Option<Vec<f32>> = (0..count)
-            .map(|i| {
-                params
-                    .get(&format!("CA_ROTOR{i}_PX"))
-                    .map(|p| p.value.as_float())
-            })
-            .collect()
-        else {
-            return;
-        };
-
-        let Some(py): Option<Vec<f32>> = (0..count)
-            .map(|i| {
-                params
-                    .get(&format!("CA_ROTOR{i}_PY"))
-                    .map(|p| p.value.as_float())
-            })
-            .collect()
-        else {
-            return;
-        };
-
-        // TODO
-        let mins = [1000.0; 8];
-        let maxs = [2000.0; 8];
-
-        let max = px
-            .iter()
-            .chain(py.iter())
-            .map(|f| f.abs())
-            .fold(0.0, f32::max);
-
-        for (i, (x, y)) in px.iter().zip(py.iter()).enumerate() {
-            let pos = square.center() + Vec2::new(*y, *x * -1.0) * 0.35 * n / max;
-            let rect = Rect::from_center_size(pos, Vec2::new(120.0, 120.0));
-            // TODO: exact motor mapping, more motors
-
-            let vector = pos - square.center();
-            let normal = Vec2::new(vector.y, -vector.x).normalized();
-            ui.painter().line(
-                vec![square.center() + normal * 5.0, pos + normal * 5.0],
-                Stroke::new(1.0, ui.visuals().weak_text_color()),
-            );
-            ui.painter().line(
-                vec![square.center() - normal * 5.0, pos - normal * 5.0],
-                Stroke::new(1.0, ui.visuals().weak_text_color()),
-            );
-
-            let all_servos = [
-                servos.servo1_raw,
-                servos.servo2_raw,
-                servos.servo3_raw,
-                servos.servo4_raw,
-            ];
-
-            ui.place(rect, |ui: &mut egui::Ui| {
-                egui::Frame::dark_canvas(ui.style())
-                    .inner_margin(Margin::same(5))
-                    .show(ui, |ui| {
-                        ui.vertical_centered_justified(|ui| {
-                            ui.set_height(rect.height() - 10.0);
-
-                            ui.add_space(10.0);
-                            ui.add_sized(
-                                Vec2::new(100.0, 50.0),
-                                Dial {
-                                    value: f32::from(all_servos[i]),
-                                    min: mins[i],
-                                    max: maxs[i],
-                                    absolute_min: 1000.0,
-                                    absolute_max: 2000.0,
-                                    trim: None,
-                                },
-                            );
-
-                            egui::Grid::new(ui.next_auto_id())
-                                .num_columns(2)
-                                .min_col_width(10.0)
-                                .show(ui, |ui| {
-                                    ui.weak("#");
-                                    ui.monospace(format!("{}", i + 1));
-                                    ui.end_row();
-
-                                    ui.weak("Dir");
-                                    // TODO
-                                    if i >= 2 {
-                                        ui.label("🔃CW");
-                                    } else {
-                                        ui.label("🔄CCW");
-                                    }
-                                    ui.end_row();
-                                });
-                        });
-                    })
-                    .response
-            });
-        }
-    }
-
-    fn draw_arducopter_rotors(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
-        let n = square.width();
-
-        let Ok(servos) = system.last_message::<ServoOutputRaw>() else {
-            return;
-        };
-
-        let params = system.params.lock().unwrap();
-        let ParamProgress::Complete(ref params) = *params else {
-            return;
-        };
-
-        let Some(frame_class) = params.get("FRAME_CLASS") else {
-            return;
-        };
-
-        let Some(frame_type) = params.get("FRAME_TYPE") else {
-            return;
-        };
-
-        let positions = match (
-            frame_class.value.as_unsigned_int(),
-            frame_type.value.as_unsigned_int(),
-        ) {
-            // Quad Plus & X
-            (1, 0) => vec![
-                Vec2::new(1.0, 0.0),
-                Vec2::new(-1.0, 0.0),
-                Vec2::new(0.0, -1.0),
-                Vec2::new(0.0, 1.0),
-            ],
-            (1, 1) => vec![
-                Vec2::new(0.95, -0.95),
-                Vec2::new(-0.95, 0.95),
-                Vec2::new(-0.95, -0.95),
-                Vec2::new(0.95, 0.95),
-            ],
-            _ => {
-                return;
-            }
-        };
-
-        // TODO
-        let mins = [1000.0; 8];
-        let maxs = [2000.0; 8];
-
-        for (i, pos_normalized) in positions.iter().enumerate() {
-            let pos = square.center() + *pos_normalized * 0.30 * n;
-
-            let vector = pos - square.center();
-            let normal = Vec2::new(vector.y, -vector.x).normalized();
-            ui.painter().line(
-                vec![square.center() + normal * 5.0, pos + normal * 5.0],
-                Stroke::new(1.0, ui.visuals().weak_text_color()),
-            );
-            ui.painter().line(
-                vec![square.center() - normal * 5.0, pos - normal * 5.0],
-                Stroke::new(1.0, ui.visuals().weak_text_color()),
-            );
-
-            let all_servos = [
-                servos.servo1_raw,
-                servos.servo2_raw,
-                servos.servo3_raw,
-                servos.servo4_raw,
-            ];
-
-            let rect = Rect::from_center_size(pos, Vec2::new(120.0, 120.0));
-            ui.place(rect, |ui: &mut egui::Ui| {
-                egui::Frame::dark_canvas(ui.style())
-                    .inner_margin(Margin::same(5))
-                    .show(ui, |ui| {
-                        ui.vertical_centered_justified(|ui| {
-                            ui.set_height(rect.height() - 10.0);
-
-                            ui.add_space(10.0);
-                            ui.add_sized(
-                                Vec2::new(100.0, 50.0),
-                                Dial {
-                                    value: f32::from(all_servos[i]),
-                                    min: mins[i],
-                                    max: maxs[i],
-                                    absolute_min: 1000.0,
-                                    absolute_max: 2000.0,
-                                    trim: None,
-                                },
-                            );
-
-                            egui::Grid::new(ui.next_auto_id())
-                                .num_columns(2)
-                                .min_col_width(10.0)
-                                .show(ui, |ui| {
-                                    ui.weak("#");
-                                    ui.monospace(format!("{}", i + 1));
-                                    ui.end_row();
-
-                                    ui.weak("Dir");
-                                    // TODO
-                                    if i >= 2 {
-                                        ui.label("🔃CW");
-                                    } else {
-                                        ui.label("🔄CCW");
-                                    }
-                                    ui.end_row();
-                                });
-                        });
-                    })
-                    .response
-            });
+            pressurization_throttle: 0.0,
+            oxidizer_fill_throttle: 0.0,
+            main_throttle: 0.0,
         }
     }
 
     fn draw_battery(&mut self, ui: &mut egui::Ui, system: &System, pos: Pos2) {
         let battery_rect = Rect::from_center_size(pos, Vec2::new(60.0, 120.0));
-
-        // TODO: properly handle multiple batteries / different instance IDs
-        if let Ok(battery) = system.last_message::<BatteryStatus>() {
-            let voltage = battery
-                .voltages
-                .iter()
-                .filter(|v| **v > 0 && **v < u16::MAX)
-                .map(|v| f32::from(*v) / 1000.0)
-                .next_back();
-
-            ui.place(
-                battery_rect,
-                BatteryIndicator {
-                    id: battery.id,
-                    soc: f32::from(battery.battery_remaining) / 100.0,
-                    voltage,
-                    current: (battery.current_battery != -1)
-                        .then_some(f32::from(battery.current_battery) / 1000.0),
-                    consumed: (battery.current_consumed != -1)
-                        .then_some(battery.current_consumed as f32),
-                },
-            );
-        } else if let Ok(status) = system.last_message::<SysStatus>() {
-            ui.place(
-                battery_rect,
-                BatteryIndicator {
-                    id: 0,
-                    soc: f32::from(status.battery_remaining) / 100.0,
-                    voltage: Some(f32::from(status.voltage_battery) / 1000.0),
-                    current: Some(f32::from(status.current_battery) / 100.0),
-                    consumed: None,
-                },
-            );
+        if let Some(indicator) = battery_indicator(system, false) {
+            ui.place(battery_rect, indicator);
         }
     }
 
@@ -444,13 +84,22 @@ impl PropulsionPane {
         };
 
         Frame::dark_canvas(ui.style()).show(ui, |ui| {
-            ui.set_width(n);
-            ui.set_height(n);
+            ui.set_width(square.width());
+            ui.set_height(square.height());
+
+            // Frame::show shifts the inner ui by its inner_margin, so the outer
+            // `square` no longer aligns with the visible content area. Rebind to
+            // the inner ui's origin so absolute-coordinate painting matches the
+            // frame border.
+            let square = Rect::from_min_size(ui.max_rect().min, square.size());
 
             // TODO: extend support
             match (heartbeat.autopilot, heartbeat.type_) {
+                (_, MavType::Rocket) => {
+                    rocket::draw_hybrid(ui, system, square);
+                }
                 (MavAutopilot::Px4, _) => {
-                    self.draw_px4_rotors(ui, system, square);
+                    px4::draw_rotors(ui, system, square);
                     self.draw_battery(ui, system, square.center());
                 }
                 (MavAutopilot::Ardupilotmega, MavType::FixedWing) => {
@@ -464,123 +113,173 @@ impl PropulsionPane {
                             .tint(Color32::WHITE.gamma_multiply(0.5)),
                     );
 
-                    self.draw_arduplane_servos(ui, system, square);
+                    arduplane::draw_servos(ui, system, square);
                     self.draw_battery(ui, system, square.center().lerp(square.center_top(), 0.5));
                 }
                 (MavAutopilot::Ardupilotmega, _) => {
-                    self.draw_arducopter_rotors(ui, system, square);
+                    arducopter::draw_rotors(ui, system, square);
                     self.draw_battery(ui, system, square.center());
                 }
                 _ => {}
             }
         });
     }
+}
 
-    fn draw_controls(&mut self, ui: &mut egui::Ui, _system: &System, _square: Rect) {
-        let first_col_width = 20.0;
-        let c = f32::min(
-            f32::max(ui.available_width() - first_col_width, first_col_width),
-            80.0,
-        );
+fn valve_row(
+    ui: &mut egui::Ui,
+    system: &System,
+    label: &str,
+    id: ValveId,
+    control: ValveControl<'_>,
+    button_size: Vec2,
+) {
+    let state = rocket::valve_state(system, id);
 
-        ui.vertical(|ui| {
-            ui.weak("⚙ Motor Test");
-            ui.add_space(5.0);
+    ui.weak(label.to_uppercase());
 
-            Grid::new(ui.next_auto_id())
-                .num_columns(2)
-                .min_col_width(first_col_width)
-                .spacing(Vec2::new(0.0, ui.spacing().item_spacing.y))
-                .show(ui, |ui| {
-                    ui.weak("＃");
-                    ui.add_sized(Vec2::new(c, 20.0), DragValue::new(&mut self.motor_id));
-                    ui.end_row();
-
-                    ui.weak("⏩");
-                    ui.add_sized(
-                        Vec2::new(c, 20.0),
-                        DragValue::new(&mut self.motor_test_throttle).suffix("%"),
-                    );
-                    ui.end_row();
-
-                    ui.horizontal(|_ui| {});
-                    ui.add_sized(Vec2::new(c, 20.0), Button::new("Run"));
-                    ui.end_row();
-                });
-        });
-
-        ui.add_space(5.0);
-        ui.separator();
-        ui.add_space(5.0);
-
-        ui.vertical(|ui| {
-            ui.weak("⟳ Set Servo");
-            ui.add_space(5.0);
-
-            Grid::new(ui.next_auto_id())
-                .num_columns(2)
-                .min_col_width(first_col_width)
-                .spacing(Vec2::new(0.0, ui.spacing().item_spacing.y))
-                .show(ui, |ui| {
-                    ui.weak("＃");
-                    ui.add_sized(Vec2::new(c, 20.0), DragValue::new(&mut self.servo_id));
-                    ui.end_row();
-
-                    ui.weak("🏁");
-                    ui.add_sized(
-                        Vec2::new(c, 20.0),
-                        DragValue::new(&mut self.servo_pulse_width).suffix("µs"),
-                    );
-                    ui.end_row();
-
-                    ui.horizontal(|_ui| {});
-                    ui.add_sized(Vec2::new(c, 20.0), Button::new("Set"));
-                    ui.end_row();
-                });
-        });
-
-        ui.add_space(5.0);
-        ui.separator();
-        ui.add_space(5.0);
-
-        ui.vertical(|ui| {
-            ui.weak("🔃 Wiggle Servo");
-            ui.add_space(5.0);
-
-            Grid::new(ui.next_auto_id())
-                .num_columns(2)
-                .min_col_width(first_col_width)
-                .spacing(Vec2::new(0.0, ui.spacing().item_spacing.y))
-                .show(ui, |ui| {
-                    ui.weak("❌");
-                    ui.add_sized(Vec2::new(c, 20.0), DragValue::new(&mut self.servo_cycles));
-                    ui.end_row();
-
-                    ui.weak("⏱");
-                    ui.add_sized(
-                        Vec2::new(c, 20.0),
-                        DragValue::new(&mut self.servo_cycle_time).suffix("ms"),
-                    );
-                    ui.end_row();
-
-                    ui.horizontal(|_ui| {});
-                    ui.add_sized(Vec2::new(c, 20.0), Button::new("Wiggle"));
-                    ui.end_row();
-                });
-        });
+    let close_active = state == Some(0.0);
+    let close_text = if close_active { "CLOSED" } else { "CLOSE" };
+    let close_btn = Button::selectable(close_active, RichText::new(close_text));
+    if ui.add_sized(button_size, close_btn).clicked() {
+        system.do_set_valve(id, 0.0);
     }
+
+    match control {
+        ValveControl::Pulse => {
+            let _ = ui
+                .add_sized(button_size, Button::new(RichText::new("PULSE")))
+                .clicked();
+        }
+        ValveControl::Throttle(value) => {
+            ui.allocate_ui_with_layout(
+                button_size,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    let dec = ui.small_button(RichText::new("\u{2193}"));
+                    if dec.clicked() {
+                        *value = (*value - 1.0).max(0.0);
+                    }
+                    let btn_w = dec.rect.width();
+                    let spacing = ui.spacing().item_spacing.x;
+                    let drag_w = (ui.available_width() - btn_w - spacing).max(0.0);
+                    ui.add_sized(
+                        Vec2::new(drag_w, button_size.y),
+                        DragValue::new(value)
+                            .speed(1.0)
+                            .range(0.0..=100.0)
+                            .suffix(" %"),
+                    );
+                    if ui.small_button(RichText::new("\u{2191}")).clicked() {
+                        *value = (*value + 1.0).min(100.0);
+                    }
+                },
+            );
+        }
+    }
+
+    let open_active = matches!(state, Some(s) if s > 0.0);
+    let open_btn = if open_active {
+        Button::selectable(true, RichText::new("OPEN")).fill(COLOR_INDICATOR_WARNING)
+    } else {
+        Button::selectable(false, RichText::new("OPEN"))
+    };
+    if open_active {
+        ui.style_mut().visuals.override_text_color = Some(Color32::BLACK);
+    }
+    if ui.add_sized(button_size, open_btn).clicked() {
+        system.do_set_valve(id, 1.0);
+    }
+    ui.style_mut().visuals.override_text_color = None;
+
+    ui.end_row();
+}
+
+fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
+    [
+        (ValveId::PressurantVent, "Pressurant Vent"),
+        (ValveId::Pressurization, "Pressurization"),
+        (ValveId::OxidizerVent, "Oxidizer Vent"),
+        (ValveId::OxidizerFill, "Oxidizer Fill"),
+        (ValveId::Main, "Main"),
+    ]
+    .into_iter()
+    .map(|(id, alias)| PlotLine {
+        system_id,
+        component_id: 1,
+        message_name: "VALVE".to_owned(),
+        instance: Some(MessageInstance {
+            field: "id".to_owned(),
+            value: i64::from(id.value()),
+        }),
+        field_name: "state".to_owned(),
+        alias: Some(alias.to_owned()),
+        unit: None,
+        color: None,
+        scale: None,
+    })
+    .collect()
+}
+
+fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
+    let mut lines: Vec<PlotLine> = [
+        (0, "Pressurant", rocket::N2_COLOR),
+        (1, "Oxidizer", rocket::N2O_COLOR),
+        (2, "Combustion", rocket::CC_COLOR),
+    ]
+    .into_iter()
+    .map(|(id, alias, color)| PlotLine {
+        system_id,
+        component_id: 1,
+        message_name: "PRESSURE_VESSEL".to_owned(),
+        instance: Some(MessageInstance {
+            field: "id".to_owned(),
+            value: id,
+        }),
+        field_name: "pressure1".to_owned(),
+        alias: Some(alias.to_owned()),
+        unit: Some("bar".to_owned()),
+        color: Some(color),
+        // PRESSURE_VESSEL.pressure1 is in kPa; the diagram and rendering use bar.
+        scale: Some(0.01),
+    })
+    .collect();
+
+    lines.push(PlotLine {
+        system_id,
+        component_id: 1,
+        message_name: "PRESSURE_VESSEL".to_owned(),
+        instance: Some(MessageInstance {
+            field: "id".to_owned(),
+            value: 1,
+        }),
+        field_name: "level".to_owned(),
+        alias: Some("Fill Level".to_owned()),
+        unit: Some("%".to_owned()),
+        color: Some(Color32::WHITE),
+        // PRESSURE_VESSEL.level is 0..=10000; render as percent.
+        scale: Some(0.01),
+    });
+
+    lines
 }
 
 impl PaneUi for PropulsionPane {
-    fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+    fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
+        let View::System(system_id) = behavior.active_view else {
+            return;
+        };
+        let Some(system) = behavior.core.system(system_id) else {
+            return;
+        };
         let Ok(heartbeat) = system.last_message::<Heartbeat>() else {
             return;
         };
 
-        // TODO: extend support to other types, firmwares, code organization
-        if heartbeat.autopilot != MavAutopilot::Px4
-            && heartbeat.autopilot != MavAutopilot::Ardupilotmega
-        {
+        let supported = heartbeat.autopilot == MavAutopilot::Px4
+            || heartbeat.autopilot == MavAutopilot::Ardupilotmega
+            || heartbeat.type_ == MavType::Rocket;
+        if !supported {
             ui.centered_and_justified(|ui| {
                 ui.weak("No propulsion information available.");
             });
@@ -588,31 +287,126 @@ impl PaneUi for PropulsionPane {
         }
 
         let rect = ui.clip_rect();
-        let n = f32::min(rect.width(), rect.height());
 
-        if rect.width() > rect.height() {
-            let square = Rect::from_two_pos(rect.left_top(), rect.left_top() + Vec2::splat(n));
-
-            ui.horizontal(|ui| {
+        if heartbeat.type_ == MavType::Rocket {
+            let h = rect.height();
+            let w = h * 0.35;
+            ui.horizontal_top(|ui| {
+                let cursor = ui.cursor().min;
+                let square = Rect::from_min_size(cursor, Vec2::new(w, h));
                 self.draw_frame(ui, &system, square);
 
                 ui.vertical(|ui| {
-                    ui.set_width(f32::max(10.0, ui.available_width()));
-                    self.draw_controls(ui, &system, square);
+                    egui::TopBottomPanel::bottom(egui::Id::new((
+                        "propulsion_valves_panel",
+                        system_id,
+                    )))
+                    .resizable(false)
+                    .show_separator_line(false)
+                    .frame(egui::Frame::new())
+                    .show_inside(ui, |ui| {
+                        ui.separator();
+                        ui.add_space(5.0);
+                        ui.weak("🚰 Valves");
+                        ui.add_space(5.0);
+
+                        let total_w = ui.available_width();
+                        let col_w = total_w / 4.0 - ui.spacing().item_spacing.x;
+                        let button_size = Vec2::new(col_w, ui.spacing().interact_size.y);
+
+                        egui::Grid::new("propulsion_valves")
+                            .num_columns(4)
+                            .min_col_width(col_w)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                valve_row(
+                                    ui,
+                                    &system,
+                                    "Pressurant Vent",
+                                    ValveId::PressurantVent,
+                                    ValveControl::Pulse,
+                                    button_size,
+                                );
+                                valve_row(
+                                    ui,
+                                    &system,
+                                    "Pressurization",
+                                    ValveId::Pressurization,
+                                    ValveControl::Throttle(&mut self.pressurization_throttle),
+                                    button_size,
+                                );
+                                valve_row(
+                                    ui,
+                                    &system,
+                                    "Oxidizer Vent",
+                                    ValveId::OxidizerVent,
+                                    ValveControl::Pulse,
+                                    button_size,
+                                );
+                                valve_row(
+                                    ui,
+                                    &system,
+                                    "Oxidizer Fill",
+                                    ValveId::OxidizerFill,
+                                    ValveControl::Throttle(&mut self.oxidizer_fill_throttle),
+                                    button_size,
+                                );
+                                valve_row(
+                                    ui,
+                                    &system,
+                                    "Main",
+                                    ValveId::Main,
+                                    ValveControl::Throttle(&mut self.main_throttle),
+                                    button_size,
+                                );
+                            });
+                    });
+
+                    let valve_states_h = ui.available_height() / 3.5;
+                    egui::TopBottomPanel::bottom(egui::Id::new((
+                        "propulsion_valve_states_panel",
+                        system_id,
+                    )))
+                    .resizable(false)
+                    .show_separator_line(false)
+                    .frame(egui::Frame::new())
+                    .exact_height(valve_states_h)
+                    .show_inside(ui, |ui| {
+                        let vs_lines = valve_state_lines(system_id);
+                        let valve_states_plot = Plot::new(
+                            &vs_lines,
+                            &behavior.core,
+                            behavior.shared_plot_state,
+                            (Some(0.0), Some(3.0)),
+                        );
+                        ui.add_sized(
+                            Vec2::new(ui.available_width(), ui.available_height()),
+                            valve_states_plot,
+                        );
+                    });
+
+                    let p_lines = pressure_lines(system_id);
+                    let pressure_plot = Plot::new(
+                        &p_lines,
+                        &behavior.core,
+                        behavior.shared_plot_state,
+                        (Some(0.0), None),
+                    );
+                    ui.add_sized(
+                        Vec2::new(ui.available_width(), ui.available_height()),
+                        pressure_plot,
+                    );
                 });
             });
         } else {
-            let mut square = rect.shrink2(Vec2::new((rect.width() - n) / 2.0, 0.0));
-            square.set_top(rect.top());
-            square.set_bottom(rect.top() + n);
-
+            let n = f32::min(rect.width(), rect.height());
+            let x_offset = (rect.width() - n).max(0.0) / 2.0;
+            let square = Rect::from_min_size(
+                egui::pos2(rect.left() + x_offset, rect.top()),
+                Vec2::new(n, n),
+            );
             ui.vertical_centered(|ui| {
                 self.draw_frame(ui, &system, square);
-
-                ui.horizontal(|ui| {
-                    ui.set_height(f32::max(10.0, ui.available_height()));
-                    self.draw_controls(ui, &system, square);
-                });
             });
         }
     }

@@ -20,6 +20,7 @@ use mavspec::rust::dialects::common::enums::{
 use mavspec::rust::dialects::common::messages::{
     AutopilotVersion, AvailableModes, CommandInt, CommandLong, Heartbeat, ParamSet,
 };
+use rapid_dialect::rapid::enums::ValveId;
 
 use db::{Db, DbError, MessageExt};
 use mavspec::rust::dialects::Common;
@@ -263,6 +264,19 @@ impl System {
             target_component: 0x01,
             command: MavCmd::DoSetStandardMode,
             param1: f32::from(standard_mode as u16),
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
+    pub fn do_set_valve(&self, valve: ValveId, state: f32) {
+        let cmd = rapid_dialect::rapid::messages::CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
+            param1: f32::from(valve.value()),
+            param2: state,
             ..Default::default()
         };
 

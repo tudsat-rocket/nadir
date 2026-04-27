@@ -24,3 +24,6 @@ pub use dial::*;
 
 mod battery;
 pub use battery::*;
+
+mod measurement;
+pub use measurement::*;
