@@ -93,7 +93,7 @@ impl App {
         )));
 
         let root = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.6),
+            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.666),
         )));
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
