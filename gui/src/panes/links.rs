@@ -115,6 +115,15 @@ impl LinksPane {
 
 impl PaneUi for LinksPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        egui::TopBottomPanel::bottom(egui::Id::new("links_channels_panel"))
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(egui::Frame::new())
+            .show_inside(ui, |ui| {
+                ui.separator();
+                self.draw_peers(ui, &system);
+            });
+
         let up_packets: f32 = system
             .channels()
             .iter_mut()
@@ -290,9 +299,5 @@ impl PaneUi for LinksPane {
                 );
             }
         }
-
-        ui.separator();
-
-        self.draw_peers(ui, &system);
     }
 }
