@@ -530,9 +530,7 @@ impl Db {
     }
 }
 
-fn collect_instance_fields(
-    dialect: &mavinspect::protocol::Dialect,
-) -> HashMap<u32, String> {
+fn collect_instance_fields(dialect: &mavinspect::protocol::Dialect) -> HashMap<u32, String> {
     dialect
         .messages()
         .into_iter()

@@ -147,7 +147,10 @@ impl PreflightPane {
 
                             ui.weak(name_display);
 
-                            if !enabled && stat == MavSysStatusSensorExtended::MAV_SYS_STATUS_RECOVERY_SYSTEM {
+                            if !enabled
+                                && stat
+                                    == MavSysStatusSensorExtended::MAV_SYS_STATUS_RECOVERY_SYSTEM
+                            {
                                 ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Disarmed");
                             } else if !enabled {
                                 ui.weak("💤 Disabled");

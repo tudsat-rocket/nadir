@@ -58,8 +58,9 @@ impl egui::Widget for MeasurementIndicator {
         let value_font = Self::value_font();
         let unit_font = Self::unit_font();
         let style = ui.ctx().style();
-        let (value_row_h, unit_row_h) =
-            ui.ctx().fonts(|f| (f.row_height(&value_font), f.row_height(&unit_font)));
+        let (value_row_h, unit_row_h) = ui
+            .ctx()
+            .fonts(|f| (f.row_height(&value_font), f.row_height(&unit_font)));
         let painter = ui.painter();
 
         painter.rect(

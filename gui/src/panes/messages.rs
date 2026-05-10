@@ -26,7 +26,6 @@ impl MessagesPane {
     }
 }
 
-
 impl PaneUi for MessagesPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         for style in [TextStyle::Button, TextStyle::Body, TextStyle::Monospace] {
@@ -108,20 +107,24 @@ impl MessagesPane {
                             );
                             ui.colored_label(
                                 color,
-                                entry.last.with_timezone(&Local).format("%H:%M:%S").to_string(),
+                                entry
+                                    .last
+                                    .with_timezone(&Local)
+                                    .format("%H:%M:%S")
+                                    .to_string(),
                             );
                         });
                         row.col(|ui| {
-                            let label_text = format_message_label(&entry.name, entry.instance.as_ref());
+                            let label_text =
+                                format_message_label(&entry.name, entry.instance.as_ref());
                             let label = ui.add(
                                 egui::Label::new(RichText::new(&label_text).small().monospace())
                                     .sense(egui::Sense::click()),
                             );
                             if label.clicked() {
-                                let is_selected =
-                                    self.selected_message.as_ref().is_some_and(|s| {
-                                        s.name == entry.name && s.instance == entry.instance
-                                    });
+                                let is_selected = self.selected_message.as_ref().is_some_and(|s| {
+                                    s.name == entry.name && s.instance == entry.instance
+                                });
                                 self.selected_message = if is_selected {
                                     None
                                 } else {

@@ -129,10 +129,7 @@ impl System {
         self.db.last_message(self.system_id, 0x01)
     }
 
-    pub fn last_instance_message<M: MessageExt + Default>(
-        &self,
-        id: i64,
-    ) -> Result<M, DbError> {
+    pub fn last_instance_message<M: MessageExt + Default>(&self, id: i64) -> Result<M, DbError> {
         let instance = M::instance_field().map(|field| (field, id));
         self.db
             .last_message_filtered(self.system_id, 0x01, instance)

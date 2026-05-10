@@ -147,10 +147,7 @@ impl egui::Widget for Plot<'_> {
                     None => base_name.to_owned(),
                 };
 
-                let instance_arg = line
-                    .instance
-                    .as_ref()
-                    .map(|i| (i.field.as_str(), i.value));
+                let instance_arg = line.instance.as_ref().map(|i| (i.field.as_str(), i.value));
                 let timeseries = match self.core.db.timeseries_by_name(
                     &line.message_name,
                     &line.field_name,
@@ -162,10 +159,7 @@ impl egui::Widget for Plot<'_> {
                 ) {
                     Ok(timeseries) => timeseries,
                     Err(e) => {
-                        tracing::error!(
-                            "Failed to plot {labelled}.{}: {e:?}",
-                            line.field_name
-                        );
+                        tracing::error!("Failed to plot {labelled}.{}: {e:?}", line.field_name);
                         continue;
                     }
                 };

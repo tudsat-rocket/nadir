@@ -210,13 +210,12 @@ impl PaneUi for StatusPane {
                         ui.columns(in_row, |columns| {
                             for (c, col_ui) in columns.iter_mut().enumerate().take(in_row) {
                                 let mode_info = &modes[r * cols + c];
-                                let name = if mode_info.standard_mode
-                                    == MavStandardMode::NonStandard
-                                {
-                                    mode_name_string(&mode_info.mode_name)
-                                } else {
-                                    format!("{:?}", mode_info.standard_mode)
-                                };
+                                let name =
+                                    if mode_info.standard_mode == MavStandardMode::NonStandard {
+                                        mode_name_string(&mode_info.mode_name)
+                                    } else {
+                                        format!("{:?}", mode_info.standard_mode)
+                                    };
                                 let selected = custom_mode == mode_info.custom_mode;
                                 let auto_mode =
                                     mode_info.properties.contains(MavModeProperty::AUTO_MODE);
@@ -253,12 +252,11 @@ impl PaneUi for StatusPane {
                                     (false, Some(c)) => Button::new(text)
                                         .fill(Color32::TRANSPARENT)
                                         .stroke(Stroke::new(1.0, c)),
-                                    (false, None) => Button::new(text)
-                                        .fill(Color32::TRANSPARENT)
-                                        .stroke(Stroke::new(
-                                            1.0,
-                                            col_ui.visuals().weak_text_color(),
-                                        )),
+                                    (false, None) => {
+                                        Button::new(text).fill(Color32::TRANSPARENT).stroke(
+                                            Stroke::new(1.0, col_ui.visuals().weak_text_color()),
+                                        )
+                                    }
                                 };
                                 let button = button.wrap_mode(egui::TextWrapMode::Truncate);
 

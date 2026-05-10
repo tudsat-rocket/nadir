@@ -227,7 +227,15 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
         valve_stroke_pressurization,
         valve_fill_pressurization,
     );
-    interact_valve(ui, &painter, system, pos2(center_x, valve_top_cy), valve_half, ValveId::Pressurization, false);
+    interact_valve(
+        ui,
+        &painter,
+        system,
+        pos2(center_x, valve_top_cy),
+        valve_half,
+        ValveId::Pressurization,
+        false,
+    );
     painter.line(
         vec![
             top_tank_rect.center_bottom(),
@@ -268,7 +276,15 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
         stroke_pressurant_vent,
         fill_pressurant_vent,
     );
-    interact_valve(ui, &painter, system, pos2(vent_valve_cx, junction_cy), valve_half, ValveId::PressurantVent, true);
+    interact_valve(
+        ui,
+        &painter,
+        system,
+        pos2(vent_valve_cx, junction_cy),
+        valve_half,
+        ValveId::PressurantVent,
+        true,
+    );
     painter.line(
         vec![
             pos2(center_x + junction_r, junction_cy),
@@ -306,7 +322,15 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
         stroke_oxidizer_vent,
         fill_oxidizer_vent,
     );
-    interact_valve(ui, &painter, system, pos2(tank_vent_valve_cx, tank_vent_y), valve_half, ValveId::OxidizerVent, true);
+    interact_valve(
+        ui,
+        &painter,
+        system,
+        pos2(tank_vent_valve_cx, tank_vent_y),
+        valve_half,
+        ValveId::OxidizerVent,
+        true,
+    );
     painter.line(
         vec![
             pos2(tank_vent_x, tank_vent_y),
@@ -345,7 +369,15 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
         stroke_oxidizer_fill,
         fill_oxidizer_fill,
     );
-    interact_valve(ui, &painter, system, pos2(bot_vent_valve_cx, tank_vent_bot_y), valve_half, ValveId::OxidizerFill, true);
+    interact_valve(
+        ui,
+        &painter,
+        system,
+        pos2(bot_vent_valve_cx, tank_vent_bot_y),
+        valve_half,
+        ValveId::OxidizerFill,
+        true,
+    );
     painter.line(
         vec![
             pos2(tank_vent_bot_x, tank_vent_bot_y),
@@ -390,7 +422,15 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
         valve_stroke_main,
         valve_fill_main,
     );
-    interact_valve(ui, &painter, system, pos2(center_x, valve_bot_cy), valve_half, ValveId::Main, false);
+    interact_valve(
+        ui,
+        &painter,
+        system,
+        pos2(center_x, valve_bot_cy),
+        valve_half,
+        ValveId::Main,
+        false,
+    );
     painter.line(
         vec![
             tank_rect.center_bottom(),
@@ -812,7 +852,11 @@ fn interact_valve(
         egui::vec2(half * 1.6, half * 2.0)
     };
     let rect = Rect::from_center_size(center, size);
-    let resp = ui.interact(rect, egui::Id::new(("valve", id.value())), egui::Sense::click());
+    let resp = ui.interact(
+        rect,
+        egui::Id::new(("valve", id.value())),
+        egui::Sense::click(),
+    );
     if resp.clicked() {
         let currently_open = matches!(valve_state(system, id), Some(s) if s > 0.0);
         system.do_set_valve(id, if currently_open { 0.0 } else { 1.0 });
