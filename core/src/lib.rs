@@ -218,15 +218,6 @@ impl Core {
                             tracing::error!("Failed to process message: {e:?}");
                         }
 
-                        let links = self.links.lock().unwrap();
-                        let link = links.get(&link_id).unwrap();
-
-                        let mut systems = self.systems.lock().unwrap();
-                        let system_id = frame.system_id();
-                        let Some(system) = systems.get_mut(&system_id) else {
-                            continue;
-                        };
-
                         system.notify_of_frame(frame, callback, link.endpoint.clone());
                     }
 
