@@ -6,8 +6,8 @@ use crate::widgets::ArtificialHorizon;
 
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum VelocityMode {
-    #[default]
     Speed,
+    #[default]
     Climb,
 }
 
