@@ -503,10 +503,10 @@ impl Db {
         let mut stmt = conn.prepare_cached(&query)?;
         let row_mapper = |row: &rusqlite::Row<'_>| {
             let timestamp: chrono::DateTime<chrono::Utc> = row.get(0)?;
-            let int: u64 = row.get(1)?;
+            let int: i64 = row.get(1)?;
             let value = match field.r#type() {
                 MavType::Float => f32::from_bits(int as u32) as f64,
-                MavType::Double => f64::from_bits(int),
+                MavType::Double => f64::from_bits(int as u64),
                 _ => int as f64,
             };
             Ok((timestamp, value))
