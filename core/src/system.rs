@@ -385,10 +385,18 @@ impl System {
     pub fn current_mode_name(&self) -> Option<String> {
         self.current_mode_info().map(|mode_info| {
             if mode_info.standard_mode == MavStandardMode::NonStandard {
-                String::from_utf8_lossy(&mode_info.mode_name).to_string()
+                mode_name_string(&mode_info.mode_name)
             } else {
                 format!("{:?}", mode_info.standard_mode)
             }
         })
     }
+}
+
+// AVAILABLE_MODES.mode_name is `char[35]` and must be NUL-terminated per the MAVLink spec, but
+// at least ArduPlane has been observed leaving uninitialised bytes past the name. Trim at the
+// first NUL (or the buffer end) before lossy-decoding.
+pub fn mode_name_string(buf: &[u8]) -> String {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).into_owned()
 }
