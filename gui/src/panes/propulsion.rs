@@ -16,6 +16,7 @@ mod arduplane;
 mod px4;
 mod rocket;
 
+#[allow(clippy::struct_field_names)]
 pub struct PropulsionPane {
     pressurization_throttle: f32,
     oxidizer_fill_throttle: f32,

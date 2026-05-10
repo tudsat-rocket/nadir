@@ -63,10 +63,10 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
     let cc_bottom = cc_top + cc_h;
     let throat_y = cc_bottom + nozzle_h * 0.2;
     let exit_y = cc_bottom + nozzle_h;
-    let cc_cy = (cc_top + cc_bottom) / 2.0;
+    let cc_cy = f32::midpoint(cc_top, cc_bottom);
 
     let valve_half = 0.022 * n;
-    let valve_bot_cy = (tank_rect.bottom() + cc_top) / 2.0;
+    let valve_bot_cy = f32::midpoint(tank_rect.bottom(), cc_top);
 
     if let Some(indicator) = super::battery_indicator(system, true) {
         let battery_half_w = tank_w * 0.6;
@@ -79,8 +79,8 @@ pub fn draw_hybrid(ui: &mut egui::Ui, system: &System, square: Rect) {
 
     let tank_left = center_x - tank_w / 2.0;
     let tank_right = center_x + tank_w / 2.0;
-    let pressure_cx = (square.left() + tank_left) / 2.0;
-    let temp_cx = (tank_right + square.right()) / 2.0;
+    let pressure_cx = f32::midpoint(square.left(), tank_left);
+    let temp_cx = f32::midpoint(tank_right, square.right());
 
     let pressurant = system.last_instance_message::<PressureVessel>(0).ok();
     let oxidizer = system.last_instance_message::<PressureVessel>(1).ok();
@@ -593,6 +593,7 @@ fn draw_capsule_tank(
     painter.add(Shape::Path(PathShape::convex_polygon(path, fill, stroke)));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_tank_fill(
     painter: &egui::Painter,
     rect: Rect,
@@ -623,6 +624,7 @@ fn draw_tank_fill(
     );
 }
 
+#[allow(clippy::similar_names)]
 fn draw_hatching(
     painter: &egui::Painter,
     polygon: &[Pos2],

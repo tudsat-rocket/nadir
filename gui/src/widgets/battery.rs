@@ -66,12 +66,12 @@ impl egui::Widget for BatteryIndicator {
                             ui.colored_label(color, format!("{i:.1}A"));
                         }
 
-                        if !self.compact {
-                            if let Some(cap) = self.consumed {
-                                ui.add_space(5.0);
-                                ui.label(format!("{cap:.0}"));
-                                ui.weak("mAh");
-                            }
+                        if !self.compact
+                            && let Some(cap) = self.consumed
+                        {
+                            ui.add_space(5.0);
+                            ui.label(format!("{cap:.0}"));
+                            ui.weak("mAh");
                         }
                     });
                 });

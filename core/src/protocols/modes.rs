@@ -121,7 +121,7 @@ fn arduplane_mode_properties(pm: PlaneMode) -> MavModeProperty {
 }
 
 // Replace the (zero) firmware-supplied properties with our own classification, then bucket-sort.
-fn fixup_arduplane_modes(modes: &mut Vec<AvailableModes>) {
+fn fixup_arduplane_modes(modes: &mut [AvailableModes]) {
     for m in modes.iter_mut() {
         let Ok(pm) = PlaneMode::try_from(m.custom_mode as u8) else {
             continue;
@@ -136,10 +136,8 @@ fn property_sort_key(p: MavModeProperty) -> u8 {
         3
     } else if p.contains(MavModeProperty::ADVANCED) {
         2
-    } else if p.contains(MavModeProperty::AUTO_MODE) {
-        1
     } else {
-        0
+        u8::from(p.contains(MavModeProperty::AUTO_MODE))
     }
 }
 

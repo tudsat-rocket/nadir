@@ -2,7 +2,7 @@ use core::System;
 use std::f32;
 
 use chrono::{DateTime, Local, Utc};
-use convert_case::{Case, Casing};
+use convert_case::{Case, Casing as _};
 
 use eframe::egui;
 use egui::{Align, DragValue, Layout, RichText, TextStyle};
@@ -61,8 +61,8 @@ impl CommandsPane {
                     param2: self.param2.unwrap_or(f32::NAN),
                     param3: self.param3.unwrap_or(f32::NAN),
                     param4: self.param4.unwrap_or(f32::NAN),
-                    param5: self.param5.map(|p| f32::from_bits(p)).unwrap_or(f32::NAN),
-                    param6: self.param6.map(|p| f32::from_bits(p)).unwrap_or(f32::NAN),
+                    param5: self.param5.map_or(f32::NAN, f32::from_bits),
+                    param6: self.param6.map_or(f32::NAN, f32::from_bits),
                     param7: self.param7.unwrap_or(f32::NAN),
                 };
                 system.send_message(&cmd);
@@ -79,8 +79,8 @@ impl CommandsPane {
                     param2: self.param2.unwrap_or(f32::NAN),
                     param3: self.param3.unwrap_or(f32::NAN),
                     param4: self.param4.unwrap_or(f32::NAN),
-                    x: self.param5.map(|p| p as i32).unwrap_or(i32::MAX),
-                    y: self.param6.map(|p| p as i32).unwrap_or(i32::MAX),
+                    x: self.param5.map_or(i32::MAX, |p| p as i32),
+                    y: self.param6.map_or(i32::MAX, |p| p as i32),
                     z: self.param7.unwrap_or(f32::NAN),
                 };
                 system.send_message(&cmd);
@@ -104,12 +104,12 @@ impl Command {
 }
 
 fn format_cmd(cmd: MavCmd) -> String {
-    let uppercamel = format!("{:?}", cmd);
+    let uppercamel = format!("{cmd:?}");
     uppercamel.to_case(Case::Constant)
 }
 
 fn format_frame(frame: MavFrame) -> String {
-    let uppercamel = format!("{:?}", frame);
+    let uppercamel = format!("{frame:?}");
     uppercamel.to_case(Case::Constant)
 }
 
@@ -127,7 +127,7 @@ impl PaneUi for CommandsPane {
                 .selected_text(format_cmd(self.cmd))
                 .show_ui(ui, |ui| {
                     let mut entries: Vec<_> = MavCmd::entries().collect();
-                    entries.sort_by_key(|e| format!("{:?}", e));
+                    entries.sort_by_key(|e| format!("{e:?}"));
 
                     for value in entries {
                         ui.selectable_value(&mut self.cmd, value, format_cmd(value));
@@ -139,7 +139,7 @@ impl PaneUi for CommandsPane {
                     .selected_text(format_frame(self.frame))
                     .show_ui(ui, |ui| {
                         let mut entries: Vec<_> = MavFrame::entries().collect();
-                        entries.sort_by_key(|e| format!("{:?}", e));
+                        entries.sort_by_key(|e| format!("{e:?}"));
 
                         for value in entries {
                             ui.selectable_value(&mut self.frame, value, format_frame(value));

@@ -48,21 +48,21 @@ pub enum PositionSource {
 impl PositionSource {
     pub const ALL: [PositionSource; 2] = [PositionSource::LocalPositionNed, PositionSource::VfrHud];
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::LocalPositionNed => "Local",
             Self::VfrHud => "MSL (HUD)",
         }
     }
 
-    pub fn message_name(&self) -> &'static str {
+    pub fn message_name(self) -> &'static str {
         match self {
             Self::LocalPositionNed => "LOCAL_POSITION_NED",
             Self::VfrHud => "VFR_HUD",
         }
     }
 
-    pub fn has_data(&self, core: &Core, system_id: u8) -> bool {
+    pub fn has_data(self, core: &Core, system_id: u8) -> bool {
         core.db
             .count_message_by_name(self.message_name(), system_id, 1)
             .unwrap_or(0)

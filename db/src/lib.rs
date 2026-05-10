@@ -14,7 +14,7 @@ struct RowStats {
     recent: VecDeque<DateTime<Utc>>,
 }
 
-/// (system_id, component_id, message_id, instance_value)
+/// (`system_id`, `component_id`, `message_id`, `instance_value`)
 type StatsKey = (u8, u8, u32, Option<i64>);
 type Stats = Arc<Mutex<HashMap<StatsKey, RowStats>>>;
 
@@ -167,7 +167,7 @@ impl Db {
                 .unwrap(),
         ]
         .into_iter()
-        .flat_map(|d| collect_instance_fields(d))
+        .flat_map(collect_instance_fields)
         .collect();
 
         Self {
@@ -181,6 +181,7 @@ impl Db {
         self.conn.lock().unwrap()
     }
 
+    #[allow(clippy::unwrap_in_result)]
     pub fn write_message<M: MessageExt>(
         &self,
         system_id: u8,
@@ -365,6 +366,7 @@ impl Db {
 
     /// One row per `(message_type, instance_value)` pair received for the
     /// given system/component, sorted by message ID and instance value.
+    #[allow(clippy::unwrap_in_result)]
     pub fn message_summary(
         &self,
         system_id: u8,
@@ -450,6 +452,7 @@ impl Db {
         last_message_debug_rapid(self, msg_name, system_id, component_id, instance)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn timeseries_by_name(
         &self,
         msg_name: &str,
@@ -470,18 +473,17 @@ impl Db {
         let protocol = mavspec::definitions::protocol();
         let Some(field) = ["common", "ardupilotmega"]
             .iter()
-            .filter_map(|dn| {
+            .find_map(|dn| {
                 let dialect = protocol.get_dialect_by_name(dn).unwrap();
                 dialect
-                    .get_message_by_name(&msg_name)
+                    .get_message_by_name(msg_name)
                     .and_then(|msg| msg.get_field_by_name(field_name))
             })
-            .next()
             .or_else(|| {
                 rapid_dialect::definitions::protocol()
                     .get_dialect_by_canonical_name("rapid")
                     .unwrap()
-                    .get_message_by_name(&msg_name)
+                    .get_message_by_name(msg_name)
                     .and_then(|msg| msg.get_field_by_name(field_name))
             })
         else {
@@ -505,7 +507,7 @@ impl Db {
             let timestamp: chrono::DateTime<chrono::Utc> = row.get(0)?;
             let int: i64 = row.get(1)?;
             let value = match field.r#type() {
-                MavType::Float => f32::from_bits(int as u32) as f64,
+                MavType::Float => f64::from(f32::from_bits(int as u32)),
                 MavType::Double => f64::from_bits(int as u64),
                 _ => int as f64,
             };

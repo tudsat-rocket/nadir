@@ -181,42 +181,39 @@ impl PaneUi for MapPane {
                     .count_message::<GlobalPositionInt>(system.system_id, 0x01)
                     .unwrap_or(0);
                 let stale = self.path_counts.get(s_id) != Some(&count);
-                if stale && count > 0 {
-                    if let Ok(gps_msgs) = system.all_messages::<GlobalPositionInt>() {
-                        // Join with heartbeat timeline to get flight mode per point
-                        let heartbeats = system.all_messages::<Heartbeat>().unwrap_or_default();
+                if stale
+                    && count > 0
+                    && let Ok(gps_msgs) = system.all_messages::<GlobalPositionInt>()
+                {
+                    // Join with heartbeat timeline to get flight mode per point
+                    let heartbeats = system.all_messages::<Heartbeat>().unwrap_or_default();
 
-                        let mut hb_idx = 0;
-                        let path = gps_msgs
-                            .iter()
-                            .map(|(ts, gps)| {
-                                // Advance heartbeat index to the last one at or before this GPS timestamp
-                                while hb_idx + 1 < heartbeats.len()
-                                    && heartbeats[hb_idx + 1].0 <= *ts
-                                {
-                                    hb_idx += 1;
-                                }
-                                let custom_mode = heartbeats
-                                    .get(hb_idx)
-                                    .map(|(_, hb)| hb.custom_mode)
-                                    .unwrap_or(0);
+                    let mut hb_idx = 0;
+                    let path = gps_msgs
+                        .iter()
+                        .map(|(ts, gps)| {
+                            // Advance heartbeat index to the last one at or before this GPS timestamp
+                            while hb_idx + 1 < heartbeats.len() && heartbeats[hb_idx + 1].0 <= *ts {
+                                hb_idx += 1;
+                            }
+                            let custom_mode =
+                                heartbeats.get(hb_idx).map_or(0, |(_, hb)| hb.custom_mode);
 
-                                let pos = Position::new(
-                                    f64::from(gps.lon) / 10_000_000.0,
-                                    f64::from(gps.lat) / 10_000_000.0,
-                                );
-                                (
-                                    pos,
-                                    PathPoint {
-                                        altitude: f64::from(gps.relative_alt) / 1000.0,
-                                        custom_mode,
-                                    },
-                                )
-                            })
-                            .collect();
-                        self.system_paths.insert(*s_id, path);
-                        self.path_counts.insert(*s_id, count);
-                    }
+                            let pos = Position::new(
+                                f64::from(gps.lon) / 10_000_000.0,
+                                f64::from(gps.lat) / 10_000_000.0,
+                            );
+                            (
+                                pos,
+                                PathPoint {
+                                    altitude: f64::from(gps.relative_alt) / 1000.0,
+                                    custom_mode,
+                                },
+                            )
+                        })
+                        .collect();
+                    self.system_paths.insert(*s_id, path);
+                    self.path_counts.insert(*s_id, count);
                 }
             }
         }
@@ -486,7 +483,7 @@ enum Visualization {
     FlightMode,
 }
 
-/// Deterministic color for a custom_mode value. Uses a set of distinct hues
+/// Deterministic color for a `custom_mode` value. Uses a set of distinct hues
 /// so that different flight modes are visually distinguishable.
 fn mode_color(custom_mode: u32) -> Color32 {
     const PALETTE: &[Color32] = &[
