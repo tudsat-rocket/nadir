@@ -1,5 +1,5 @@
-rapid-control (working title)
-=============
+nadir
+=====
 
 This is a MAVLink-based ground station software, for developing and operating autonomous systems (drones, sounding rockets, other equipment). Documentation on MAVLink can be found here: https://mavlink.io/
 
@@ -7,7 +7,7 @@ It is designed to handle scenarios with multiple systems, such as multiple drone
 
 # Building & Running
 
-To compile and run, install Rust (preferrably the latest stable release) and run:
+To compile and run, install Rust and run:
 
 ```bash
 $ cargo run
@@ -15,11 +15,15 @@ $ cargo run
 
 # Usage & Features
 
-TODO: Document which MAVLink message we use for what somewhere
-
 ## Multi-Dialect Support
 
-TODO: not implemented
+The following MAVLink dialects are supported:
+
+- `common` (used by e.g. PX4)
+- `ardupilotmega` (extends `common`, used by Ardupilot)
+- `rapid` (extends `common`, used by zenith)
+
+Other dialects which extend `common` will work partially, with non-`common` messages discarded.
 
 ## MAVLink Protocols / "Microservices"
 
@@ -61,4 +65,7 @@ $ sudo ip link set dev vcan0 up
 
 ## Testing with Simulation
 
-The easiest way to test is with Software-in-the-Loop simulations of firmwares like PX4 & Ardupilot. A docker-compose setup that runs a number of simulations of various vehicle types can be found here: https://github.com/tudsat-rocket/ardupilot-docker
+Development & testing is easiest with software-in-the-loop (SITL) simulation builds of various firmwares:
+
+- For UAVs, you can use this docker-compose setup to test with PX4 and Ardupilot vehicles: https://github.com/tudsat-rocket/ardupilot-docker
+- For rockets, use zenith's SITL build target: https://github.com/tudsat-rocket/zenith
