@@ -93,8 +93,18 @@ impl App {
             egui_tiles::Linear::new_binary(LinearDir::Vertical, [top_split, bottom], 0.2),
         )));
 
+        #[cfg(feature = "profiling")]
+        let right_side = {
+            let profiler = tiles.insert_pane(Pane::Profiler);
+            tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
+                egui_tiles::Linear::new_binary(LinearDir::Vertical, [map, profiler], 0.5),
+            )))
+        };
+        #[cfg(not(feature = "profiling"))]
+        let right_side = map;
+
         let root = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, map], 0.666),
+            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, right_side], 0.666),
         )));
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
@@ -374,8 +384,5 @@ impl eframe::App for App {
             });
 
         self.toasts.show(ctx);
-
-        #[cfg(feature = "profiling")]
-        puffin_egui::show_viewport_if_enabled(ctx);
     }
 }

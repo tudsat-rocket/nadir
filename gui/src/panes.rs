@@ -93,6 +93,8 @@ pub enum Pane {
     Preflight(PreflightPane),
     Navigation(NavigationPane),
     FlightLogs(LogsPane),
+    #[cfg(feature = "profiling")]
+    Profiler,
     Placeholder(String),
 }
 
@@ -158,6 +160,8 @@ impl std::fmt::Display for Pane {
             Pane::Preflight(_) => "Preflight".into(),
             Pane::Navigation(_) => "Navigation".into(),
             Pane::FlightLogs(_) => "Flight Logs".into(),
+            #[cfg(feature = "profiling")]
+            Pane::Profiler => "Profiler".into(),
             Pane::Placeholder(s) => s.into(),
         };
         f.write_str(&name)
@@ -220,6 +224,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::Preflight(p) => p.outer_ui(ui, self),
             Pane::Navigation(p) => p.outer_ui(ui, self),
             Pane::FlightLogs(p) => p.outer_ui(ui, self),
+            #[cfg(feature = "profiling")]
+            Pane::Profiler => {
+                puffin_egui::profiler_ui(ui);
+            }
             Pane::Placeholder(_) => {
                 ui.centered_and_justified(|ui| {
                     ui.weak("To be implemented.");
