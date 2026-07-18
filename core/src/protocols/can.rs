@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast::Receiver, mpsc::Sender};
 
 use mavspec::rust::dialects::{Common, common::messages};
@@ -14,8 +13,13 @@ pub async fn forward_to_socketcan(
     socketcan_tx: Sender<socketcan::CanFrame>,
 ) {
     loop {
-        let Ok(msg) = message_rx.recv().await else {
-            continue;
+        let msg = match message_rx.recv().await {
+            Ok(msg) => msg,
+            Err(RecvError::Lagged(n)) => {
+                tracing::warn!("CAN forwarding lagged, {n} messages dropped");
+                continue;
+            }
+            Err(RecvError::Closed) => return,
         };
 
         let Common::CanFrame(can_frame) = msg else {
@@ -35,9 +39,10 @@ pub async fn forward_to_socketcan(
 
         let frame = socketcan::CanFrame::new(id, &can_frame.data[..(can_frame.len as usize)])
             .expect("can frame creation should not have failed");
-        let _ = socketcan_tx
-            .send_timeout(frame, Duration::from_millis(1))
-            .await;
+        if socketcan_tx.send(frame).await.is_err() {
+            tracing::warn!("socketcan writer is gone, stopping CAN forwarding");
+            return;
+        }
     }
 }
 
@@ -47,8 +52,13 @@ pub async fn subscribe_to_socketcan(
     mut socketcan_rx: Receiver<socketcan::CanFrame>,
 ) {
     loop {
-        let Ok(can_frame) = socketcan_rx.recv().await else {
-            continue;
+        let can_frame = match socketcan_rx.recv().await {
+            Ok(can_frame) => can_frame,
+            Err(RecvError::Lagged(n)) => {
+                tracing::warn!("socketcan subscription lagged, {n} frames dropped");
+                continue;
+            }
+            Err(RecvError::Closed) => return,
         };
 
         tracing::trace!("Can frame received via socket");

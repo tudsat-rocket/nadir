@@ -63,7 +63,7 @@ impl System {
         let logs = Arc::new(Mutex::new(FlightLogUiState::default()));
 
         // TODO: dialects
-        let (message_sender, receiver) = tokio::sync::broadcast::channel::<Common>(5);
+        let (message_sender, receiver) = tokio::sync::broadcast::channel::<Common>(512);
         let receiver2 = message_sender.subscribe();
         let receiver3 = message_sender.subscribe();
         let receiver_logs = message_sender.subscribe();
