@@ -41,6 +41,7 @@ impl SensorsPane {
                     unit: None,
                     color: None,
                     scale: None,
+                    sentinel: None,
                 });
             }
         }
@@ -99,6 +100,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -110,6 +112,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -121,6 +124,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -132,6 +136,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -143,6 +148,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -154,6 +160,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                 ];
                 let temp_plot = Plot::new(
@@ -175,6 +182,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -186,6 +194,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                     PlotLine {
                         system_id,
@@ -197,6 +206,7 @@ impl PaneUi for SensorsPane {
                         unit: None,
                         color: None,
                         scale: None,
+                        sentinel: None,
                     },
                 ];
                 let pres_plot = Plot::new(

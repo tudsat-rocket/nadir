@@ -192,6 +192,7 @@ impl PaneUi for PlotPane {
                         unit: None, // TODO
                         color: None,
                         scale: None,
+                        sentinel: None,
                     })
                     .collect::<Vec<_>>();
 

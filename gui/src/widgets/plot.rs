@@ -54,6 +54,9 @@ pub struct PlotLine {
     pub unit: Option<String>,
     pub color: Option<Color32>,
     pub scale: Option<f64>,
+    // Raw stored value to treat as "no reading" and drop from the plot,
+    // e.g. a firmware sentinel like u16::MAX. Compared before `scale`.
+    pub sentinel: Option<f64>,
 }
 
 pub struct Plot<'a> {
@@ -167,6 +170,7 @@ impl egui::Widget for Plot<'_> {
                 let scale = line.scale.unwrap_or(1.0);
                 let plot_data: Vec<_> = timeseries
                     .into_iter()
+                    .filter(|(_, v)| line.sentinel != Some(*v))
                     .map(|(t, v)| [(t - self.core.plot_origin).as_seconds_f64(), v * scale])
                     .collect();
 

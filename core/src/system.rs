@@ -286,6 +286,20 @@ impl System {
         self.send_message(&cmd);
     }
 
+    pub fn do_pulse_valve(&self, valve: ValveId, duration_secs: f32) {
+        let cmd = rapid_dialect::rapid::messages::CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
+            param1: f32::from(valve.value()),
+            param2: 1.0, // 1.0 -> PulseOpen
+            param3: duration_secs,
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
     pub fn request_can_forwarding(&self, enable: bool) {
         let cmd = CommandLong {
             target_system: self.system_id,

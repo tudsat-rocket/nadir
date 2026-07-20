@@ -1,10 +1,14 @@
-use egui::{Align2, Color32, Context, CornerRadius, FontId, Sense, StrokeKind, Vec2, pos2};
+use egui::{Align2, Color32, Context, CornerRadius, FontId, Sense, Stroke, StrokeKind, Vec2, pos2};
+
+use crate::colors::{COLOR_INDICATOR_WARNING, blink_on};
 
 pub struct MeasurementIndicator {
     pub values: Vec<Option<f32>>,
     pub unit: &'static str,
     pub color: Color32,
     pub decimals: Option<u8>,
+    // When set, the border blinks orange as a warning cue.
+    pub blink: bool,
 }
 
 impl MeasurementIndicator {
@@ -61,13 +65,20 @@ impl egui::Widget for MeasurementIndicator {
         let (value_row_h, unit_row_h) = ui
             .ctx()
             .fonts(|f| (f.row_height(&value_font), f.row_height(&unit_font)));
+        let border = if self.blink && blink_on(ui.input(|i| i.time)) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(60));
+            Stroke::new(2.0, COLOR_INDICATOR_WARNING)
+        } else {
+            style.visuals.window_stroke()
+        };
         let painter = ui.painter();
 
         painter.rect(
             rect,
             CornerRadius::ZERO,
             style.visuals.extreme_bg_color,
-            style.visuals.window_stroke(),
+            border,
             StrokeKind::Inside,
         );
 

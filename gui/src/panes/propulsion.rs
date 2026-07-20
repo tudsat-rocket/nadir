@@ -1,12 +1,15 @@
 use core::{MessageInstance, System};
 
-use egui::{Button, Color32, DragValue, Frame, Image, Pos2, Rect, RichText, Vec2};
+use egui::{
+    Align2, Button, Color32, CornerRadius, DragValue, FontId, Frame, Image, Pos2, Rect, RichText,
+    Sense, Stroke, StrokeKind, Vec2, pos2,
+};
 use mavspec::rust::dialects::common::enums::MavType;
 use mavspec::rust::dialects::common::messages::{BatteryStatus, Heartbeat, SysStatus};
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
 use rapid_dialect::rapid::enums::ValveId;
 
-use crate::colors::COLOR_INDICATOR_WARNING;
+use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING};
 use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
 use crate::widgets::{BatteryIndicator, Plot, PlotLine};
@@ -16,16 +19,89 @@ mod arduplane;
 mod px4;
 mod rocket;
 
-#[allow(clippy::struct_field_names)]
-pub struct PropulsionPane {
-    pressurization_throttle: f32,
-    oxidizer_fill_throttle: f32,
-    main_throttle: f32,
+// Firmware bound on pulse length (mission::valves::MAX_PULSE_DURATION).
+const MAX_PULSE_DURATION_SECS: f32 = 30.0;
+
+// How long a commanded-vs-actual mismatch must persist before the cue starts
+// blinking, so normal valve travel doesn't flash the UI.
+const VALVE_MISMATCH_DEBOUNCE_SECS: f64 = 0.5;
+
+// Commanded position within this of fully closed/open latches the CLOSE/OPEN button.
+const VALVE_LATCH_EPS: f32 = 0.02;
+
+const VALVE_COUNT: usize = 9;
+
+// Solenoid valves are binary; servo valves additionally accept a proportional
+// set-position, making the servo control a strict superset of the solenoid one.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ValveKind {
+    Solenoid,
+    Servo,
 }
 
-enum ValveControl<'a> {
+// Single source of truth for the rocket's valves: identity, label, capability.
+// A valve's position in this table indexes the per-valve pane state and blink flags.
+const VALVES: [(ValveId, &str, ValveKind); VALVE_COUNT] = [
+    (
+        ValveId::PressurantVent,
+        "Pressurant Vent",
+        ValveKind::Solenoid,
+    ),
+    (ValveId::Pressurization, "Pressurization", ValveKind::Servo),
+    (ValveId::OxidizerVent, "Oxidizer Vent", ValveKind::Solenoid),
+    (ValveId::OxidizerFill, "Oxidizer Fill", ValveKind::Servo),
+    (ValveId::Main, "Main", ValveKind::Servo),
+    // Ground-support fill valves mirror their onboard counterparts (servo);
+    // the reserved external vents are binary solenoids like the other vents.
+    (
+        ValveId::ExternalPressurantFill,
+        "Ext Pressurant Fill",
+        ValveKind::Servo,
+    ),
+    (
+        ValveId::ExternalOxidizerFill,
+        "Ext Oxidizer Fill",
+        ValveKind::Servo,
+    ),
+    (
+        ValveId::ExternalPressurantVent,
+        "Ext Pressurant Vent",
+        ValveKind::Solenoid,
+    ),
+    (
+        ValveId::ExternalOxidizerVent,
+        "Ext Oxidizer Vent",
+        ValveKind::Solenoid,
+    ),
+];
+
+fn valve_index(id: ValveId) -> usize {
+    VALVES.iter().position(|(v, _, _)| *v == id).unwrap_or(0)
+}
+
+// What a click on a valve in the graphical overview does. Every valve honors
+// Pulse now; the mode just picks pulse-open vs toggle for the whole schematic.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub(crate) enum ValveInteractionMode {
     Pulse,
-    Throttle(&'a mut f32),
+    Toggle,
+}
+
+pub struct PropulsionPane {
+    pulse_secs: [f32; VALVE_COUNT],
+    valve_mismatch_since: [Option<f64>; VALVE_COUNT],
+    valve_mode: ValveInteractionMode,
+}
+
+// Blink once a mismatch has persisted past the debounce window; clears on agreement.
+fn debounce_blink(since: &mut Option<f64>, mismatch: bool, now: f64) -> bool {
+    if mismatch {
+        let start = *since.get_or_insert(now);
+        now - start > VALVE_MISMATCH_DEBOUNCE_SECS
+    } else {
+        *since = None;
+        false
+    }
 }
 
 // TODO: properly handle multiple batteries / different instance IDs
@@ -64,10 +140,21 @@ pub(super) fn battery_indicator(system: &System, compact: bool) -> Option<Batter
 impl PropulsionPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {
-            pressurization_throttle: 0.0,
-            oxidizer_fill_throttle: 0.0,
-            main_throttle: 0.0,
+            pulse_secs: [1.0; VALVE_COUNT],
+            valve_mismatch_since: [None; VALVE_COUNT],
+            valve_mode: ValveInteractionMode::Pulse,
         }
+    }
+
+    // Per-valve blink flags, computed once per frame and shared by the list and
+    // the schematic so the two surfaces stay consistent.
+    fn update_valve_blink(&mut self, system: &System, now: f64) -> [bool; VALVE_COUNT] {
+        let mut flags = [false; VALVE_COUNT];
+        for (i, (id, _, _)) in VALVES.iter().enumerate() {
+            let mismatch = rocket::valve_reading(system, *id).is_some_and(rocket::valve_mismatch);
+            flags[i] = debounce_blink(&mut self.valve_mismatch_since[i], mismatch, now);
+        }
+        flags
     }
 
     fn draw_battery(&mut self, ui: &mut egui::Ui, system: &System, pos: Pos2) {
@@ -77,7 +164,13 @@ impl PropulsionPane {
         }
     }
 
-    fn draw_frame(&mut self, ui: &mut egui::Ui, system: &System, square: Rect) {
+    fn draw_frame(
+        &mut self,
+        ui: &mut egui::Ui,
+        system: &System,
+        square: Rect,
+        valve_blink: [bool; VALVE_COUNT],
+    ) {
         let n = square.width();
 
         let Ok(heartbeat) = system.last_message::<Heartbeat>() else {
@@ -97,7 +190,14 @@ impl PropulsionPane {
             // TODO: extend support
             match (heartbeat.autopilot, heartbeat.type_) {
                 (_, MavType::Rocket) => {
-                    rocket::draw_hybrid(ui, system, square);
+                    rocket::draw_hybrid(
+                        ui,
+                        system,
+                        square,
+                        &mut self.valve_mode,
+                        self.pulse_secs,
+                        valve_blink,
+                    );
                 }
                 (MavAutopilot::Px4, _) => {
                     px4::draw_rotors(ui, system, square);
@@ -127,59 +227,126 @@ impl PropulsionPane {
     }
 }
 
+// A horizontal position bar: fill = reported state, caret = commanded (intended)
+// position. Servo valves are draggable to command a proportional position, and
+// the whole bar's border blinks on a debounced mismatch. Returns the new target
+// (0.0..=1.0) when a servo drag completes.
+fn valve_bar(
+    ui: &mut egui::Ui,
+    size: Vec2,
+    reading: Option<rocket::ValveReading>,
+    servo: bool,
+    blink: bool,
+    time: f64,
+) -> Option<f32> {
+    let sense = if servo {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+    let painter = ui.painter().clone();
+    let rounding = CornerRadius::same(3);
+    let visuals = ui.visuals();
+
+    painter.rect_filled(rect, rounding, visuals.extreme_bg_color);
+
+    let state = reading.and_then(|r| r.state).map(|s| s.clamp(0.0, 1.0));
+    if let Some(s) = state
+        && s > 0.0
+    {
+        let fill_rect = Rect::from_min_size(rect.min, Vec2::new(rect.width() * s, rect.height()));
+        painter.rect_filled(
+            fill_rect,
+            rounding,
+            COLOR_INDICATOR_WARNING.gamma_multiply(0.8),
+        );
+    }
+
+    if let Some(c) = reading.and_then(|r| r.commanded).map(|c| c.clamp(0.0, 1.0)) {
+        let x = rect.left() + rect.width() * c;
+        painter.line_segment(
+            [pos2(x, rect.top() + 1.0), pos2(x, rect.bottom() - 1.0)],
+            Stroke::new(2.0, Color32::WHITE),
+        );
+    }
+
+    let mut target = None;
+    if servo {
+        if let Some(p) = resp.interact_pointer_pos()
+            && (resp.dragged() || resp.drag_stopped())
+        {
+            let t = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            let x = rect.left() + rect.width() * t;
+            painter.line_segment(
+                [pos2(x, rect.top()), pos2(x, rect.bottom())],
+                Stroke::new(2.0, COLOR_INDICATOR_GOOD),
+            );
+            if resp.drag_stopped() {
+                target = Some(t);
+            }
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+    }
+
+    let label = match state {
+        Some(s) => format!("{:.0}%", s * 100.0),
+        None => "--".to_owned(),
+    };
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(11.0),
+        visuals.text_color(),
+    );
+
+    let border = if blink && crate::colors::blink_on(time) {
+        Stroke::new(2.0, COLOR_INDICATOR_WARNING)
+    } else {
+        Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color)
+    };
+    painter.rect(
+        rect,
+        rounding,
+        Color32::TRANSPARENT,
+        border,
+        StrokeKind::Inside,
+    );
+
+    target
+}
+
 fn valve_row(
     ui: &mut egui::Ui,
     system: &System,
-    label: &str,
-    id: ValveId,
-    control: ValveControl<'_>,
+    index: usize,
+    pulse_secs: &mut f32,
+    blink: bool,
     button_size: Vec2,
 ) {
-    let state = rocket::valve_state(system, id);
+    let (id, label, kind) = VALVES[index];
+    let reading = rocket::valve_reading(system, id);
+    let commanded = reading.and_then(|r| r.commanded);
+    let time = ui.input(|i| i.time);
 
     ui.weak(label.to_uppercase());
 
-    let close_active = state == Some(0.0);
+    let close_active = matches!(commanded, Some(c) if c <= VALVE_LATCH_EPS);
     let close_text = if close_active { "CLOSED" } else { "CLOSE" };
     let close_btn = Button::selectable(close_active, RichText::new(close_text));
     if ui.add_sized(button_size, close_btn).clicked() {
         system.do_set_valve(id, 0.0);
     }
 
-    match control {
-        ValveControl::Pulse => {
-            let _ = ui
-                .add_sized(button_size, Button::new(RichText::new("PULSE")))
-                .clicked();
-        }
-        ValveControl::Throttle(value) => {
-            ui.allocate_ui_with_layout(
-                button_size,
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    let dec = ui.small_button(RichText::new("\u{2193}"));
-                    if dec.clicked() {
-                        *value = (*value - 1.0).max(0.0);
-                    }
-                    let btn_w = dec.rect.width();
-                    let spacing = ui.spacing().item_spacing.x;
-                    let drag_w = (ui.available_width() - btn_w - spacing).max(0.0);
-                    ui.add_sized(
-                        Vec2::new(drag_w, button_size.y),
-                        DragValue::new(value)
-                            .speed(1.0)
-                            .range(0.0..=100.0)
-                            .suffix(" %"),
-                    );
-                    if ui.small_button(RichText::new("\u{2191}")).clicked() {
-                        *value = (*value + 1.0).min(100.0);
-                    }
-                },
-            );
-        }
+    let servo = kind == ValveKind::Servo;
+    if let Some(target) = valve_bar(ui, button_size, reading, servo, blink, time) {
+        system.do_set_valve(id, target);
     }
 
-    let open_active = matches!(state, Some(s) if s > 0.0);
+    let open_active = matches!(commanded, Some(c) if c >= 1.0 - VALVE_LATCH_EPS);
     let open_btn = if open_active {
         Button::selectable(true, RichText::new("OPEN")).fill(COLOR_INDICATOR_WARNING)
     } else {
@@ -193,6 +360,32 @@ fn valve_row(
     }
     ui.style_mut().visuals.override_text_color = None;
 
+    ui.allocate_ui_with_layout(
+        button_size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            let spacing = ui.spacing().item_spacing.x;
+            let drag_w = (button_size.x * 0.4).max(0.0);
+            let btn_w = (button_size.x - drag_w - spacing).max(0.0);
+            if ui
+                .add_sized(
+                    Vec2::new(btn_w, button_size.y),
+                    Button::new(RichText::new("PULSE")),
+                )
+                .clicked()
+            {
+                system.do_pulse_valve(id, *pulse_secs);
+            }
+            ui.add_sized(
+                Vec2::new(drag_w, button_size.y),
+                DragValue::new(pulse_secs)
+                    .speed(0.1)
+                    .range(0.0..=MAX_PULSE_DURATION_SECS)
+                    .suffix(" s"),
+            );
+        },
+    );
+
     ui.end_row();
 }
 
@@ -203,6 +396,10 @@ fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
         (ValveId::OxidizerVent, "Oxidizer Vent"),
         (ValveId::OxidizerFill, "Oxidizer Fill"),
         (ValveId::Main, "Main"),
+        (ValveId::ExternalPressurantFill, "Ext Pressurant Fill"),
+        (ValveId::ExternalOxidizerFill, "Ext Oxidizer Fill"),
+        (ValveId::ExternalPressurantVent, "Ext Pressurant Vent"),
+        (ValveId::ExternalOxidizerVent, "Ext Oxidizer Vent"),
     ]
     .into_iter()
     .map(|(id, alias)| PlotLine {
@@ -218,15 +415,19 @@ fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
         unit: None,
         color: None,
         scale: None,
+        sentinel: None,
     })
     .collect()
 }
 
 fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
-    let mut lines: Vec<PlotLine> = [
+    [
         (0, "Pressurant", rocket::N2_COLOR),
         (1, "Oxidizer", rocket::N2O_COLOR),
         (2, "Combustion", rocket::CC_COLOR),
+        (3, "Reg. Pressurant", rocket::NODE_COLOR),
+        (4, "Ext. Pressurant", rocket::EXT_N2_COLOR),
+        (5, "Ext. Oxidizer", rocket::EXT_N2O_COLOR),
     ]
     .into_iter()
     .map(|(id, alias, color)| PlotLine {
@@ -243,26 +444,10 @@ fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
         color: Some(color),
         // PRESSURE_VESSEL.pressure1 is in kPa; the diagram and rendering use bar.
         scale: Some(0.01),
+        // Firmware reports an unavailable sensor as u16::MAX.
+        sentinel: Some(f64::from(u16::MAX)),
     })
-    .collect();
-
-    lines.push(PlotLine {
-        system_id,
-        component_id: 1,
-        message_name: "PRESSURE_VESSEL".to_owned(),
-        instance: Some(MessageInstance {
-            field: "id".to_owned(),
-            value: 1,
-        }),
-        field_name: "level".to_owned(),
-        alias: Some("Fill Level".to_owned()),
-        unit: Some("%".to_owned()),
-        color: Some(Color32::WHITE),
-        // PRESSURE_VESSEL.level is 0..=10000; render as percent.
-        scale: Some(0.01),
-    });
-
-    lines
+    .collect()
 }
 
 impl PaneUi for PropulsionPane {
@@ -291,11 +476,15 @@ impl PaneUi for PropulsionPane {
 
         if heartbeat.type_ == MavType::Rocket {
             let h = rect.height();
-            let w = h * 0.35;
+            // Wider than the flight plant alone: the left slice is a ground-support
+            // lane for the external tanks and fill valves (see rocket::draw_hybrid).
+            let w = h * 0.438;
             ui.horizontal_top(|ui| {
+                let now = ui.input(|i| i.time);
+                let blink = self.update_valve_blink(&system, now);
                 let cursor = ui.cursor().min;
                 let square = Rect::from_min_size(cursor, Vec2::new(w, h));
-                self.draw_frame(ui, &system, square);
+                self.draw_frame(ui, &system, square, blink);
 
                 ui.vertical(|ui| {
                     egui::TopBottomPanel::bottom(egui::Id::new((
@@ -311,55 +500,16 @@ impl PaneUi for PropulsionPane {
                         ui.weak("🚰 Valves");
                         ui.add_space(5.0);
 
-                        let total_w = ui.available_width();
-                        let col_w = total_w / 4.0 - ui.spacing().item_spacing.x;
-                        let button_size = Vec2::new(col_w, ui.spacing().interact_size.y);
+                        let button_size = Vec2::new(80.0, ui.spacing().interact_size.y);
 
                         egui::Grid::new("propulsion_valves")
-                            .num_columns(4)
-                            .min_col_width(col_w)
                             .striped(true)
                             .show(ui, |ui| {
-                                valve_row(
-                                    ui,
-                                    &system,
-                                    "Pressurant Vent",
-                                    ValveId::PressurantVent,
-                                    ValveControl::Pulse,
-                                    button_size,
-                                );
-                                valve_row(
-                                    ui,
-                                    &system,
-                                    "Pressurization",
-                                    ValveId::Pressurization,
-                                    ValveControl::Throttle(&mut self.pressurization_throttle),
-                                    button_size,
-                                );
-                                valve_row(
-                                    ui,
-                                    &system,
-                                    "Oxidizer Vent",
-                                    ValveId::OxidizerVent,
-                                    ValveControl::Pulse,
-                                    button_size,
-                                );
-                                valve_row(
-                                    ui,
-                                    &system,
-                                    "Oxidizer Fill",
-                                    ValveId::OxidizerFill,
-                                    ValveControl::Throttle(&mut self.oxidizer_fill_throttle),
-                                    button_size,
-                                );
-                                valve_row(
-                                    ui,
-                                    &system,
-                                    "Main",
-                                    ValveId::Main,
-                                    ValveControl::Throttle(&mut self.main_throttle),
-                                    button_size,
-                                );
+                                for (i, (pulse, blink)) in
+                                    self.pulse_secs.iter_mut().zip(blink).enumerate()
+                                {
+                                    valve_row(ui, &system, i, pulse, blink, button_size);
+                                }
                             });
                     });
 
@@ -407,8 +557,67 @@ impl PaneUi for PropulsionPane {
                 Vec2::new(n, n),
             );
             ui.vertical_centered(|ui| {
-                self.draw_frame(ui, &system, square);
+                self.draw_frame(ui, &system, square, [false; VALVE_COUNT]);
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rocket::{ValveReading, valve_mismatch};
+    use super::{VALVE_MISMATCH_DEBOUNCE_SECS, debounce_blink};
+
+    #[test]
+    fn mismatch_flags_both_directions() {
+        assert!(valve_mismatch(ValveReading {
+            commanded: Some(1.0),
+            state: Some(0.0)
+        }));
+        assert!(valve_mismatch(ValveReading {
+            commanded: Some(0.0),
+            state: Some(1.0)
+        }));
+        // Within the deadband: normal travel / agreement, not a mismatch.
+        assert!(!valve_mismatch(ValveReading {
+            commanded: Some(1.0),
+            state: Some(0.95)
+        }));
+        assert!(!valve_mismatch(ValveReading {
+            commanded: Some(0.5),
+            state: Some(0.55)
+        }));
+        // Unknown (NaN -> None) reported state is a fault for now.
+        assert!(valve_mismatch(ValveReading {
+            commanded: Some(1.0),
+            state: None
+        }));
+        assert!(valve_mismatch(ValveReading {
+            commanded: None,
+            state: None
+        }));
+        // Known state with no command to compare against: not a mismatch.
+        assert!(!valve_mismatch(ValveReading {
+            commanded: None,
+            state: Some(0.0)
+        }));
+    }
+
+    #[test]
+    fn debounce_waits_then_blinks_and_clears() {
+        let mut since = None;
+        let d = VALVE_MISMATCH_DEBOUNCE_SECS;
+
+        // First frame of a mismatch: armed but not yet blinking.
+        assert!(!debounce_blink(&mut since, true, 100.0));
+        // Still within the window.
+        assert!(!debounce_blink(&mut since, true, 100.0 + d - 0.01));
+        // Past the window: blink.
+        assert!(debounce_blink(&mut since, true, 100.0 + d + 0.01));
+        // Agreement clears the timer and stops the blink.
+        assert!(!debounce_blink(&mut since, false, 200.0));
+        assert_eq!(since, None);
+        // A fresh mismatch restarts the debounce.
+        assert!(!debounce_blink(&mut since, true, 300.0));
     }
 }
