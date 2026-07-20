@@ -305,6 +305,7 @@ impl Db {
         );
 
         let mut stmt = conn.prepare_cached(&query)?;
+        let table = M::default().table().to_owned();
         let rows = stmt
             .query_map(
                 &[(":system_id", &system_id), (":component_id", &component_id)],
@@ -314,7 +315,17 @@ impl Db {
                     Ok((t, m))
                 },
             )?
-            .collect::<Result<Vec<_>, _>>()?;
+            // A row may have been written by a dialect whose enum extensions (e.g. MAV_CMD)
+            // the requested type M doesn't know about; skip just that row rather than
+            // failing the whole query.
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("skipping unparseable {table} row: {e}");
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         Ok(rows)
     }
@@ -590,3 +601,73 @@ macros::implement_message_ext_for_dialect!(
     mavspec::rust::dialects::ardupilotmega
 );
 macros::implement_message_ext_for_dialect!("rapid", rapid_dialect::Rapid, rapid_dialect::rapid);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valve_command_does_not_poison_command_long_reads() {
+        let db = Db::init();
+
+        let normal = mavspec::rust::dialects::common::messages::CommandLong {
+            target_system: 1,
+            target_component: 1,
+            command: mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm,
+            ..Default::default()
+        };
+        db.write_message(1, 1, &normal).unwrap();
+
+        let valve = rapid_dialect::rapid::messages::CommandLong {
+            target_system: 1,
+            target_component: 1,
+            command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
+            ..Default::default()
+        };
+        db.write_message(1, 1, &valve).unwrap();
+
+        let rows = db
+            .all_messages::<mavspec::rust::dialects::common::messages::CommandLong>(1, 1)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].1.command,
+            mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm
+        );
+    }
+
+    #[test]
+    fn rapid_command_long_reads_decode_both_common_and_rapid_commands() {
+        let db = Db::init();
+
+        let normal = mavspec::rust::dialects::common::messages::CommandLong {
+            target_system: 1,
+            target_component: 1,
+            command: mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm,
+            ..Default::default()
+        };
+        db.write_message(1, 1, &normal).unwrap();
+
+        let valve = rapid_dialect::rapid::messages::CommandLong {
+            target_system: 1,
+            target_component: 1,
+            command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
+            ..Default::default()
+        };
+        db.write_message(1, 1, &valve).unwrap();
+
+        let mut rows = db
+            .all_messages::<rapid_dialect::rapid::messages::CommandLong>(1, 1)
+            .unwrap();
+        rows.sort_by_key(|(t, _)| *t);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].1.command,
+            rapid_dialect::rapid::enums::MavCmd::ComponentArmDisarm
+        );
+        assert_eq!(
+            rows[1].1.command,
+            rapid_dialect::rapid::enums::MavCmd::CommandValve
+        );
+    }
+}

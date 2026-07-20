@@ -7,7 +7,11 @@ use convert_case::{Case, Casing as _};
 use eframe::egui;
 use egui::{Align, DragValue, Layout, RichText, TextStyle};
 use egui_extras::{Column, TableBuilder};
-use mavspec::rust::dialects::common::{
+// rapid's MAV_CMD/MAV_FRAME enums are supersets of common's (they inherit common's entries
+// and add rapid-specific ones, e.g. the valve commands), so decoding/sending through these
+// types covers both common and rapid-dialect commands rather than only common's.
+// TODO: properly handle an arbitrary number of supersets of common
+use rapid_dialect::rapid::{
     enums::{MavCmd, MavFrame},
     messages::{CommandInt, CommandLong},
 };

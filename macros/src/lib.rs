@@ -312,15 +312,34 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                                 #var_ident: #dialect_mod::enums::#enum_ident::from_bits(row.get::<usize, _>(#i)?).unwrap()
                             }
                         }
-                        (_, Some("MAV_REMOTE_LOG_DATA_BLOCK_COMMANDS")) => {
-                            quote! { #var_ident: row.get::<usize, u32>(#i)?.try_into().unwrap() }
-                        }
-                        (_, Some("MAV_CMD")) => {
-                            quote! { #var_ident: row.get::<usize, u16>(#i)?.try_into().unwrap() }
-                        }
-                        (_, Some(_)) => {
-                            quote! { #var_ident: row.get::<usize, u8>(#i)?.try_into().unwrap() }
-                        }
+                        // Enums like MAV_CMD are shared across dialects and extended per-dialect
+                        // (e.g. rapid's custom valve commands); a row written by one dialect may
+                        // hold a value the dialect used to read it back doesn't recognize. Surface
+                        // that as a query error instead of panicking the whole process.
+                        (_, Some(enum_name @ "MAV_REMOTE_LOG_DATA_BLOCK_COMMANDS")) => quote! {
+                            #var_ident: {
+                                let raw: u32 = row.get(#i)?;
+                                core::convert::TryFrom::try_from(raw).map_err(|_| {
+                                    rusqlite::Error::InvalidColumnType(#i, format!("invalid {} value {raw}", #enum_name), rusqlite::types::Type::Integer)
+                                })?
+                            }
+                        },
+                        (_, Some(enum_name @ "MAV_CMD")) => quote! {
+                            #var_ident: {
+                                let raw: u16 = row.get(#i)?;
+                                core::convert::TryFrom::try_from(raw).map_err(|_| {
+                                    rusqlite::Error::InvalidColumnType(#i, format!("invalid {} value {raw}", #enum_name), rusqlite::types::Type::Integer)
+                                })?
+                            }
+                        },
+                        (_, Some(enum_name)) => quote! {
+                            #var_ident: {
+                                let raw: u8 = row.get(#i)?;
+                                core::convert::TryFrom::try_from(raw).map_err(|_| {
+                                    rusqlite::Error::InvalidColumnType(#i, format!("invalid {} value {raw}", #enum_name), rusqlite::types::Type::Integer)
+                                })?
+                            }
+                        },
                         (MavType::Float, _) => quote! { #var_ident: f32::from_bits(row.get::<usize, u32>(#i)?) },
                         (MavType::Double, _) => quote! { #var_ident: f64::from_bits(row.get::<usize, u64>(#i)?) },
                         _ => quote! { #var_ident: row.get(#i)? }
