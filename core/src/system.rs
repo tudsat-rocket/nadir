@@ -11,7 +11,7 @@ use maviola::core::io::{ChannelId, ChannelInfo};
 use maviola::prelude::Frame;
 use maviola::prelude::Message;
 use maviola::prelude::V2;
-use maviola::prelude::{CallbackApi as _, Endpoint};
+use maviola::prelude::{CallbackApi as _, Endpoint, MavLinkId};
 use maviola::protocol::SystemId;
 use mavspec::rust::default_dialect::enums::MavProtocolCapability;
 use mavspec::rust::dialects::common::enums::{
@@ -28,6 +28,7 @@ use mavspec::rust::dialects::Common;
 use crate::protocols::logs::{FlightLogUiState, LogDlCommand};
 use crate::protocols::params::{ParamEncoding, ParamProgress, ParamVal};
 use crate::stats::ChannelStats;
+use crate::{GROUND_STATION_COMPONENT_ID, GROUND_STATION_SYSTEM_ID};
 
 pub struct SystemConnection {
     pub callback: Callback<V2>,
@@ -52,7 +53,6 @@ impl System {
         system_id: SystemId,
         db: Db,
         callback: Callback<V2>,
-        endpoint: Arc<Mutex<Endpoint<V2>>>,
         can_proxy: Option<(
             mpsc::Sender<socketcan::CanFrame>,
             broadcast::Sender<socketcan::CanFrame>,
@@ -69,6 +69,12 @@ impl System {
         let receiver_logs = message_sender.subscribe();
 
         let (log_cmd_tx, log_cmd_rx) = tokio::sync::mpsc::channel::<LogDlCommand>(1);
+
+        // Each system gets its own endpoint (and thus its own MAVLink sequence counter)
+        let endpoint = Arc::new(Mutex::new(Endpoint::new(MavLinkId {
+            system: GROUND_STATION_SYSTEM_ID,
+            component: GROUND_STATION_COMPONENT_ID,
+        })));
 
         let system = System {
             system_id,
@@ -319,22 +325,15 @@ impl System {
         message: Common,
         frame: &Frame<V2>,
         callback: &Callback<V2>,
-        endpoint: Arc<Mutex<Endpoint<V2>>>,
     ) {
         let _ = self.message_sender.send(message);
-        self.notify_of_frame(frame, callback, endpoint);
+        self.notify_of_frame(frame, callback);
     }
 
-    pub fn notify_of_frame(
-        &mut self,
-        frame: &Frame<V2>,
-        callback: &Callback<V2>,
-        endpoint: Arc<Mutex<Endpoint<V2>>>,
-    ) {
+    pub fn notify_of_frame(&mut self, frame: &Frame<V2>, callback: &Callback<V2>) {
         let mut conninfo = self.conn.lock().unwrap();
 
         conninfo.callback = callback.clone();
-        conninfo.endpoint = endpoint;
         let (_channel_info, channel_stats) = conninfo
             .channels
             .entry(callback.channel_id())

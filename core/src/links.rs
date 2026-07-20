@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::Sender;
 
@@ -7,7 +6,6 @@ use maviola::asnc::node::Event;
 use maviola::prelude::*;
 
 use crate::stats::LinkStats;
-use crate::{GROUND_STATION_COMPONENT_ID, GROUND_STATION_SYSTEM_ID};
 
 pub mod tcp;
 pub mod udp;
@@ -24,7 +22,6 @@ pub enum LinkId {
 pub struct Link {
     pub id: LinkId,
     //event_loop_task: tokio::task::JoinHandle<()>,
-    pub endpoint: Arc<Mutex<Endpoint<V2>>>,
     pub stats: LinkStats,
 }
 
@@ -39,10 +36,6 @@ impl LinkId {
         Link {
             id: self.clone(),
             //event_loop_task,
-            endpoint: Arc::new(Mutex::new(Endpoint::new(MavLinkId {
-                system: GROUND_STATION_SYSTEM_ID,
-                component: GROUND_STATION_COMPONENT_ID,
-            }))),
             stats: LinkStats::default(),
         }
     }

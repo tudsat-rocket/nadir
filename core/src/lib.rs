@@ -140,9 +140,6 @@ impl Core {
                         continue;
                     }
 
-                    let mut links = self.links.lock().unwrap();
-                    let link = links.get(&link_id).unwrap();
-
                     let mut systems = self.systems.lock().unwrap();
                     let system_id = frame.system_id();
                     let system = systems.entry(system_id).or_insert_with(|| {
@@ -150,7 +147,6 @@ impl Core {
                             system_id,
                             self.db.clone(),
                             callback.clone(),
-                            link.endpoint.clone(),
                             self.can_proxy.clone(),
                         )
                     });
@@ -196,12 +192,7 @@ impl Core {
                             tracing::error!("Failed to process message: {e:?}");
                         }
 
-                        system.notify_of_common_message(
-                            message,
-                            frame,
-                            callback,
-                            link.endpoint.clone(),
-                        );
+                        system.notify_of_common_message(message, frame, callback);
                     } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
                         if let Err(e) =
                             self.db
@@ -210,7 +201,7 @@ impl Core {
                             tracing::error!("Failed to process message: {e:?}");
                         }
 
-                        system.notify_of_frame(frame, callback, link.endpoint.clone());
+                        system.notify_of_frame(frame, callback);
                     } else if let Ok(message) = frame.decode::<rapid_dialect::Rapid>() {
                         if let Err(e) =
                             self.db
@@ -219,9 +210,10 @@ impl Core {
                             tracing::error!("Failed to process message: {e:?}");
                         }
 
-                        system.notify_of_frame(frame, callback, link.endpoint.clone());
+                        system.notify_of_frame(frame, callback);
                     }
 
+                    let mut links = self.links.lock().unwrap();
                     let link = links.get_mut(&link_id).unwrap();
                     link.stats.push_received(frame.body_length());
                 }
