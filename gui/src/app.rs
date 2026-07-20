@@ -43,7 +43,7 @@ impl App {
             .autoconnect_to_usb()
             .on_event(Box::new(move |event| {
                 let _ = event_tx.send(event.clone());
-                ctx2.request_repaint();
+                ctx2.request_repaint_after(std::time::Duration::from_millis(16));
             }))
             .spawn();
 
