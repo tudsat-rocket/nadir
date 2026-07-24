@@ -390,7 +390,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         conn.execute(
                             &query,
                             rusqlite::named_params! {
-                                ":received_at": received_at,
+                                ":received_at": received_at.timestamp_micros(),
                                 ":system_id": system_id,
                                 ":component_id": component_id,
                                 #(#param_assignments),*

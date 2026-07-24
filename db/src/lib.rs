@@ -47,6 +47,11 @@ pub struct MessageSummary {
     pub last: DateTime<Utc>,
 }
 
+fn datetime_from_micros(col: usize, micros: i64) -> Result<DateTime<Utc>, rusqlite::Error> {
+    DateTime::from_timestamp_micros(micros)
+        .ok_or(rusqlite::Error::IntegralValueOutOfRange(col, micros))
+}
+
 pub trait MessageExt: MessageSpec {
     fn table(&self) -> &str;
     fn rows(&self) -> &[&str];
@@ -322,7 +327,7 @@ impl Db {
             M::default().table(),
         );
 
-        let since = since.unwrap_or(DateTime::UNIX_EPOCH);
+        let since = since.map_or(i64::MIN, |t| t.timestamp_micros());
         let mut stmt = conn.prepare_cached(&query)?;
         let table = M::default().table().to_owned();
         let rows = stmt
@@ -334,7 +339,8 @@ impl Db {
                 },
                 |row| {
                     let m = M::from_row(row)?;
-                    let t: DateTime<Utc> = row.get(M::default().rows().len())?;
+                    let col = M::default().rows().len();
+                    let t = datetime_from_micros(col, row.get(col)?)?;
                     Ok((t, m))
                 },
             )?
@@ -521,7 +527,7 @@ impl Db {
         let conn = self.conn();
         let lower_case = msg_name.to_lowercase();
 
-        let since = since.unwrap_or_default();
+        let since = since.unwrap_or_default().timestamp_micros();
 
         let protocol = mavspec::definitions::protocol();
         let Some(field) = ["common", "ardupilotmega"]
@@ -557,7 +563,7 @@ impl Db {
 
         let mut stmt = conn.prepare_cached(&query)?;
         let row_mapper = |row: &rusqlite::Row<'_>| {
-            let timestamp: chrono::DateTime<chrono::Utc> = row.get(0)?;
+            let timestamp = datetime_from_micros(0, row.get(0)?)?;
             let int: i64 = row.get(1)?;
             let value = match field.r#type() {
                 MavType::Float => f64::from(f32::from_bits(int as u32)),
