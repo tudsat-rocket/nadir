@@ -1,3 +1,9 @@
+mod alerts;
+pub use alerts::*;
+
+mod text;
+pub(crate) use text::*;
+
 mod plot;
 pub use plot::*;
 

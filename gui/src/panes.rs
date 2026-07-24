@@ -75,17 +75,16 @@ pub struct TreeBehavior<'a> {
     pub position_source: &'a mut PositionSource,
 }
 
+// Links, Horizon and Status are not Pane variants: they live in the fixed status bar (see app.rs)
+// rather than in the tile tree.
 pub enum Pane {
     Map(Box<MapPane>),
-    Status(StatusPane),
     StateEstimator(StateEstimatorPane),
     Sensors(SensorsPane),
     Plot(PlotPane),
     Messages(MessagesPane),
     Commands(CommandsPane),
     CanProbe(CanProbePane),
-    Links(LinksPane),
-    Horizon(HorizonPane),
     Params(ParamsPane),
     Propulsion(PropulsionPane),
     Preflight(PreflightPane),
@@ -144,15 +143,12 @@ impl std::fmt::Display for Pane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name: String = match self {
             Pane::Map(_) => "Map".into(),
-            Pane::Status(_) => "Status".into(),
             Pane::StateEstimator(_) => "State Estimator".into(),
             Pane::Sensors(_) => "Sensors".into(),
             Pane::Plot(_) => "Plot".into(),
             Pane::Messages(_) => "Messages".into(),
             Pane::Commands(_) => "Commands".into(),
             Pane::CanProbe(_) => "CAN Probe".into(),
-            Pane::Links(_) => "Link".into(),
-            Pane::Horizon(_) => "Horizon".into(),
             Pane::Params(_) => "Params".into(),
             Pane::Propulsion(_) => "Propulsion".into(),
             Pane::Preflight(_) => "Preflight".into(),
@@ -208,15 +204,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
         match pane {
             Pane::Map(p) => p.outer_ui(ui, self),
-            Pane::Status(p) => p.outer_ui(ui, self),
             Pane::StateEstimator(p) => p.outer_ui(ui, self),
             Pane::Sensors(p) => p.outer_ui(ui, self),
             Pane::Plot(p) => p.outer_ui(ui, self),
             Pane::Messages(p) => p.outer_ui(ui, self),
             Pane::Commands(p) => p.outer_ui(ui, self),
             Pane::CanProbe(p) => p.outer_ui(ui, self),
-            Pane::Links(p) => p.outer_ui(ui, self),
-            Pane::Horizon(p) => p.outer_ui(ui, self),
             Pane::Params(p) => p.outer_ui(ui, self),
             Pane::Propulsion(p) => p.outer_ui(ui, self),
             Pane::Preflight(p) => p.outer_ui(ui, self),

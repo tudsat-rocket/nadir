@@ -5,20 +5,11 @@ use mavspec::rust::dialects::common::{enums::MavModeFlag, messages::Heartbeat};
 
 pub struct ModeDisplay {
     system: System,
-    font_size: Option<f32>,
 }
 
 impl ModeDisplay {
     pub fn new(system: System) -> Self {
-        Self {
-            system,
-            font_size: None,
-        }
-    }
-
-    pub fn font_size(mut self, size: f32) -> Self {
-        self.font_size = Some(size);
-        self
+        Self { system }
     }
 }
 
@@ -28,7 +19,7 @@ impl egui::Widget for ModeDisplay {
             return ui.label("");
         };
 
-        let mut rt = if let Some(name) = self.system.current_mode_name() {
+        let rt = if let Some(name) = self.system.current_mode_name() {
             RichText::new(name).strong()
         } else if heartbeat
             .base_mode
@@ -41,10 +32,6 @@ impl egui::Widget for ModeDisplay {
             RichText::new("")
             // TODO
         };
-
-        if let Some(size) = self.font_size {
-            rt = rt.size(size);
-        }
 
         ui.label(rt)
     }

@@ -56,7 +56,9 @@ impl PaneUi for HorizonPane {
                 });
             });
 
-        if pane_rect.width() >= 300.0 {
+        // Keep the toggles available at status-bar widths; they only disappear when the horizon is
+        // genuinely too narrow to fit them.
+        if pane_rect.width() >= 220.0 {
             let button_size = Vec2::new(52.0, 22.0);
 
             Area::new(Id::new("horizon_velocity_toggle"))

@@ -10,9 +10,25 @@ use crate::{
     panes::PaneUi,
 };
 
+/// The figures the compact summary shows in place of the link diagram.
+struct LinkSummary {
+    up_packets: f32,
+    down_packets: f32,
+    up_data: f32,
+    down_data: f32,
+    uplink_quality: Option<f32>,
+    downlink_quality: Option<f32>,
+    radio_status: Option<RadioStatus>,
+}
+
 pub struct LinksPane {}
 
 impl LinksPane {
+    /// Width the link diagram needs before it stops being readable. Below this the pane falls back
+    /// to a numbers-only summary; below [`Self::COMPACT_MIN_WIDTH`] callers should drop the pane.
+    pub const FULL_MIN_WIDTH: f32 = 285.0;
+    pub const COMPACT_MIN_WIDTH: f32 = 130.0;
+
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
     }
@@ -99,6 +115,84 @@ impl LinksPane {
         }
     }
 
+    /// Transports only, no addresses: at compact widths the address is the first thing to become
+    /// unreadable, while "UDP" or "USB" still answers how the vehicle is attached.
+    fn draw_peers_compact(&mut self, ui: &mut egui::Ui, system: &System) {
+        let mut transports: Vec<&str> = system
+            .channels()
+            .iter()
+            .map(|(info, _)| match info.details() {
+                ChannelDetails::TcpClient { .. } | ChannelDetails::TcpServer { .. } => "TCP",
+                ChannelDetails::UdpClient { .. } | ChannelDetails::UdpServer { .. } => "UDP",
+                ChannelDetails::SerialPort { .. } => "USB",
+                _ => "?",
+            })
+            .collect();
+        transports.sort_unstable();
+        transports.dedup();
+
+        ui.horizontal(|ui| {
+            ui.weak("🖧");
+            ui.weak(transports.join(" "));
+        });
+    }
+
+    /// Numbers-only stand-in for the diagram, in the same uplink-over-downlink order, for zones too
+    /// narrow to draw the link graph in.
+    fn draw_summary(&mut self, ui: &mut egui::Ui, links: &LinkSummary) {
+        ui.add_space(2.0);
+
+        // The data-rate column is the first thing to go; packet rate and link quality are what the
+        // zone exists for.
+        let with_data_rate = ui.available_width() >= 200.0;
+
+        egui::Grid::new("links_summary")
+            .num_columns(if with_data_rate { 4 } else { 3 })
+            .striped(true)
+            .spacing(Vec2::new(6.0, 2.0))
+            .show(ui, |ui| {
+                ui.label("");
+                ui.weak("LQ");
+                ui.weak("pkt/s");
+                if with_data_rate {
+                    ui.weak("KiB/s");
+                }
+                ui.end_row();
+
+                // Same up/down glyph pair the sidebar uses for its data rates; B612 has no
+                // triangles, so anything else here renders as tofu.
+                for (arrow, lq, packets, data) in [
+                    ("⏫", links.uplink_quality, links.up_packets, links.up_data),
+                    (
+                        "⏬",
+                        links.downlink_quality,
+                        links.down_packets,
+                        links.down_data,
+                    ),
+                ] {
+                    ui.weak(arrow);
+                    self.draw_link_quality(ui, lq);
+                    ui.monospace(format!("{packets:>5.1}"));
+                    if with_data_rate {
+                        ui.monospace(format!("{:>5.2}", data / 1024.0));
+                    }
+                    ui.end_row();
+                }
+            });
+
+        // The radio's own view of the link: remote RSSI over local RSSI, the pair the diagram
+        // would label per direction.
+        if let Some(radio) = &links.radio_status {
+            ui.horizontal(|ui| {
+                ui.weak("📡");
+                ui.monospace(format!("{:>+4}", radio.remrssi as i8));
+                ui.weak("/");
+                ui.monospace(format!("{:>+4}", radio.rssi as i8));
+                ui.weak("dBm");
+            });
+        }
+    }
+
     fn draw_link_quality(&mut self, ui: &mut egui::Ui, mut lq: Option<f32>) -> egui::Response {
         lq = lq.and_then(|lq| lq.is_normal().then_some(lq));
 
@@ -115,13 +209,19 @@ impl LinksPane {
 
 impl PaneUi for LinksPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        let compact = ui.available_width() < Self::FULL_MIN_WIDTH;
+
         egui::TopBottomPanel::bottom(egui::Id::new("links_channels_panel"))
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::new())
             .show_inside(ui, |ui| {
                 ui.separator();
-                self.draw_peers(ui, &system);
+                if compact {
+                    self.draw_peers_compact(ui, &system);
+                } else {
+                    self.draw_peers(ui, &system);
+                }
             });
 
         let up_packets: f32 = system
@@ -169,8 +269,34 @@ impl PaneUi for LinksPane {
             .as_ref()
             .map(|rs| 1.0 - f32::from(rs.rxerrors) / 100.0);
 
+        if compact {
+            self.draw_summary(
+                ui,
+                &LinkSummary {
+                    up_packets,
+                    down_packets,
+                    up_data,
+                    down_data,
+                    uplink_quality: local_uplink_quality,
+                    downlink_quality: local_downlink_quality,
+                    radio_status,
+                },
+            );
+            return;
+        }
+
+        // In the fixed status bar this pane gets less than its natural height; tighten the row
+        // spacing and drop the data-rate rows instead of clipping.
+        let diagram_h = ui.available_height().min(150.0);
+        let compact = diagram_h < 130.0;
+        let (off_quality, off_packets, off_data) = if compact {
+            (14.0, 34.0, None)
+        } else {
+            (20.0, 42.0, Some(62.0))
+        };
+
         let (response, painter) =
-            ui.allocate_painter(Vec2::new(ui.available_width(), 150.0), Sense::empty());
+            ui.allocate_painter(Vec2::new(ui.available_width(), diagram_h), Sense::empty());
         let rect = response.rect.shrink(10.0);
 
         let icon_font = FontId::proportional(18.0);
@@ -222,14 +348,14 @@ impl PaneUi for LinksPane {
 
         for (sign, lq) in [(-1.0, local_uplink_quality), (1.0, local_downlink_quality)] {
             ui.place(
-                Rect::from_center_size(local_center + Vec2::new(0.0, 20.0 * sign), s),
+                Rect::from_center_size(local_center + Vec2::new(0.0, off_quality * sign), s),
                 |ui: &mut egui::Ui| self.draw_link_quality(ui, lq),
             );
         }
 
         for (sign, pkts) in [(-1.0, up_packets), (1.0, down_packets)] {
             ui.place(
-                Rect::from_center_size(local_center + Vec2::new(0.0, 42.0 * sign), s),
+                Rect::from_center_size(local_center + Vec2::new(0.0, off_packets * sign), s),
                 |ui: &mut egui::Ui| {
                     ui.horizontal(|ui| {
                         ui.monospace(format!("{pkts:>5.1}"));
@@ -240,17 +366,19 @@ impl PaneUi for LinksPane {
             );
         }
 
-        for (sign, data) in [(-1.0, up_data), (1.0, down_data)] {
-            ui.place(
-                Rect::from_center_size(local_center + Vec2::new(0.0, 62.0 * sign), s),
-                |ui: &mut egui::Ui| {
-                    ui.horizontal(|ui| {
-                        ui.monospace(format!("{:>5.2}", data / 1024.0));
-                        ui.weak("KiB/s");
-                    })
-                    .response
-                },
-            );
+        if let Some(off_data) = off_data {
+            for (sign, data) in [(-1.0, up_data), (1.0, down_data)] {
+                ui.place(
+                    Rect::from_center_size(local_center + Vec2::new(0.0, off_data * sign), s),
+                    |ui: &mut egui::Ui| {
+                        ui.horizontal(|ui| {
+                            ui.monospace(format!("{:>5.2}", data / 1024.0));
+                            ui.weak("KiB/s");
+                        })
+                        .response
+                    },
+                );
+            }
         }
 
         if let Some(radio_status) = radio_status {
@@ -266,14 +394,14 @@ impl PaneUi for LinksPane {
                 (1.0, remote_downlink_quality),
             ] {
                 ui.place(
-                    Rect::from_center_size(radio_center + Vec2::new(0.0, 20.0 * sign), s),
+                    Rect::from_center_size(radio_center + Vec2::new(0.0, off_quality * sign), s),
                     |ui: &mut egui::Ui| self.draw_link_quality(ui, lq),
                 );
             }
 
             for (sign, rssi) in [(-1.0, uplink_rssi), (1.0, downlink_rssi)] {
                 ui.place(
-                    Rect::from_center_size(radio_center + Vec2::new(0.0, 42.0 * sign), s),
+                    Rect::from_center_size(radio_center + Vec2::new(0.0, off_packets * sign), s),
                     |ui: &mut egui::Ui| {
                         ui.horizontal(|ui| {
                             ui.weak("RSSI:");
@@ -285,18 +413,20 @@ impl PaneUi for LinksPane {
                 );
             }
 
-            for (sign, snr) in [(-1.0, uplink_snr), (1.0, downlink_snr)] {
-                ui.place(
-                    Rect::from_center_size(radio_center + Vec2::new(0.0, 62.0 * sign), s),
-                    |ui: &mut egui::Ui| {
-                        ui.horizontal(|ui| {
-                            ui.weak("SNR: ");
-                            ui.monospace(format!("{snr:>+3.0}"));
-                            ui.weak("dB");
-                        })
-                        .response
-                    },
-                );
+            if let Some(off_data) = off_data {
+                for (sign, snr) in [(-1.0, uplink_snr), (1.0, downlink_snr)] {
+                    ui.place(
+                        Rect::from_center_size(radio_center + Vec2::new(0.0, off_data * sign), s),
+                        |ui: &mut egui::Ui| {
+                            ui.horizontal(|ui| {
+                                ui.weak("SNR: ");
+                                ui.monospace(format!("{snr:>+3.0}"));
+                                ui.weak("dB");
+                            })
+                            .response
+                        },
+                    );
+                }
             }
         }
     }

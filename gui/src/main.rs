@@ -9,6 +9,7 @@ use tracing_subscriber::prelude::*;
 mod app;
 mod colors;
 mod panes;
+mod shell;
 mod views;
 mod widgets;
 
@@ -46,7 +47,6 @@ fn main() -> Result<(), eframe::Error> {
                 egui::FontData::from_static(include_bytes!("../assets/fonts/B612-Regular.ttf"));
             let b612_mono =
                 egui::FontData::from_static(include_bytes!("../assets/fonts/B612Mono-Regular.ttf"));
-
             fonts.font_data.insert("B612".to_owned(), Arc::new(b612));
             fonts
                 .font_data

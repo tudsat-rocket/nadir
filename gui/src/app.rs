@@ -1,17 +1,16 @@
 use core::LinkId;
 
-use egui::{Align, Color32, Key, Layout, Margin, Modifiers, RichText};
-use egui_tiles::LinearDir;
+use egui::{Color32, Key, Margin, Modifiers};
 use maviola::asnc::node::Event;
 use maviola::prelude::V2;
 use mavspec::rust::dialects::Common;
 use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
-use mavspec::rust::dialects::common::messages::Heartbeat;
 
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
+use crate::shell::{Sidebar, StatusBar};
 use crate::views::View;
-use crate::widgets::{ArmedIndicator, AutopilotLogo, ModeDisplay, SharedPlotState};
+use crate::widgets::SharedPlotState;
 
 pub struct App {
     core: core::Core,
@@ -19,11 +18,12 @@ pub struct App {
     log_collector: egui_tracing::tracing::collector::EventCollector,
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
+    sidebar: Sidebar,
+    status_bar: StatusBar,
     shared_plot_state: SharedPlotState,
     position_source: PositionSource,
     active_view: View,
     never_connected: bool,
-    sidebar_collapsed: bool,
     logs_shown: bool,
 }
 
@@ -50,13 +50,6 @@ impl App {
         let mut tiles = egui_tiles::Tiles::default();
 
         let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(ctx, None))));
-
-        let link = tiles.insert_pane(Pane::Links(LinksPane::new(ctx)));
-        let horizon = tiles.insert_pane(Pane::Horizon(HorizonPane::new(ctx)));
-
-        let status = tiles.insert_pane(Pane::Status(StatusPane::new(ctx)));
-        let components = tiles.insert_pane(Pane::Placeholder("Info".to_owned()));
-
         let propulsion = tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx)));
         let preflight = tiles.insert_pane(Pane::Preflight(PreflightPane::new(ctx)));
         let navigation = tiles.insert_pane(Pane::Navigation(NavigationPane::new(ctx)));
@@ -70,17 +63,17 @@ impl App {
         let can = tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx)));
         let flight_log = tiles.insert_pane(Pane::FlightLogs(LogsPane::new(ctx)));
 
-        let link_and_horizon = tiles.insert_horizontal_tile(vec![link, horizon]);
-        let info_top_tabs = tiles.insert_tab_tile(vec![status, components]);
-
-        let top_split = tiles.insert_horizontal_tile(vec![link_and_horizon, info_top_tabs]);
+        #[cfg(feature = "profiling")]
+        let profiler = Some(tiles.insert_pane(Pane::Profiler));
+        #[cfg(not(feature = "profiling"))]
+        let profiler: Option<egui_tiles::TileId> = None;
 
         let top_left_tabs = tiles.insert_tab_tile(vec![propulsion, params]);
-        let bottom_left_tabs =
-            tiles.insert_tab_tile(vec![messages, commands, plot, can, flight_log]);
+        let bottom_left_tabs = tiles.insert_tab_tile(vec![map, messages, commands, flight_log]);
 
-        let top_right_tabs = tiles.insert_tab_tile(vec![preflight, navigation, mission]);
-        let bottom_right_tabs = tiles.insert_tab_tile(vec![state, sensors]);
+        let top_right_tabs = tiles.insert_tab_tile(vec![state, preflight, navigation, mission]);
+        let bottom_right_tabs =
+            tiles.insert_tab_tile([sensors, plot, can].into_iter().chain(profiler).collect());
 
         let bottom = tiles.insert_grid_tile(vec![
             top_left_tabs,
@@ -89,37 +82,27 @@ impl App {
             bottom_right_tabs,
         ]);
 
-        let side = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Vertical, [top_split, bottom], 0.2),
-        )));
-
-        #[cfg(feature = "profiling")]
-        let right_side = {
-            let profiler = tiles.insert_pane(Pane::Profiler);
-            tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-                egui_tiles::Linear::new_binary(LinearDir::Vertical, [map, profiler], 0.5),
-            )))
-        };
-        #[cfg(not(feature = "profiling"))]
-        let right_side = map;
-
-        let root = tiles.insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
-            egui_tiles::Linear::new_binary(LinearDir::Horizontal, [side, right_side], 0.666),
-        )));
-
-        let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
+        let tiles_tree = egui_tiles::Tree::new("my_tree", bottom, tiles);
 
         Self {
             core,
             event_rx,
             log_collector,
-            toasts: egui_notify::Toasts::default().with_anchor(egui_notify::Anchor::BottomRight),
+            toasts: egui_notify::Toasts::default()
+                .with_anchor(egui_notify::Anchor::TopRight)
+                .with_shadow(egui::epaint::Shadow {
+                    offset: [0, 3],
+                    blur: 10,
+                    spread: 0,
+                    color: Color32::from_black_alpha(160),
+                }),
             tiles_tree,
+            sidebar: Sidebar::new(),
+            status_bar: StatusBar::new(ctx),
             shared_plot_state: SharedPlotState::new(),
             position_source: PositionSource::default(),
             active_view: View::Overview,
             never_connected: true,
-            sidebar_collapsed: false,
             logs_shown: false,
         }
     }
@@ -162,7 +145,7 @@ impl eframe::App for App {
                     if self.never_connected && self.active_view == View::Overview {
                         self.active_view = View::System(peer.system_id());
                         self.never_connected = false;
-                        self.sidebar_collapsed = true;
+                        self.sidebar.collapse();
                     }
 
                     self.toasts
@@ -176,121 +159,8 @@ impl eframe::App for App {
             }
         }
 
-        let clps = self.sidebar_collapsed;
-        egui::SidePanel::left("sidepanel")
-            .resizable(false)
-            .exact_width(if clps { 37.0 } else { 300.0 })
-            .show(ctx, |ui| {
-                ui.set_width(ui.available_width());
-
-                for (i, system_id) in self.core.known_system_ids().iter().enumerate() {
-                    if i != 0 && !self.sidebar_collapsed {
-                        ui.separator();
-                    }
-
-                    let Some(system) = self.core.system(*system_id) else {
-                        continue;
-                    };
-
-                    if self.sidebar_collapsed {
-                        ui.selectable_value(
-                            &mut self.active_view,
-                            View::System(*system_id),
-                            system.icon(),
-                        );
-                    } else if let Ok(heartbeat) = system.last_message::<Heartbeat>() {
-                        ui.horizontal(|ui| {
-                            ui.monospace(format!("0x{system_id:02x}"));
-                            ui.label(system.icon());
-
-                            ui.add(ArmedIndicator(heartbeat.base_mode));
-
-                            ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
-                                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                                    ui.add_space(5.0);
-                                    ui.add(AutopilotLogo(heartbeat.autopilot, heartbeat.type_));
-                                })
-                                .response
-                            });
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.add(ModeDisplay::new(system.clone()));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("🔋 98%").color(Color32::from_rgb(78, 154, 6)));
-                            ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
-                                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                                    ui.selectable_value(
-                                        &mut self.active_view,
-                                        View::System(*system_id),
-                                        "Select ➡",
-                                    );
-
-                                    let total_data_rate = system
-                                        .channels()
-                                        .iter_mut()
-                                        .map(|(_, s)| s.received_data_rate())
-                                        .sum::<f32>()
-                                        / 1024.0;
-                                    ui.label("KiB/s");
-                                    ui.monospace(format!("{total_data_rate:>5.2}"));
-                                    ui.weak("⏬");
-                                })
-                                .response
-                            });
-                        });
-                    } else {
-                        ui.monospace(format!("0x{system_id:02x}"));
-                        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                            ui.selectable_value(
-                                &mut self.active_view,
-                                View::System(*system_id),
-                                "Select ➡",
-                            );
-                        });
-                    }
-                }
-
-                ui.with_layout(egui::Layout::bottom_up(Align::LEFT), |ui| {
-                    ui.add_space(5.0);
-                    if ui.button(if clps { "➡" } else { "⬅  Collapse" }).clicked() {
-                        self.sidebar_collapsed = !self.sidebar_collapsed;
-                    }
-                    ui.separator();
-
-                    #[cfg(feature = "profiling")]
-                    {
-                        let mut profiling_on = puffin::are_scopes_on();
-                        ui.selectable_value(
-                            &mut profiling_on,
-                            true,
-                            if clps { "⏱" } else { "⏱ Profiling" },
-                        );
-                        puffin::set_scopes_on(profiling_on);
-                    }
-
-                    ui.toggle_value(
-                        &mut self.logs_shown,
-                        if clps { "📃" } else { "📃 Show Debug Logs" },
-                    );
-
-                    ui.separator();
-
-                    ui.selectable_value(
-                        &mut self.active_view,
-                        View::Settings,
-                        if clps { "🔧" } else { "🔧 Preferences" },
-                    );
-
-                    ui.selectable_value(
-                        &mut self.active_view,
-                        View::Overview,
-                        if clps { "🖧" } else { "🖧 Overview" },
-                    );
-                });
-            });
+        self.sidebar
+            .show(ctx, &self.core, &mut self.active_view, &mut self.logs_shown);
 
         if self.logs_shown {
             egui::TopBottomPanel::bottom("bottombar")
@@ -302,6 +172,19 @@ impl eframe::App for App {
                     ui.add_space(5.0);
                     ui.add(egui_tracing::ui::Logs::new(self.log_collector.clone()));
                 });
+        }
+
+        let mut behavior = TreeBehavior {
+            shared_plot_state: &mut self.shared_plot_state,
+            core: self.core.clone(),
+            active_view: self.active_view,
+            position_source: &mut self.position_source,
+        };
+
+        if let View::System(system_id) = self.active_view
+            && let Some(system) = self.core.system(system_id)
+        {
+            self.status_bar.show(ctx, &system, &mut behavior);
         }
 
         ctx.input(|input| {
@@ -373,16 +256,15 @@ impl eframe::App for App {
                     ui.label("TODO");
                 }
                 View::System(_) => {
-                    let mut behavior = TreeBehavior {
-                        shared_plot_state: &mut self.shared_plot_state,
-                        core: self.core.clone(),
-                        active_view: self.active_view,
-                        position_source: &mut self.position_source,
-                    };
                     self.tiles_tree.ui(&mut behavior, ui);
                 }
             });
 
+        // egui-notify paints toast backgrounds with the global noninteractive bg_fill; darken it
+        // just for the toast pass (nothing else paints after this) so notifications stand out.
+        let original_bg = ctx.style().visuals.widgets.noninteractive.bg_fill;
+        ctx.style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = s.visuals.extreme_bg_color);
         self.toasts.show(ctx);
+        ctx.style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = original_bg);
     }
 }
