@@ -141,6 +141,8 @@ impl Db {
     pub fn init() -> Self {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
 
+        conn.set_prepared_statement_cache_capacity(256);
+
         let protocol = mavspec::definitions::protocol();
         define_message_tables!(conn, protocol.get_dialect_by_name("common").unwrap());
         define_message_tables!(conn, protocol.get_dialect_by_name("ardupilotmega").unwrap());
