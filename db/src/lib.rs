@@ -66,6 +66,7 @@ pub trait MessageExt: MessageSpec {
         conn: &rusqlite::Connection,
         system_id: u8,
         component_id: u8,
+        received_at: DateTime<Utc>,
     ) -> Result<(), rusqlite::Error>;
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error>
@@ -181,19 +182,29 @@ impl Db {
         self.conn.lock().unwrap()
     }
 
-    #[allow(clippy::unwrap_in_result)]
     pub fn write_message<M: MessageExt>(
         &self,
         system_id: u8,
         component_id: u8,
         msg: &M,
     ) -> Result<(), DbError> {
+        self.write_message_at(system_id, component_id, msg, Utc::now())
+    }
+
+    #[allow(clippy::unwrap_in_result)]
+    pub fn write_message_at<M: MessageExt>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+        msg: &M,
+        received_at: DateTime<Utc>,
+    ) -> Result<(), DbError> {
         let conn = self.conn();
         conn.busy_timeout(std::time::Duration::from_millis(10))?;
-        msg.insert(&conn, system_id, component_id)?;
+        msg.insert(&conn, system_id, component_id, received_at)?;
         drop(conn);
 
-        let now = Utc::now();
+        let now = received_at;
         let cutoff = now - chrono::TimeDelta::seconds(FREQ_WINDOW_SECS);
         let key = (system_id, component_id, msg.id(), msg.instance_value());
         let mut stats = self.stats.lock().unwrap();
@@ -235,9 +246,6 @@ impl Db {
         Ok(msg)
     }
 
-    /// Like [`Self::last_message`], but optionally filters on a single
-    /// instance-field column (e.g. `id` for `BATTERY_STATUS`). The column
-    /// name comes from trusted introspection so the dynamic SQL is safe.
     pub fn last_message_filtered<M: MessageExt + Default>(
         &self,
         system_id: u8,
@@ -291,6 +299,15 @@ impl Db {
         system_id: u8,
         component_id: u8,
     ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+        self.messages_since(system_id, component_id, None)
+    }
+
+    pub fn messages_since<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
         puffin::profile_function!();
 
         let conn = self.conn();
@@ -299,16 +316,22 @@ impl Db {
         let query = format!(
             "SELECT {}, received_at FROM {}
                 WHERE system_id=:system_id AND component_id=:component_id
+                    AND received_at > :since
                 ORDER BY received_at ASC",
             M::default().rows().join(","),
             M::default().table(),
         );
 
+        let since = since.unwrap_or(DateTime::UNIX_EPOCH);
         let mut stmt = conn.prepare_cached(&query)?;
         let table = M::default().table().to_owned();
         let rows = stmt
             .query_map(
-                &[(":system_id", &system_id), (":component_id", &component_id)],
+                rusqlite::named_params! {
+                    ":system_id": system_id,
+                    ":component_id": component_id,
+                    ":since": since,
+                },
                 |row| {
                     let m = M::from_row(row)?;
                     let t: DateTime<Utc> = row.get(M::default().rows().len())?;
@@ -328,6 +351,25 @@ impl Db {
             .collect::<Vec<_>>();
 
         Ok(rows)
+    }
+
+    /// Number of stored messages of this type, taken from the in-memory write stats instead of a
+    /// `COUNT(*)` scan whose cost grows with session length. Exact, since every write updates the
+    /// stats.
+    pub fn count_message_cached<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+    ) -> usize {
+        let msg_id = M::default().id();
+        let stats = self.stats.lock().unwrap();
+        stats
+            .iter()
+            .filter(|((sys, comp, id, _instance), _)| {
+                *sys == system_id && *comp == component_id && *id == msg_id
+            })
+            .map(|(_, rs)| usize::try_from(rs.count).unwrap_or(usize::MAX))
+            .sum()
     }
 
     pub fn count_message<M: MessageExt + Default>(

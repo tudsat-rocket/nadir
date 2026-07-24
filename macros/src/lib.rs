@@ -85,7 +85,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
         .iter()
         .map(|type_ident| {
             quote! {
-                Self::#type_ident(inner) => inner.insert(conn, system_id, component_id)
+                Self::#type_ident(inner) => inner.insert(conn, system_id, component_id, received_at)
             }
         })
         .collect();
@@ -134,7 +134,8 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 &'a self,
                 conn: &rusqlite::Connection,
                 system_id: u8,
-                component_id: u8
+                component_id: u8,
+                received_at: chrono::DateTime<chrono::Utc>,
             ) -> Result<(), rusqlite::Error> {
                 match self {
                     #(#inner_message_match_arms),* ,
@@ -374,7 +375,8 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         &'a self,
                         conn: &rusqlite::Connection,
                         system_id: u8,
-                        component_id: u8
+                        component_id: u8,
+                        received_at: chrono::DateTime<chrono::Utc>,
                     ) -> Result<(), rusqlite::Error> {
                         let query = format!(
                             "INSERT INTO {}
@@ -388,7 +390,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         conn.execute(
                             &query,
                             rusqlite::named_params! {
-                                ":received_at": chrono::Utc::now(),
+                                ":received_at": received_at,
                                 ":system_id": system_id,
                                 ":component_id": component_id,
                                 #(#param_assignments),*
