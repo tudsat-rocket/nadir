@@ -147,6 +147,17 @@ impl System {
         self.db.all_messages(self.system_id, 0x01)
     }
 
+    pub fn messages_since<M: MessageExt + Default>(
+        &self,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+        self.db.messages_since(self.system_id, 0x01, since)
+    }
+
+    pub fn message_count<M: MessageExt + Default>(&self) -> usize {
+        self.db.count_message_cached::<M>(self.system_id, 0x01)
+    }
+
     #[deprecated]
     pub fn last_heartbeat(&self) -> Result<Option<Heartbeat>, DbError> {
         // TODO: cache last heartbeat, don't go through the database for this.

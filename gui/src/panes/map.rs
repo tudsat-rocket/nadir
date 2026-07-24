@@ -1,7 +1,9 @@
 //! Contains our map widget, based on the walkers crate.
 
 use core::System;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+
+use chrono::{DateTime, Utc};
 
 use eframe::egui;
 use egui::{Color32, Frame, Pos2, Rect, Shape, Stroke, Ui, Vec2};
@@ -24,6 +26,17 @@ struct PathPoint {
     custom_mode: u32,
 }
 
+#[derive(Default)]
+struct SystemPath {
+    points: Vec<(Position, PathPoint)>,
+    last_gps: Option<DateTime<Utc>>,
+    last_heartbeat: Option<DateTime<Utc>>,
+    /// Heartbeats newer than the last appended GPS point, waiting to be joined once position
+    /// messages catch up.
+    pending_heartbeats: VecDeque<(DateTime<Utc>, u32)>,
+    custom_mode: u32,
+}
+
 pub struct MapPane {
     osm_tiles: HttpTiles,
     mapbox_tiles: Option<HttpTiles>,
@@ -31,9 +44,7 @@ pub struct MapPane {
     satellite: bool,
     visualization: Visualization,
     gradient: Vec<Color32>,
-    system_paths: HashMap<u8, Vec<(Position, PathPoint)>>,
-    /// Message counts used to invalidate path cache
-    path_counts: HashMap<u8, usize>,
+    system_paths: HashMap<u8, SystemPath>,
 }
 
 struct NavigationPlugin {
@@ -124,7 +135,6 @@ impl MapPane {
             visualization: Visualization::Altitude,
             gradient,
             system_paths: HashMap::new(),
-            path_counts: HashMap::new(),
         }
     }
 
@@ -173,48 +183,52 @@ impl PaneUi for MapPane {
 
         let system_ids = behavior.core.known_system_ids();
 
-        // Update cached paths for each system when new messages arrive
+        // Append newly arrived positions to each system's cached path.
         for s_id in &system_ids {
-            if let Some(system) = behavior.core.system(*s_id) {
-                let count = system
-                    .db
-                    .count_message::<GlobalPositionInt>(system.system_id, 0x01)
-                    .unwrap_or(0);
-                let stale = self.path_counts.get(s_id) != Some(&count);
-                if stale
-                    && count > 0
-                    && let Ok(gps_msgs) = system.all_messages::<GlobalPositionInt>()
-                {
-                    // Join with heartbeat timeline to get flight mode per point
-                    let heartbeats = system.all_messages::<Heartbeat>().unwrap_or_default();
+            let Some(system) = behavior.core.system(*s_id) else {
+                continue;
+            };
+            let count = system.message_count::<GlobalPositionInt>();
+            let path = self.system_paths.entry(*s_id).or_default();
+            if count == path.points.len() {
+                continue;
+            }
 
-                    let mut hb_idx = 0;
-                    let path = gps_msgs
-                        .iter()
-                        .map(|(ts, gps)| {
-                            // Advance heartbeat index to the last one at or before this GPS timestamp
-                            while hb_idx + 1 < heartbeats.len() && heartbeats[hb_idx + 1].0 <= *ts {
-                                hb_idx += 1;
-                            }
-                            let custom_mode =
-                                heartbeats.get(hb_idx).map_or(0, |(_, hb)| hb.custom_mode);
+            let new_gps = system
+                .messages_since::<GlobalPositionInt>(path.last_gps)
+                .unwrap_or_default();
+            let new_heartbeats = system
+                .messages_since::<Heartbeat>(path.last_heartbeat)
+                .unwrap_or_default();
 
-                            let pos = Position::new(
-                                f64::from(gps.lon) / 10_000_000.0,
-                                f64::from(gps.lat) / 10_000_000.0,
-                            );
-                            (
-                                pos,
-                                PathPoint {
-                                    altitude: f64::from(gps.relative_alt) / 1000.0,
-                                    custom_mode,
-                                },
-                            )
-                        })
-                        .collect();
-                    self.system_paths.insert(*s_id, path);
-                    self.path_counts.insert(*s_id, count);
+            for (ts, hb) in new_heartbeats {
+                path.pending_heartbeats.push_back((ts, hb.custom_mode));
+                path.last_heartbeat = Some(ts);
+            }
+
+            for (ts, gps) in new_gps {
+                // Advance the flight mode to the last heartbeat at or before this GPS timestamp;
+                // later ones stay pending for future points.
+                while let Some((hb_ts, mode)) = path.pending_heartbeats.front().copied() {
+                    if hb_ts > ts {
+                        break;
+                    }
+                    path.custom_mode = mode;
+                    path.pending_heartbeats.pop_front();
                 }
+
+                let pos = Position::new(
+                    f64::from(gps.lon) / 10_000_000.0,
+                    f64::from(gps.lat) / 10_000_000.0,
+                );
+                path.points.push((
+                    pos,
+                    PathPoint {
+                        altitude: f64::from(gps.relative_alt) / 1000.0,
+                        custom_mode: path.custom_mode,
+                    },
+                ));
+                path.last_gps = Some(ts);
             }
         }
 
@@ -292,6 +306,7 @@ impl PaneUi for MapPane {
         let paths: Vec<Path<'_, PathPoint>> = self
             .system_paths
             .values()
+            .map(|p| &p.points)
             .filter(|p| p.len() >= 2)
             .map(|path_data| {
                 let gradient = gradient.clone();
