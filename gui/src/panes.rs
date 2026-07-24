@@ -1,5 +1,6 @@
 use egui::{Align, Layout};
 use egui_tiles::SimplificationOptions;
+use mavspec::rust::dialects::common::messages::{LocalPositionNed, VfrHud};
 
 use core::{Core, System};
 
@@ -55,18 +56,15 @@ impl PositionSource {
         }
     }
 
-    pub fn message_name(self) -> &'static str {
-        match self {
-            Self::LocalPositionNed => "LOCAL_POSITION_NED",
-            Self::VfrHud => "VFR_HUD",
-        }
-    }
-
     pub fn has_data(self, core: &Core, system_id: u8) -> bool {
-        core.db
-            .count_message_by_name(self.message_name(), system_id, 1)
-            .unwrap_or(0)
-            > 0
+        let count = match self {
+            Self::LocalPositionNed => core
+                .db
+                .count_message_cached::<LocalPositionNed>(system_id, 1),
+            Self::VfrHud => core.db.count_message_cached::<VfrHud>(system_id, 1),
+        };
+
+        count > 0
     }
 }
 
