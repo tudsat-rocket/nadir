@@ -1,6 +1,6 @@
 use core::System;
 
-use egui::epaint::PathShape;
+use egui::epaint::{PathShape, PathStroke};
 use egui::{
     Align2, Area, Button, Color32, CornerRadius, Id, Order, Pos2, Rect, RichText, Shape, Stroke,
     StrokeKind, Vec2, pos2,
@@ -15,6 +15,14 @@ use crate::widgets::MeasurementIndicator;
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
 const TANK_BULKHEAD_STEPS: usize = 32;
+// Narrower hatch lines are stroked rather than filled as polygons. epaint anti-aliases a fill by
+// pulling its inner ring in by half a feather width per side, which leaves a sliver this thin with
+// a sub-pixel core that the rasterizer samples into a hard staircase; a stroke has a dedicated
+// thin-line path (a feather-wide ridge with scaled opacity) that stays smooth at any width.
+const MIN_FILLED_HATCH_WIDTH: f32 = 2.0;
+// Floor on a hatch line's width, in the same units. A stroke below a pixel is drawn by scaling its
+// opacity, so this is where the line stops fading rather than where it stops thinning.
+const MIN_HATCH_WIDTH: f32 = 0.35;
 const N2_MAX_PRESSURE_BAR: f32 = 300.0;
 const N2O_MAX_PRESSURE_BAR: f32 = 100.0;
 const CC_MAX_PRESSURE_BAR: f32 = 70.0;
@@ -1179,14 +1187,19 @@ fn draw_hatching(
     if coverage <= 0.0 || polygon.is_empty() {
         return;
     }
-    // Fill one hatch shard. With `fade`, opacity ramps from full at `y_full` to
-    // zero at `y_zero`, so an unknown-level tank thins out toward the top.
+    // With `fade`, opacity ramps from full at `y_full` to zero at `y_zero`, so an
+    // unknown-level tank thins out toward the top.
+    let fade_at = move |y: f32| match fade {
+        Some((y_full, y_zero)) => {
+            color.gamma_multiply(1.0 - ((y_full - y) / (y_full - y_zero)).clamp(0.0, 1.0))
+        }
+        None => color,
+    };
     let fill_shard = |poly: Vec<Pos2>| {
-        if let Some((y_full, y_zero)) = fade {
+        if fade.is_some() {
             let mut mesh = egui::Mesh::default();
             for p in &poly {
-                let t = ((y_full - p.y) / (y_full - y_zero)).clamp(0.0, 1.0);
-                mesh.colored_vertex(*p, color.gamma_multiply(1.0 - t));
+                mesh.colored_vertex(*p, fade_at(p.y));
             }
             for i in 1..poly.len() as u32 - 1 {
                 mesh.add_triangle(0, i, i + 1);
@@ -1205,7 +1218,9 @@ fn draw_hatching(
         return;
     }
 
-    let line_width = coverage * stride;
+    // Any pressure at all keeps a perceptible hatch, so a nearly empty vessel still reads
+    // differently from one that reports nothing.
+    let line_width = (coverage * stride).max(MIN_HATCH_WIDTH);
     let perp = egui::vec2(
         std::f32::consts::FRAC_1_SQRT_2,
         std::f32::consts::FRAC_1_SQRT_2,
@@ -1246,17 +1261,84 @@ fn draw_hatching(
     for k in 0..=n_stripes {
         let s = s0 + k as f32 * stride;
         let base = center + s * perp;
+        let (a, b) = (base + t_lo * dir, base + t_hi * dir);
+
+        if line_width < MIN_FILLED_HATCH_WIDTH {
+            // Inset by the half width so the stroke covers the same area the clipped band would,
+            // without spilling over the vessel outline.
+            let Some((a, b)) = clip_segment_to_convex(a, b, polygon, half_w) else {
+                continue;
+            };
+            if fade.is_some() {
+                // A stroke takes one color, so the ramp has to come from a per-vertex callback.
+                painter.add(Shape::Path(PathShape {
+                    points: vec![a, b],
+                    closed: false,
+                    fill: Color32::TRANSPARENT,
+                    stroke: PathStroke::new_uv(line_width, move |_, p| fade_at(p.y)),
+                }));
+            } else {
+                painter.line_segment([a, b], Stroke::new(line_width, color));
+            }
+            continue;
+        }
+
         let stripe = [
-            base + t_lo * dir - half_w * perp,
-            base + t_hi * dir - half_w * perp,
-            base + t_hi * dir + half_w * perp,
-            base + t_lo * dir + half_w * perp,
+            a - half_w * perp,
+            b - half_w * perp,
+            b + half_w * perp,
+            a + half_w * perp,
         ];
         let clipped = clip_polygon_to_convex(&stripe, polygon);
         if clipped.len() >= 3 {
             fill_shard(clipped);
         }
     }
+}
+
+/// Clips a segment against a convex polygon, shrinking the polygon by `inset` first. `None` if
+/// nothing of the segment survives.
+fn clip_segment_to_convex(a: Pos2, b: Pos2, polygon: &[Pos2], inset: f32) -> Option<(Pos2, Pos2)> {
+    let sum: egui::Vec2 = polygon
+        .iter()
+        .fold(egui::Vec2::ZERO, |acc, v| acc + v.to_vec2());
+    let center = (sum / polygon.len() as f32).to_pos2();
+
+    let dir = b - a;
+    let mut t_enter = 0.0_f32;
+    let mut t_exit = 1.0_f32;
+    for i in 0..polygon.len() {
+        let edge_a = polygon[i];
+        let edge = polygon[(i + 1) % polygon.len()] - edge_a;
+        let mut normal = egui::vec2(-edge.y, edge.x).normalized();
+        if normal == egui::Vec2::ZERO {
+            // Coincident points, e.g. where a fill surface meets a bulkhead exactly.
+            continue;
+        }
+        if normal.dot(center - edge_a) < 0.0 {
+            normal = -normal;
+        }
+
+        // Inside is `(p - edge_a).dot(normal) >= inset`; solve that for the segment parameter.
+        let dist = (a - edge_a).dot(normal) - inset;
+        let rate = dir.dot(normal);
+        if rate == 0.0 {
+            if dist < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let t = -dist / rate;
+        if rate > 0.0 {
+            t_enter = t_enter.max(t);
+        } else {
+            t_exit = t_exit.min(t);
+        }
+        if t_enter > t_exit {
+            return None;
+        }
+    }
+    Some((a + t_enter * dir, a + t_exit * dir))
 }
 
 fn clip_polygon_to_convex(subject: &[Pos2], clip_polygon: &[Pos2]) -> Vec<Pos2> {
