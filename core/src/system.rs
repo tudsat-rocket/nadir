@@ -40,6 +40,7 @@ pub struct SystemConnection {
 pub struct System {
     pub system_id: SystemId,
     pub db: Db,
+    pub tlog: crate::tlog::Writer,
     pub message_sender: broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
@@ -52,6 +53,7 @@ impl System {
     pub fn new(
         system_id: SystemId,
         db: Db,
+        tlog: crate::tlog::Writer,
         callback: Callback<V2>,
         can_proxy: Option<(
             mpsc::Sender<socketcan::CanFrame>,
@@ -79,6 +81,7 @@ impl System {
         let system = System {
             system_id,
             db,
+            tlog,
             message_sender: message_sender.clone(),
             conn: Arc::new(Mutex::new(SystemConnection {
                 callback,
@@ -210,6 +213,9 @@ impl System {
             let endpoint = connection.endpoint.lock().unwrap();
             endpoint.next_frame(message).unwrap()
         };
+
+        // The log of the system we are talking to, not one of our own, see `Writer::log`.
+        self.tlog.log(self.system_id, &frame);
 
         let channel_id = connection.callback.channel_id();
         if let Some((_, stats)) = connection.channels.get_mut(&channel_id) {

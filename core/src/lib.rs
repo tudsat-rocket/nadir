@@ -17,6 +17,7 @@ mod links;
 mod protocols;
 mod stats;
 mod system;
+pub mod tlog;
 
 use db::Db;
 pub use db::{MessageInstance, MessageSummary, format_message_label};
@@ -34,6 +35,7 @@ pub type EventCallback = Box<dyn Fn(&Event<V2>) + Send + Sync>;
 pub struct Core {
     event_sender: tokio::sync::mpsc::Sender<(LinkId, Event<V2>)>,
     pub db: Db,
+    pub tlog: tlog::Writer,
     pub systems: Arc<Mutex<HashMap<SystemId, System>>>,
     pub links: Arc<Mutex<HashMap<LinkId, Link>>>,
     pub plot_origin: chrono::DateTime<chrono::Utc>,
@@ -88,6 +90,7 @@ impl CoreBuilder {
             event_sender: tx,
             plot_origin: chrono::Utc::now(),
             db: Db::init(),
+            tlog: tlog::Writer::spawn(),
             systems: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(HashMap::new())),
             can_proxy: Some((socketcan_tx_sender, socketcan_rx_publisher.clone())),
@@ -136,6 +139,10 @@ impl Core {
         while let Some((link_id, event)) = event_receiver.recv().await {
             match &event {
                 Event::Frame(frame, callback) => {
+                    // Logged before the filter below, so that the log stays a faithful record of
+                    // what arrived on the link.
+                    self.tlog.log(frame.system_id(), frame);
+
                     if frame.system_id() == 0xff {
                         continue;
                     }
@@ -146,6 +153,7 @@ impl Core {
                         System::new(
                             system_id,
                             self.db.clone(),
+                            self.tlog.clone(),
                             callback.clone(),
                             self.can_proxy.clone(),
                         )
