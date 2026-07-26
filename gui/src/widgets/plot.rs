@@ -61,7 +61,7 @@ pub struct PlotLine {
 
 pub struct Plot<'a> {
     lines: &'a [PlotLine],
-    core: &'a core::Core,
+    source: &'a core::Source,
     shared: &'a mut SharedPlotState,
     ylimits: (Option<f32>, Option<f32>),
 }
@@ -69,13 +69,13 @@ pub struct Plot<'a> {
 impl<'a> Plot<'a> {
     pub fn new(
         lines: &'a [PlotLine],
-        core: &'a core::Core,
+        source: &'a core::Source,
         shared: &'a mut SharedPlotState,
         ylimits: (Option<f32>, Option<f32>),
     ) -> Self {
         Self {
             lines,
-            core,
+            source,
             shared,
             ylimits,
         }
@@ -97,7 +97,7 @@ impl egui::Widget for Plot<'_> {
         //ui.style_mut().visuals.override_text_color = Some(text_color.gamma_multiply(0.5));
 
         //let view_end = self.backend.fc_time().unwrap_or_default();
-        let view_end = (chrono::Utc::now() - self.core.plot_origin).as_seconds_f64();
+        let view_end = (chrono::Utc::now() - self.source.plot_origin).as_seconds_f64();
         #[allow(deprecated)] // the axis widths in egui suck, TODO
         let mut plot = egui_plot::Plot::new(ui.next_auto_id())
             .link_axis("plot_axis_group", [true, false])
@@ -139,7 +139,7 @@ impl egui::Widget for Plot<'_> {
             let min_x = *last_bounds.range_x().start();
             let _max_x = *last_bounds.range_x().end();
 
-            let since = self.core.plot_origin + TimeDelta::seconds(min_x as i64 - 5);
+            let since = self.source.plot_origin + TimeDelta::seconds(min_x as i64 - 5);
 
             for line in self.lines {
                 let labelled = format_message_label(&line.message_name, line.instance.as_ref());
@@ -151,7 +151,7 @@ impl egui::Widget for Plot<'_> {
                 };
 
                 let instance_arg = line.instance.as_ref().map(|i| (i.field.as_str(), i.value));
-                let timeseries = match self.core.db.timeseries_by_name(
+                let timeseries = match self.source.db.timeseries_by_name(
                     &line.message_name,
                     &line.field_name,
                     line.system_id,
@@ -171,7 +171,7 @@ impl egui::Widget for Plot<'_> {
                 let plot_data: Vec<_> = timeseries
                     .into_iter()
                     .filter(|(_, v)| line.sentinel != Some(*v))
-                    .map(|(t, v)| [(t - self.core.plot_origin).as_seconds_f64(), v * scale])
+                    .map(|(t, v)| [(t - self.source.plot_origin).as_seconds_f64(), v * scale])
                     .collect();
 
                 let mut l = egui_plot::Line::new(name, plot_data).width(1.0);

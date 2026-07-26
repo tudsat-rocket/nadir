@@ -2,7 +2,7 @@ use egui::{Align, Layout};
 use egui_tiles::SimplificationOptions;
 use mavspec::rust::dialects::common::messages::{LocalPositionNed, VfrHud};
 
-use core::{Core, System};
+use core::{Source, System};
 
 mod can;
 mod commands;
@@ -56,12 +56,12 @@ impl PositionSource {
         }
     }
 
-    pub fn has_data(self, core: &Core, system_id: u8) -> bool {
+    pub fn has_data(self, source: &Source, system_id: u8) -> bool {
         let count = match self {
-            Self::LocalPositionNed => core
+            Self::LocalPositionNed => source
                 .db
                 .count_message_cached::<LocalPositionNed>(system_id, 1),
-            Self::VfrHud => core.db.count_message_cached::<VfrHud>(system_id, 1),
+            Self::VfrHud => source.db.count_message_cached::<VfrHud>(system_id, 1),
         };
 
         count > 0
@@ -69,7 +69,9 @@ impl PositionSource {
 }
 
 pub struct TreeBehavior<'a> {
-    pub core: Core,
+    /// The source the active view names. Panes only ever read telemetry, so this is all they get:
+    /// no links and no CAN proxy.
+    pub source: Source,
     pub active_view: View,
     pub shared_plot_state: &'a mut SharedPlotState,
     pub position_source: &'a mut PositionSource,
@@ -107,7 +109,7 @@ pub trait PaneUi {
             return;
         };
 
-        let Some(system) = behavior.core.system(system_id) else {
+        let Some(system) = behavior.source.system(system_id) else {
             return;
         };
 

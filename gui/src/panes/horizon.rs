@@ -33,7 +33,7 @@ impl PaneUi for HorizonPane {
             return;
         };
 
-        let Some(system) = behavior.core.system(system_id) else {
+        let Some(system) = behavior.source.system(system_id) else {
             return;
         };
 
@@ -98,7 +98,7 @@ impl PaneUi for HorizonPane {
                         (PositionSource::LocalPositionNed, "LOCAL"),
                         (PositionSource::VfrHud, "MSL"),
                     ] {
-                        let has_data = src.has_data(&behavior.core, system_id);
+                        let has_data = src.has_data(&behavior.source, system_id);
                         let selected = *behavior.position_source == src;
                         let stroke = if selected {
                             Stroke::new(1.0, Color32::WHITE)

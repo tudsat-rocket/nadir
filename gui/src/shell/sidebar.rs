@@ -43,12 +43,12 @@ impl Sidebar {
             .show(ctx, |ui| {
                 ui.set_width(ui.available_width());
 
-                for (i, system_id) in core.known_system_ids().iter().enumerate() {
+                for (i, system_id) in core.live.known_system_ids().iter().enumerate() {
                     if i != 0 && !collapsed {
                         ui.separator();
                     }
 
-                    let Some(system) = core.system(*system_id) else {
+                    let Some(system) = core.live.system(*system_id) else {
                         continue;
                     };
 

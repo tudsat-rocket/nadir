@@ -2,28 +2,24 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::broadcast;
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc::Receiver;
 
 use maviola::asnc::prelude::*;
 use maviola::prelude::*;
-use maviola::protocol::SystemId;
-use maviola::protocol::dialects::Ardupilotmega;
-use maviola::protocol::dialects::Common;
-use mavspec::rust::dialects::common::enums::MavSeverity;
 
 mod can_proxy;
 mod links;
 mod protocols;
+mod source;
 mod stats;
 mod system;
 pub mod tlog;
 
-use db::Db;
 pub use db::{MessageInstance, MessageSummary, format_message_label};
 pub use links::*;
 pub use protocols::logs::types::*;
 pub use protocols::params::{Param, ParamId, ParamProgress, ParamVal};
+pub use source::*;
 pub use system::*;
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
@@ -31,18 +27,12 @@ pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
 
 pub type EventCallback = Box<dyn Fn(&Event<V2>) + Send + Sync>;
 
+/// The live end of the ground station: the links, and the [`Source`] they feed.
 #[derive(Clone)]
 pub struct Core {
     event_sender: tokio::sync::mpsc::Sender<(LinkId, Event<V2>)>,
-    pub db: Db,
-    pub tlog: tlog::Writer,
-    pub systems: Arc<Mutex<HashMap<SystemId, System>>>,
     pub links: Arc<Mutex<HashMap<LinkId, Link>>>,
-    pub plot_origin: chrono::DateTime<chrono::Utc>,
-    pub can_proxy: Option<(
-        mpsc::Sender<socketcan::CanFrame>,
-        broadcast::Sender<socketcan::CanFrame>,
-    )>,
+    pub live: Source,
 }
 
 #[derive(Default)]
@@ -88,12 +78,8 @@ impl CoreBuilder {
 
         let core = Core {
             event_sender: tx,
-            plot_origin: chrono::Utc::now(),
-            db: Db::init(),
-            tlog: tlog::Writer::spawn(),
-            systems: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(HashMap::new())),
-            can_proxy: Some((socketcan_tx_sender, socketcan_rx_publisher.clone())),
+            live: Source::live(Some((socketcan_tx_sender, socketcan_rx_publisher.clone()))),
         };
 
         let c = core.clone();
@@ -141,85 +127,13 @@ impl Core {
                 Event::Frame(frame, callback) => {
                     // Logged before the filter below, so that the log stays a faithful record of
                     // what arrived on the link.
-                    self.tlog.log(frame.system_id(), frame);
+                    self.live.tlog.log(frame.system_id(), frame);
 
                     if frame.system_id() == 0xff {
                         continue;
                     }
 
-                    let mut systems = self.systems.lock().unwrap();
-                    let system_id = frame.system_id();
-                    let system = systems.entry(system_id).or_insert_with(|| {
-                        System::new(
-                            system_id,
-                            self.db.clone(),
-                            self.tlog.clone(),
-                            callback.clone(),
-                            self.can_proxy.clone(),
-                        )
-                    });
-
-                    if let Ok(message) = frame.decode::<Common>() {
-                        // TODO: move this to its own protocol task as well to get it out of here
-                        if let Common::Statustext(inner) = &message {
-                            match inner.severity {
-                                MavSeverity::Debug => tracing::debug!(
-                                    system_id = frame.system_id(),
-                                    component_id = frame.component_id(),
-                                    "{}",
-                                    &String::from_utf8_lossy(&inner.text),
-                                ),
-                                MavSeverity::Info | MavSeverity::Notice => tracing::info!(
-                                    system_id = frame.system_id(),
-                                    component_id = frame.component_id(),
-                                    "{}",
-                                    &String::from_utf8_lossy(&inner.text),
-                                ),
-                                MavSeverity::Warning => tracing::warn!(
-                                    system_id = frame.system_id(),
-                                    component_id = frame.component_id(),
-                                    "{}",
-                                    &String::from_utf8_lossy(&inner.text),
-                                ),
-                                MavSeverity::Error
-                                | MavSeverity::Alert
-                                | MavSeverity::Critical
-                                | MavSeverity::Emergency => tracing::error!(
-                                    system_id = frame.system_id(),
-                                    component_id = frame.component_id(),
-                                    "{}",
-                                    &String::from_utf8_lossy(&inner.text),
-                                ),
-                            }
-                        }
-
-                        if let Err(e) =
-                            self.db
-                                .write_message(frame.system_id(), frame.component_id(), &message)
-                        {
-                            tracing::error!("Failed to process message: {e:?}");
-                        }
-
-                        system.notify_of_common_message(message, frame, callback);
-                    } else if let Ok(message) = frame.decode::<Ardupilotmega>() {
-                        if let Err(e) =
-                            self.db
-                                .write_message(frame.system_id(), frame.component_id(), &message)
-                        {
-                            tracing::error!("Failed to process message: {e:?}");
-                        }
-
-                        system.notify_of_frame(frame, callback);
-                    } else if let Ok(message) = frame.decode::<rapid_dialect::Rapid>() {
-                        if let Err(e) =
-                            self.db
-                                .write_message(frame.system_id(), frame.component_id(), &message)
-                        {
-                            tracing::error!("Failed to process message: {e:?}");
-                        }
-
-                        system.notify_of_frame(frame, callback);
-                    }
+                    self.live.ingest(frame, callback);
 
                     let mut links = self.links.lock().unwrap();
                     let link = links.get_mut(&link_id).unwrap();
@@ -238,17 +152,6 @@ impl Core {
                 cb(&event);
             }
         }
-    }
-
-    pub fn known_system_ids(&self) -> Vec<SystemId> {
-        let mut system_ids: Vec<SystemId> = self.systems.lock().unwrap().keys().copied().collect();
-        system_ids.sort_unstable();
-        system_ids.dedup();
-        system_ids
-    }
-
-    pub fn system(&self, id: SystemId) -> Option<System> {
-        self.systems.lock().unwrap().get(&id).cloned()
     }
 
     pub fn links(&self) -> Vec<Link> {

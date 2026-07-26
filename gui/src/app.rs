@@ -176,13 +176,13 @@ impl eframe::App for App {
 
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
-            core: self.core.clone(),
+            source: self.core.live.clone(),
             active_view: self.active_view,
             position_source: &mut self.position_source,
         };
 
         if let View::System(system_id) = self.active_view
-            && let Some(system) = self.core.system(system_id)
+            && let Some(system) = self.core.live.system(system_id)
         {
             self.status_bar.show(ctx, &system, &mut behavior);
         }
@@ -211,7 +211,7 @@ impl eframe::App for App {
                 if input.key_down(*key)
                     && input.modifiers.contains(Modifiers::CTRL)
                     && input.modifiers.contains(Modifiers::SHIFT)
-                    && self.core.known_system_ids().contains(&sysid)
+                    && self.core.live.known_system_ids().contains(&sysid)
                 {
                     self.active_view = View::System(sysid);
                 }

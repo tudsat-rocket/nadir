@@ -181,11 +181,11 @@ impl PaneUi for MapPane {
 
         let rect = ui.clip_rect();
 
-        let system_ids = behavior.core.known_system_ids();
+        let system_ids = behavior.source.known_system_ids();
 
         // Append newly arrived positions to each system's cached path.
         for s_id in &system_ids {
-            let Some(system) = behavior.core.system(*s_id) else {
+            let Some(system) = behavior.source.system(*s_id) else {
                 continue;
             };
             let count = system.message_count::<GlobalPositionInt>();
@@ -240,14 +240,17 @@ impl PaneUi for MapPane {
         #[allow(clippy::unnecessary_literal_unwrap)]
         let center_position = gcs_position.unwrap();
 
-        let systems = system_ids.iter().filter_map(|id| behavior.core.system(*id));
+        let systems = system_ids
+            .iter()
+            .filter_map(|id| behavior.source.system(*id));
         let active_system_id = if let View::System(s_id) = behavior.active_view {
             Some(s_id)
         } else {
             None
         };
 
-        let active_system = active_system_id.and_then(|system_id| behavior.core.system(system_id));
+        let active_system =
+            active_system_id.and_then(|system_id| behavior.source.system(system_id));
 
         let system_positions: HashMap<u8, (System, Position, f64, f64)> = systems
             .filter_map(|s| {

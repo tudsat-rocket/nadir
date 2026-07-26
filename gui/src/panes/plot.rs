@@ -126,7 +126,7 @@ impl PaneUi for PlotPane {
         };
 
         let summary = behavior
-            .core
+            .source
             .db
             .message_summary(system_id, 1)
             .unwrap_or_default();
@@ -198,7 +198,7 @@ impl PaneUi for PlotPane {
 
                 let plot = Plot::new(
                     &lines,
-                    &behavior.core,
+                    &behavior.source,
                     behavior.shared_plot_state,
                     (None, None),
                 );

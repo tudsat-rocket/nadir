@@ -455,7 +455,7 @@ impl PaneUi for PropulsionPane {
         let View::System(system_id) = behavior.active_view else {
             return;
         };
-        let Some(system) = behavior.core.system(system_id) else {
+        let Some(system) = behavior.source.system(system_id) else {
             return;
         };
         let Ok(heartbeat) = system.last_message::<Heartbeat>() else {
@@ -526,7 +526,7 @@ impl PaneUi for PropulsionPane {
                         let vs_lines = valve_state_lines(system_id);
                         let valve_states_plot = Plot::new(
                             &vs_lines,
-                            &behavior.core,
+                            &behavior.source,
                             behavior.shared_plot_state,
                             (Some(0.0), Some(3.0)),
                         );
@@ -539,7 +539,7 @@ impl PaneUi for PropulsionPane {
                     let p_lines = pressure_lines(system_id);
                     let pressure_plot = Plot::new(
                         &p_lines,
-                        &behavior.core,
+                        &behavior.source,
                         behavior.shared_plot_state,
                         (Some(0.0), None),
                     );

@@ -61,7 +61,7 @@ impl PaneUi for SensorsPane {
         let acc_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "acc");
         let acc_plot = Plot::new(
             &acc_lines,
-            &behavior.core,
+            &behavior.source,
             behavior.shared_plot_state,
             (None, None),
         );
@@ -70,7 +70,7 @@ impl PaneUi for SensorsPane {
         let gyro_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "gyro");
         let gyro_plot = Plot::new(
             &gyro_lines,
-            &behavior.core,
+            &behavior.source,
             behavior.shared_plot_state,
             (None, None),
         );
@@ -79,7 +79,7 @@ impl PaneUi for SensorsPane {
         let mag_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "mag");
         let mag_plot = Plot::new(
             &mag_lines,
-            &behavior.core,
+            &behavior.source,
             behavior.shared_plot_state,
             (None, None),
         );
@@ -165,7 +165,7 @@ impl PaneUi for SensorsPane {
                 ];
                 let temp_plot = Plot::new(
                     &temp_lines,
-                    &behavior.core,
+                    &behavior.source,
                     behavior.shared_plot_state,
                     (None, None),
                 );
@@ -211,7 +211,7 @@ impl PaneUi for SensorsPane {
                 ];
                 let pres_plot = Plot::new(
                     &pres_lines,
-                    &behavior.core,
+                    &behavior.source,
                     behavior.shared_plot_state,
                     (None, None),
                 );

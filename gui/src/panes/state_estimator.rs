@@ -83,7 +83,7 @@ impl PaneUi for StateEstimatorPane {
 
         ui.horizontal(|ui| {
             for src in PositionSource::ALL {
-                let has_data = src.has_data(&behavior.core, system_id);
+                let has_data = src.has_data(&behavior.source, system_id);
                 ui.add_enabled(
                     has_data,
                     egui::Button::selectable(*behavior.position_source == src, src.label()),
@@ -100,7 +100,7 @@ impl PaneUi for StateEstimatorPane {
         let alt_lines = altitude_lines(source, system_id);
         let altitude_plot = Plot::new(
             &alt_lines,
-            &behavior.core,
+            &behavior.source,
             behavior.shared_plot_state,
             (None, None),
         );
@@ -111,7 +111,7 @@ impl PaneUi for StateEstimatorPane {
         let vel_lines = velocity_lines(source, system_id);
         let velocity_plot = Plot::new(
             &vel_lines,
-            &behavior.core,
+            &behavior.source,
             behavior.shared_plot_state,
             (None, None),
         );
