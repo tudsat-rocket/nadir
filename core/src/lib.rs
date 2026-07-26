@@ -25,9 +25,14 @@ pub use system::*;
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
 pub const GROUND_STATION_COMPONENT_ID: u8 = 1;
 
+/// Not a value the spec reserves, just the one `QGroundControl` and Mission Planner default to.
+pub(crate) const OTHER_GROUND_STATION_SYSTEM_ID: u8 = 0xff;
+
 pub type EventCallback = Box<dyn Fn(&Event<V2>) + Send + Sync>;
 
-/// The live end of the ground station: the links, and the [`Source`] they feed.
+/// Owns the links and the systems reachable over them.
+///
+/// There is exactly one, for the lifetime of the process.
 #[derive(Clone)]
 pub struct Core {
     event_sender: tokio::sync::mpsc::Sender<(LinkId, Event<V2>)>,
@@ -123,17 +128,24 @@ impl Core {
         }
 
         while let Some((link_id, event)) = event_receiver.recv().await {
+            let event_system_id = match &event {
+                Event::Frame(frame, _) | Event::Invalid(frame, _, _) => frame.system_id(),
+                Event::NewPeer(peer) | Event::PeerLost(peer) => peer.system_id(),
+            };
+
+            if event_system_id == OTHER_GROUND_STATION_SYSTEM_ID {
+                continue;
+            }
+
             match &event {
                 Event::Frame(frame, callback) => {
-                    // Logged before the filter below, so that the log stays a faithful record of
-                    // what arrived on the link.
-                    self.live.tlog.log(frame.system_id(), frame);
-
-                    if frame.system_id() == 0xff {
-                        continue;
+                    // Logged before anything tries to decode it, so that a frame we cannot make
+                    // sense of is still in the record.
+                    if let Some(tlog) = &self.live.tlog {
+                        tlog.log(frame.system_id(), frame);
                     }
 
-                    self.live.ingest(frame, callback);
+                    self.live.ingest(frame, chrono::Utc::now(), Some(callback));
 
                     let mut links = self.links.lock().unwrap();
                     let link = links.get_mut(&link_id).unwrap();

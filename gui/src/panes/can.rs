@@ -1,6 +1,6 @@
 use core::System;
 
-use chrono::{Local, Utc};
+use chrono::Local;
 use eframe::egui;
 use egui::{Button, DragValue, TextEdit, Vec2};
 use egui_extras::{Column, TableBuilder};
@@ -28,6 +28,7 @@ impl CanProbePane {
 
 impl PaneUi for CanProbePane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        let now = system.now();
         let h = ui.available_height();
         ui.set_width(ui.available_width());
         ui.set_height(ui.available_height());
@@ -142,7 +143,7 @@ impl PaneUi for CanProbePane {
                         .body(|mut body| {
                             for chunk in chunks {
                                 let last = chunk.last().unwrap();
-                                let elapsed = Utc::now() - last.0;
+                                let elapsed = now - last.0;
                                 let elapsed_log = elapsed.as_seconds_f32().log2();
                                 body.row(20.0, |mut row| {
                                     row.col(|ui| {
@@ -285,7 +286,7 @@ impl PaneUi for CanProbePane {
                 .body(|mut body| {
                     for chunk in chunks {
                         let last = chunk.last().unwrap();
-                        let elapsed = Utc::now() - last.0;
+                        let elapsed = now - last.0;
                         let elapsed_log = elapsed.as_seconds_f32().log2();
                         body.row(20.0, |mut row| {
                             row.col(|ui| {

@@ -105,7 +105,7 @@ pub trait PaneUi {
     }
 
     fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
+        let View::System { system_id, .. } = behavior.active_view else {
             return;
         };
 

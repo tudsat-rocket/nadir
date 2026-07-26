@@ -243,7 +243,10 @@ impl PaneUi for MapPane {
         let systems = system_ids
             .iter()
             .filter_map(|id| behavior.source.system(*id));
-        let active_system_id = if let View::System(s_id) = behavior.active_view {
+        let active_system_id = if let View::System {
+            system_id: s_id, ..
+        } = behavior.active_view
+        {
             Some(s_id)
         } else {
             None

@@ -119,6 +119,7 @@ fn format_frame(frame: MavFrame) -> String {
 
 impl PaneUi for CommandsPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        let now = system.now();
         for style in [TextStyle::Button, TextStyle::Body, TextStyle::Monospace] {
             ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;
         }
@@ -289,7 +290,7 @@ impl PaneUi for CommandsPane {
                 for (t, cmd) in commands.into_iter().rev() {
                     body.row(14.0, |mut row| {
                         row.col(|ui| {
-                            let elapsed = Utc::now() - t;
+                            let elapsed = now - t;
                             let elapsed_log = elapsed.as_seconds_f32().log2();
                             let color = ui.visuals().strong_text_color().lerp_to_gamma(
                                 ui.visuals().weak_text_color(),

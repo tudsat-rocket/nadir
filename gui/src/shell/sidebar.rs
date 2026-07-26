@@ -1,11 +1,16 @@
-use core::Core;
+use std::collections::BTreeMap;
+
+use core::{Core, Origin, Source};
 
 use eframe::egui;
-use egui::{Align, Color32, Layout, RichText};
+use egui::{Align, Layout, RichText};
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
-use crate::views::View;
-use crate::widgets::{ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay};
+use crate::views::{LIVE, SourceId, View};
+use crate::widgets::{
+    ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, TEXT_SIZE, soc_color,
+    state_of_charge,
+};
 
 const WIDTH: f32 = 300.0;
 /// Collapsed, the bar keeps just enough width for one icon per row.
@@ -32,10 +37,12 @@ impl Sidebar {
         &mut self,
         ctx: &egui::Context,
         core: &Core,
+        logs: &BTreeMap<SourceId, Source>,
         active_view: &mut View,
         logs_shown: &mut bool,
-    ) {
+    ) -> Option<SourceId> {
         let collapsed = self.collapsed;
+        let mut close = None;
 
         egui::SidePanel::left("sidepanel")
             .resizable(false)
@@ -43,69 +50,46 @@ impl Sidebar {
             .show(ctx, |ui| {
                 ui.set_width(ui.available_width());
 
-                for (i, system_id) in core.live.known_system_ids().iter().enumerate() {
-                    if i != 0 && !collapsed {
-                        ui.separator();
-                    }
+                // No header while the live systems are the only thing here.
+                if !logs.is_empty() && !collapsed {
+                    ui.horizontal(|ui| {
+                        ui.weak("🖧");
+                        ui.weak("Live");
+                    });
+                }
 
-                    let Some(system) = core.live.system(*system_id) else {
+                self.systems(ui, LIVE, &core.live, active_view);
+
+                for (id, source) in logs {
+                    let Origin::Log(progress) = &source.origin else {
                         continue;
                     };
 
-                    if collapsed {
-                        ui.selectable_value(active_view, View::System(*system_id), system.icon());
-                    } else if let Ok(heartbeat) = system.last_message::<Heartbeat>() {
-                        ui.horizontal(|ui| {
-                            ui.monospace(format!("0x{system_id:02x}"));
-                            ui.label(system.icon());
+                    ui.separator();
 
-                            ui.add(ArmedIndicator(heartbeat.base_mode));
+                    if !collapsed {
+                        ui.horizontal(|ui| {
+                            ui.weak("📂");
+                            ui.label(RichText::new(progress.name()).monospace().size(TEXT_SIZE));
 
                             ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
                                 ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                                    ui.add_space(5.0);
-                                    ui.add(AutopilotLogo(heartbeat.autopilot, heartbeat.type_));
+                                    if ui.small_button("✖").on_hover_text("Close log").clicked() {
+                                        close = Some(*id);
+                                    }
                                 })
                                 .response
                             });
                         });
 
-                        ui.horizontal(|ui| {
-                            ui.add(ModeDisplay::new(system.clone()));
-                            ui.add_space(5.0);
-                            ui.add(MavStateIndicator(heartbeat.system_status));
-                        });
-
-                        ui.horizontal(|ui| {
-                            // TODO: hardcoded, unlike the status bar's consumables column.
-                            ui.label(RichText::new("🔋 98%").color(Color32::from_rgb(78, 154, 6)));
-                            ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
-                                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                                    ui.selectable_value(
-                                        active_view,
-                                        View::System(*system_id),
-                                        "Select ➡",
-                                    );
-
-                                    let total_data_rate = system
-                                        .channels()
-                                        .iter_mut()
-                                        .map(|(_, s)| s.received_data_rate())
-                                        .sum::<f32>()
-                                        / 1024.0;
-                                    ui.label("KiB/s");
-                                    ui.monospace(format!("{total_data_rate:>5.2}"));
-                                    ui.weak("⏬");
-                                })
-                                .response
-                            });
-                        });
-                    } else {
-                        ui.monospace(format!("0x{system_id:02x}"));
-                        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                            ui.selectable_value(active_view, View::System(*system_id), "Select ➡");
-                        });
+                        if progress.done() {
+                            ui.weak(format!("{} records", progress.records()));
+                        } else {
+                            ui.add(egui::ProgressBar::new(progress.fraction()).show_percentage());
+                        }
                     }
+
+                    self.systems(ui, *id, source, active_view);
                 }
 
                 ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -157,5 +141,92 @@ impl Sidebar {
                     );
                 });
             });
+
+        close
+    }
+
+    /// The systems of one source, live or recorded.
+    fn systems(&self, ui: &mut egui::Ui, id: SourceId, source: &Source, active_view: &mut View) {
+        let collapsed = self.collapsed;
+        let recorded = !matches!(source.origin, Origin::Live);
+
+        for (i, system_id) in source.known_system_ids().iter().enumerate() {
+            if i != 0 && !collapsed {
+                ui.separator();
+            }
+
+            let Some(system) = source.system(*system_id) else {
+                continue;
+            };
+
+            let view = View::system(id, *system_id);
+
+            if collapsed {
+                // With only an icon per row, a recording would otherwise be indistinguishable from
+                // the vehicle it was recorded from.
+                let label = if recorded {
+                    format!("📂{}", system.icon())
+                } else {
+                    system.icon().to_owned()
+                };
+
+                ui.selectable_value(active_view, view, label);
+            } else if let Ok(heartbeat) = system.last_message::<Heartbeat>() {
+                ui.horizontal(|ui| {
+                    ui.monospace(format!("0x{system_id:02x}"));
+                    ui.label(system.icon());
+
+                    ui.add(ArmedIndicator(heartbeat.base_mode));
+
+                    ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
+                        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                            ui.add_space(5.0);
+                            ui.add(AutopilotLogo(heartbeat.autopilot, heartbeat.type_));
+                        })
+                        .response
+                    });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.add(ModeDisplay::new(system.clone()));
+                    ui.add_space(5.0);
+                    ui.add(MavStateIndicator(heartbeat.system_status));
+                });
+
+                ui.horizontal(|ui| {
+                    if let Some(soc) = state_of_charge(&system) {
+                        let color = soc_color(f32::from(soc) / 100.0);
+                        ui.label(RichText::new(format!("🔋 {soc}%")).color(color));
+                    } else {
+                        ui.weak("🔋 --");
+                    }
+
+                    ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
+                        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                            ui.selectable_value(active_view, view, "Select ➡");
+
+                            // A recording has no channels, and so no rate to show.
+                            if !recorded {
+                                let total_data_rate = system
+                                    .channels()
+                                    .iter_mut()
+                                    .map(|(_, s)| s.received_data_rate())
+                                    .sum::<f32>()
+                                    / 1024.0;
+                                ui.label("KiB/s");
+                                ui.monospace(format!("{total_data_rate:>5.2}"));
+                                ui.weak("⏬");
+                            }
+                        })
+                        .response
+                    });
+                });
+            } else {
+                ui.monospace(format!("0x{system_id:02x}"));
+                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                    ui.selectable_value(active_view, view, "Select ➡");
+                });
+            }
+        }
     }
 }

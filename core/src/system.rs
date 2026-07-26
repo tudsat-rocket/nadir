@@ -27,11 +27,14 @@ use mavspec::rust::dialects::Common;
 
 use crate::protocols::logs::{FlightLogUiState, LogDlCommand};
 use crate::protocols::params::{ParamEncoding, ParamProgress, ParamVal};
+use crate::source::Origin;
 use crate::stats::ChannelStats;
 use crate::{GROUND_STATION_COMPONENT_ID, GROUND_STATION_SYSTEM_ID};
 
 pub struct SystemConnection {
-    pub callback: Callback<V2>,
+    /// The channel this system was last heard on, and the only one we answer it over. Absent for a
+    /// system that arrived from a recording, which cannot be talked to at all.
+    pub callback: Option<Callback<V2>>,
     pub endpoint: Arc<Mutex<Endpoint<V2>>>,
     pub channels: HashMap<ChannelId, (ChannelInfo, ChannelStats)>,
 }
@@ -40,7 +43,8 @@ pub struct SystemConnection {
 pub struct System {
     pub system_id: SystemId,
     pub db: Db,
-    pub tlog: crate::tlog::Writer,
+    pub tlog: Option<crate::tlog::Writer>,
+    pub origin: Origin,
     pub message_sender: broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
@@ -53,8 +57,9 @@ impl System {
     pub fn new(
         system_id: SystemId,
         db: Db,
-        tlog: crate::tlog::Writer,
-        callback: Callback<V2>,
+        tlog: Option<crate::tlog::Writer>,
+        origin: Origin,
+        callback: Option<Callback<V2>>,
         can_proxy: Option<(
             mpsc::Sender<socketcan::CanFrame>,
             broadcast::Sender<socketcan::CanFrame>,
@@ -82,6 +87,7 @@ impl System {
             system_id,
             db,
             tlog,
+            origin,
             message_sender: message_sender.clone(),
             conn: Arc::new(Mutex::new(SystemConnection {
                 callback,
@@ -132,6 +138,11 @@ impl System {
         }
 
         system
+    }
+
+    /// The latest moment this system knows about: see [`Origin::now`].
+    pub fn now(&self) -> DateTime<Utc> {
+        self.origin.now()
     }
 
     pub fn last_message<M: MessageExt + Default>(&self) -> Result<M, DbError> {
@@ -208,17 +219,32 @@ impl System {
 
     pub fn send_message<M: Message + MessageExt + Debug>(&self, message: &M) {
         let mut connection = self.conn.lock().unwrap();
+        let SystemConnection {
+            callback,
+            endpoint,
+            channels,
+        } = &mut *connection;
+
+        // No channel to answer on, which is what keeps a replay off a real link.
+        let Some(callback) = callback.as_ref() else {
+            tracing::debug!(
+                system_id = self.system_id,
+                "Discarding {message:?}, this system is read-only"
+            );
+            return;
+        };
 
         let frame = {
-            let endpoint = connection.endpoint.lock().unwrap();
+            let endpoint = endpoint.lock().unwrap();
             endpoint.next_frame(message).unwrap()
         };
 
         // The log of the system we are talking to, not one of our own, see `Writer::log`.
-        self.tlog.log(self.system_id, &frame);
+        if let Some(tlog) = &self.tlog {
+            tlog.log(self.system_id, &frame);
+        }
 
-        let channel_id = connection.callback.channel_id();
-        if let Some((_, stats)) = connection.channels.get_mut(&channel_id) {
+        if let Some((_, stats)) = channels.get_mut(&callback.channel_id()) {
             stats.push_sent(frame.body_length());
         }
 
@@ -227,7 +253,7 @@ impl System {
             let _ = self.db.write_message(self.system_id, 0x01, message);
         }
 
-        if let Err(e) = connection.callback.respond(&frame) {
+        if let Err(e) = callback.respond(&frame) {
             tracing::error!(system_id = self.system_id, "Failed to send message: {e:?}");
         }
     }
@@ -355,16 +381,21 @@ impl System {
         &mut self,
         message: Common,
         frame: &Frame<V2>,
-        callback: &Callback<V2>,
+        callback: Option<&Callback<V2>>,
     ) {
         let _ = self.message_sender.send(message);
         self.notify_of_frame(frame, callback);
     }
 
-    pub fn notify_of_frame(&mut self, frame: &Frame<V2>, callback: &Callback<V2>) {
+    /// Records that a frame arrived, and over which channel to answer it.
+    pub fn notify_of_frame(&mut self, frame: &Frame<V2>, callback: Option<&Callback<V2>>) {
+        let Some(callback) = callback else {
+            return;
+        };
+
         let mut conninfo = self.conn.lock().unwrap();
 
-        conninfo.callback = callback.clone();
+        conninfo.callback = Some(callback.clone());
         let (_channel_info, channel_stats) = conninfo
             .channels
             .entry(callback.channel_id())

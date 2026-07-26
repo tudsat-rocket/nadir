@@ -1,6 +1,6 @@
 use core::{MessageInstance, MessageSummary, System, format_message_label};
 
-use chrono::{Local, Utc};
+use chrono::{DateTime, Local, Utc};
 use eframe::egui;
 use egui::{Align, Layout, RichText, TextStyle};
 use egui_extras::{Column, TableBuilder};
@@ -28,6 +28,7 @@ impl MessagesPane {
 
 impl PaneUi for MessagesPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        let now = system.now();
         for style in [TextStyle::Button, TextStyle::Body, TextStyle::Monospace] {
             ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;
         }
@@ -47,7 +48,7 @@ impl PaneUi for MessagesPane {
         };
 
         let mut table_ui = ui.new_child(egui::UiBuilder::new().max_rect(table_rect));
-        self.table_ui(&mut table_ui, &summary);
+        self.table_ui(&mut table_ui, &summary, now);
 
         if has_detail {
             let detail_rect =
@@ -65,7 +66,7 @@ impl PaneUi for MessagesPane {
 }
 
 impl MessagesPane {
-    fn table_ui(&mut self, ui: &mut egui::Ui, summary: &[MessageSummary]) {
+    fn table_ui(&mut self, ui: &mut egui::Ui, summary: &[MessageSummary], now: DateTime<Utc>) {
         let h = ui.available_height();
 
         TableBuilder::new(ui)
@@ -99,7 +100,7 @@ impl MessagesPane {
                 for entry in summary {
                     body.row(14.0, |mut row| {
                         row.col(|ui| {
-                            let elapsed = Utc::now() - entry.last;
+                            let elapsed = now - entry.last;
                             let elapsed_log = elapsed.as_seconds_f32().log2();
                             let color = ui.visuals().strong_text_color().lerp_to_gamma(
                                 ui.visuals().weak_text_color(),

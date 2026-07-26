@@ -821,6 +821,7 @@ dependencies = [
  "mavspec",
  "rapid-dialect",
  "socketcan",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-serial",
  "tracing",

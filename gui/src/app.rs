@@ -1,4 +1,5 @@
-use core::LinkId;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use egui::{Color32, Key, Margin, Modifiers};
 use maviola::asnc::node::Event;
@@ -9,17 +10,22 @@ use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
 use crate::shell::{Sidebar, StatusBar};
-use crate::views::View;
+use crate::views::{LIVE, Overview, SourceId, View};
 use crate::widgets::SharedPlotState;
 
 pub struct App {
     core: core::Core,
+    /// Telemetry logs opened alongside the live source. A map rather than a list because closing
+    /// one must not renumber the others out from under a [`View`].
+    logs: BTreeMap<SourceId, core::Source>,
+    next_source_id: SourceId,
     event_rx: std::sync::mpsc::Receiver<Event<V2>>,
     log_collector: egui_tracing::tracing::collector::EventCollector,
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
     sidebar: Sidebar,
     status_bar: StatusBar,
+    overview: Overview,
     shared_plot_state: SharedPlotState,
     position_source: PositionSource,
     active_view: View,
@@ -97,13 +103,69 @@ impl App {
                     color: Color32::from_black_alpha(160),
                 }),
             tiles_tree,
+            logs: BTreeMap::new(),
+            next_source_id: LIVE + 1,
             sidebar: Sidebar::new(),
             status_bar: StatusBar::new(ctx),
+            overview: Overview::new(),
             shared_plot_state: SharedPlotState::new(),
             position_source: PositionSource::default(),
             active_view: View::Overview,
             never_connected: true,
             logs_shown: false,
+        }
+    }
+
+    /// The source a view names, or `None` once a log it pointed at has been closed.
+    fn source(&self, id: SourceId) -> Option<&core::Source> {
+        if id == LIVE {
+            Some(&self.core.live)
+        } else {
+            self.logs.get(&id)
+        }
+    }
+
+    fn open_log(&mut self, path: &Path) {
+        let already_open = self.logs.values().any(|source| match &source.origin {
+            core::Origin::Log(progress) => progress.path == path,
+            core::Origin::Live => false,
+        });
+
+        // Only reachable by dropping a file that is already listed as open in the overview.
+        if already_open {
+            self.toasts
+                .info(format!("{} is already open.", path.display()));
+            return;
+        }
+
+        match core::Source::open_log(path) {
+            Ok(source) => {
+                let id = self.next_source_id;
+                self.next_source_id += 1;
+                self.logs.insert(id, source);
+                self.overview.refresh();
+
+                self.toasts
+                    .success(format!("Opened {}.", path.display()))
+                    .duration(Some(std::time::Duration::from_secs(4)));
+            }
+            Err(e) => {
+                tracing::error!("Failed to open {}: {e}", path.display());
+                self.toasts.error(format!("{e}"));
+            }
+        }
+    }
+
+    fn close_log(&mut self, id: SourceId) {
+        if let Some(source) = self.logs.remove(&id) {
+            // The loader holds its own handle, so dropping ours does not stop it on its own.
+            if let core::Origin::Log(progress) = &source.origin {
+                progress.cancel();
+            }
+        }
+
+        if self.active_view.source() == Some(id) {
+            self.active_view = View::Overview;
         }
     }
 }
@@ -143,7 +205,7 @@ impl eframe::App for App {
                 }
                 Event::NewPeer(peer) => {
                     if self.never_connected && self.active_view == View::Overview {
-                        self.active_view = View::System(peer.system_id());
+                        self.active_view = View::system(LIVE, peer.system_id());
                         self.never_connected = false;
                         self.sidebar.collapse();
                     }
@@ -159,8 +221,20 @@ impl eframe::App for App {
             }
         }
 
-        self.sidebar
-            .show(ctx, &self.core, &mut self.active_view, &mut self.logs_shown);
+        for path in dropped_logs(ctx) {
+            self.open_log(&path);
+        }
+
+        let close = self.sidebar.show(
+            ctx,
+            &self.core,
+            &self.logs,
+            &mut self.active_view,
+            &mut self.logs_shown,
+        );
+        if let Some(id) = close {
+            self.close_log(id);
+        }
 
         if self.logs_shown {
             egui::TopBottomPanel::bottom("bottombar")
@@ -174,15 +248,32 @@ impl eframe::App for App {
                 });
         }
 
+        let active_source = match self.active_view {
+            View::System { source, .. } => {
+                let source = self.source(source).cloned();
+
+                // The log this view pointed at has been closed.
+                if source.is_none() {
+                    self.active_view = View::Overview;
+                }
+
+                source
+            }
+            View::Overview | View::Settings => None,
+        };
+
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
-            source: self.core.live.clone(),
+            // The fallback is never read; nothing outside `View::System` draws through this.
+            source: active_source
+                .clone()
+                .unwrap_or_else(|| self.core.live.clone()),
             active_view: self.active_view,
             position_source: &mut self.position_source,
         };
 
-        if let View::System(system_id) = self.active_view
-            && let Some(system) = self.core.live.system(system_id)
+        if let View::System { system_id, .. } = self.active_view
+            && let Some(system) = active_source.and_then(|source| source.system(system_id))
         {
             self.status_bar.show(ctx, &system, &mut behavior);
         }
@@ -213,10 +304,12 @@ impl eframe::App for App {
                     && input.modifiers.contains(Modifiers::SHIFT)
                     && self.core.live.known_system_ids().contains(&sysid)
                 {
-                    self.active_view = View::System(sysid);
+                    self.active_view = View::system(LIVE, sysid);
                 }
             }
         });
+
+        let mut to_open = None;
 
         egui::CentralPanel::default()
             .frame(egui::Frame {
@@ -226,39 +319,19 @@ impl eframe::App for App {
             })
             .show(ctx, |ui| match self.active_view {
                 View::Overview => {
-                    ui.label("No system selected. TODO: put a map here as well.");
-
-                    for link in self.core.links() {
-                        let mut stats = link.stats;
-                        let info_string = match link.id {
-                            LinkId::UdpServer(addr) => format!("udp:{addr}"),
-                            LinkId::TcpClient(addr) => format!("tcp:{addr}"),
-                            LinkId::SerialPort(port) => format!("serial:{port}"),
-                        };
-
-                        ui.horizontal(|ui| {
-                            ui.add_space(5.0);
-                            ui.weak("🖧");
-                            ui.label(info_string);
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.add_space(5.0);
-                            ui.weak("⏬");
-                            ui.monospace(format!("{:>3.0}", stats.received_packet_rate()));
-                            ui.label("pkt/s ");
-                            ui.monospace(format!("{:>5.2}", stats.received_data_rate() / 1024.0));
-                            ui.label("KiB/s");
-                        });
-                    }
+                    to_open = self.overview.ui(ui, &self.core, &self.logs);
                 }
                 View::Settings => {
                     ui.label("TODO");
                 }
-                View::System(_) => {
+                View::System { .. } => {
                     self.tiles_tree.ui(&mut behavior, ui);
                 }
             });
+
+        if let Some(path) = to_open {
+            self.open_log(&path);
+        }
 
         // egui-notify paints toast backgrounds with the global noninteractive bg_fill; darken it
         // just for the toast pass (nothing else paints after this) so notifications stand out.
@@ -267,4 +340,20 @@ impl eframe::App for App {
         self.toasts.show(ctx);
         ctx.style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = original_bg);
     }
+}
+
+/// Paths dropped onto the window that look like telemetry logs.
+fn dropped_logs(ctx: &egui::Context) -> Vec<PathBuf> {
+    ctx.input(|input| {
+        input
+            .raw
+            .dropped_files
+            .iter()
+            .filter_map(|file| file.path.clone())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tlog"))
+            })
+            .collect()
+    })
 }

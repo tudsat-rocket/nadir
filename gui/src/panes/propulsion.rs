@@ -119,7 +119,7 @@ pub(super) fn battery_indicator(system: &System, compact: bool) -> Option<Batter
             soc: f32::from(battery.battery_remaining) / 100.0,
             voltage,
             current: (battery.current_battery != -1)
-                .then_some(f32::from(battery.current_battery) / 1000.0),
+                .then_some(f32::from(battery.current_battery) / 100.0),
             consumed: (battery.current_consumed != -1).then_some(battery.current_consumed as f32),
             compact,
         })
@@ -452,7 +452,7 @@ fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
 
 impl PaneUi for PropulsionPane {
     fn pane_ui(&mut self, ui: &mut egui::Ui, behavior: &mut TreeBehavior) {
-        let View::System(system_id) = behavior.active_view else {
+        let View::System { system_id, .. } = behavior.active_view else {
             return;
         };
         let Some(system) = behavior.source.system(system_id) else {

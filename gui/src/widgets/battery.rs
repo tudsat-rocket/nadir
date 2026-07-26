@@ -1,6 +1,32 @@
-use egui::{Align, CornerRadius, Frame, Layout, Sense, Vec2};
+use core::System;
+
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Sense, Vec2};
+use mavspec::rust::dialects::common::messages::{BatteryStatus, SysStatus};
 
 use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING};
+
+/// The pack's state of charge in percent, from `BATTERY_STATUS` if the system sends it and
+/// `SYS_STATUS` otherwise. Both report `-1` for a vehicle that does not measure it.
+// TODO: properly handle multiple batteries (same as the propulsion pane and the status bar)
+pub(crate) fn state_of_charge(system: &System) -> Option<i8> {
+    let remaining = match system.last_instance_message::<BatteryStatus>(1) {
+        Ok(battery) => battery.battery_remaining,
+        Err(_) => system.last_message::<SysStatus>().ok()?.battery_remaining,
+    };
+
+    (remaining >= 0).then_some(remaining)
+}
+
+/// Green above 60% charge, amber down to 20%, red below.
+pub(crate) fn soc_color(fraction: f32) -> Color32 {
+    if fraction > 0.6 {
+        COLOR_INDICATOR_GOOD
+    } else if fraction > 0.2 {
+        COLOR_INDICATOR_WARNING
+    } else {
+        COLOR_INDICATOR_LIMITS
+    }
+}
 
 pub struct BatteryIndicator {
     pub id: u8,
@@ -13,13 +39,7 @@ pub struct BatteryIndicator {
 
 impl egui::Widget for BatteryIndicator {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let color = if self.soc > 0.6 {
-            COLOR_INDICATOR_GOOD
-        } else if self.soc > 0.2 {
-            COLOR_INDICATOR_WARNING
-        } else {
-            COLOR_INDICATOR_LIMITS
-        };
+        let color = soc_color(self.soc);
 
         let s = ui.available_size();
         Frame::dark_canvas(ui.style())

@@ -97,7 +97,8 @@ impl egui::Widget for Plot<'_> {
         //ui.style_mut().visuals.override_text_color = Some(text_color.gamma_multiply(0.5));
 
         //let view_end = self.backend.fc_time().unwrap_or_default();
-        let view_end = (chrono::Utc::now() - self.source.plot_origin).as_seconds_f64();
+        // The source's own clock: a recording's right edge belongs at its last record, not at now.
+        let view_end = (self.source.now() - self.source.plot_origin).as_seconds_f64();
         #[allow(deprecated)] // the axis widths in egui suck, TODO
         let mut plot = egui_plot::Plot::new(ui.next_auto_id())
             .link_axis("plot_axis_group", [true, false])

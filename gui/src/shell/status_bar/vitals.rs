@@ -7,7 +7,9 @@ use mavspec::rust::dialects::common::messages::{
 };
 
 use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING};
-use crate::widgets::{AutopilotLogo, TEXT_SIZE, column_header, link_quality, small_text};
+use crate::widgets::{
+    AutopilotLogo, TEXT_SIZE, column_header, link_quality, small_text, soc_color,
+};
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
 /// an idle bus does not read as an event. Uses the magnitude, since firmware that reports discharge
@@ -103,12 +105,7 @@ impl Vitals<'_> {
             let mut cell = Vec::new();
             if !charge.is_empty() {
                 // A pack reporting only volts stays neutral, with nothing to color it by.
-                let color = match soc {
-                    Some(soc) if soc > 50 => COLOR_INDICATOR_GOOD,
-                    Some(soc) if soc > 20 => COLOR_INDICATOR_WARNING,
-                    Some(_) => COLOR_INDICATOR_LIMITS,
-                    None => normal,
-                };
+                let color = soc.map_or(normal, |soc| soc_color(f32::from(soc) / 100.0));
                 cell.push((charge.join(", "), color));
             }
             if let Some(i) = current {
