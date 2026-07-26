@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use mavinspect::protocol::MavType;
-use maviola::protocol::MessageSpec;
+use mavspec::rust::spec::MessageSpec;
 
 const FREQ_WINDOW_SECS: i64 = 5;
 
@@ -82,7 +82,7 @@ pub trait MessageExt: MessageSpec {
 macro_rules! define_message_tables {
     ($conn:expr, $dialect:expr) => {
         for message in $dialect.messages() {
-            use maviola::prelude::Dialect;
+            use mavspec::rust::spec::Dialect;
 
             // Skip messages from common in other dialects derived from it
             if $dialect.name() != "common" && mavspec::rust::dialects::Common::message_info(message.id()).is_ok() {

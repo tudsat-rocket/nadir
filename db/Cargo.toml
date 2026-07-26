@@ -14,8 +14,7 @@ thiserror = { workspace = true }
 
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 
-mavspec = { workspace = true }
-maviola = { workspace = true }
+mavspec = { workspace = true, features = ["rust-dialects", "dlct-ardupilotmega"] }
 mavinspect = { version = "0.6.6" }
 rapid-dialect = { workspace = true }
 
