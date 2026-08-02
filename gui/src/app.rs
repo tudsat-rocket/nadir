@@ -15,6 +15,7 @@ use crate::widgets::SharedPlotState;
 
 pub struct App {
     core: core::Core,
+    live: core::Source,
     /// Telemetry logs opened alongside the live source. A map rather than a list because closing
     /// one must not renumber the others out from under a [`View`].
     logs: BTreeMap<SourceId, core::Source>,
@@ -59,6 +60,8 @@ impl App {
             }))
             .spawn();
 
+        let live = core.live.clone();
+
         let mut tiles = egui_tiles::Tiles::default();
 
         let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(
@@ -101,6 +104,7 @@ impl App {
 
         Self {
             core,
+            live,
             event_rx,
             log_collector,
             toasts: egui_notify::Toasts::default()
@@ -129,7 +133,7 @@ impl App {
     /// The source a view names, or `None` once a log it pointed at has been closed.
     fn source(&self, id: SourceId) -> Option<&core::Source> {
         if id == LIVE {
-            Some(&self.core.live)
+            Some(&self.live)
         } else {
             self.logs.get(&id)
         }
@@ -237,7 +241,7 @@ impl eframe::App for App {
 
         let close = self.sidebar.show(
             ctx,
-            &self.core,
+            &self.live,
             &self.logs,
             &mut self.active_view,
             &mut self.logs_shown,
@@ -275,9 +279,7 @@ impl eframe::App for App {
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
             // The fallback is never read; nothing outside `View::System` draws through this.
-            source: active_source
-                .clone()
-                .unwrap_or_else(|| self.core.live.clone()),
+            source: active_source.clone().unwrap_or_else(|| self.live.clone()),
             active_view: self.active_view,
             position_source: &mut self.position_source,
         };
@@ -312,7 +314,7 @@ impl eframe::App for App {
                 if input.key_down(*key)
                     && input.modifiers.contains(Modifiers::CTRL)
                     && input.modifiers.contains(Modifiers::SHIFT)
-                    && self.core.live.known_system_ids().contains(&sysid)
+                    && self.live.known_system_ids().contains(&sysid)
                 {
                     self.active_view = View::system(LIVE, sysid);
                 }
@@ -329,7 +331,8 @@ impl eframe::App for App {
             })
             .show(ctx, |ui| match self.active_view {
                 View::Overview => {
-                    to_open = self.overview.ui(ui, &self.core, &self.logs);
+                    let links = self.core.links();
+                    to_open = self.overview.ui(ui, &links, &self.logs);
                 }
                 View::Settings => {
                     self.settings.ui(ui);

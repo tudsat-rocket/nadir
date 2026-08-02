@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use core::{Core, Origin, Source};
+use core::{Origin, Source};
 
 use eframe::egui;
 use egui::{Align, Layout, RichText};
@@ -36,7 +36,7 @@ impl Sidebar {
     pub fn show(
         &mut self,
         ctx: &egui::Context,
-        core: &Core,
+        live: &Source,
         logs: &BTreeMap<SourceId, Source>,
         active_view: &mut View,
         logs_shown: &mut bool,
@@ -58,7 +58,7 @@ impl Sidebar {
                     });
                 }
 
-                self.systems(ui, LIVE, &core.live, active_view);
+                self.systems(ui, LIVE, live, active_view);
 
                 for (id, source) in logs {
                     let Origin::Log(progress) = &source.origin else {

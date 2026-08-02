@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use core::{Core, LinkId, Origin, Source, tlog};
+use core::{Link, LinkId, Origin, Source, tlog};
 
 use eframe::egui;
 
@@ -40,7 +40,7 @@ impl Overview {
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        core: &Core,
+        links: &[Link],
         logs: &BTreeMap<SourceId, Source>,
     ) -> Option<PathBuf> {
         if self.scanned_at.elapsed() >= RESCAN_INTERVAL {
@@ -52,7 +52,7 @@ impl Overview {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(10.0);
             ui.indent("overview", |ui| {
-                self.links(ui, core);
+                self.links(ui, links);
                 ui.add_space(15.0);
                 picked = self.recent_logs(ui, logs);
             });
@@ -61,12 +61,12 @@ impl Overview {
         picked
     }
 
-    fn links(&self, ui: &mut egui::Ui, core: &Core) {
+    fn links(&self, ui: &mut egui::Ui, links: &[Link]) {
         column_header(ui, "🖧 LINKS");
 
-        for link in core.links() {
-            let mut stats = link.stats;
-            let info_string = match link.id {
+        for link in links {
+            let mut stats = link.stats.clone();
+            let info_string = match &link.id {
                 LinkId::UdpServer(addr) => format!("udp:{addr}"),
                 LinkId::TcpClient(addr) => format!("tcp:{addr}"),
                 LinkId::SerialPort(port) => format!("serial:{port}"),
