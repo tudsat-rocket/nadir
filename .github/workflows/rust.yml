@@ -6,35 +6,80 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings" # treat warnings as errors
 
+# The toolchain (channel 1.94.1) is pinned in rust-toolchain.toml and auto-installed by rustup on
+# the first cargo invocation.
+
 jobs:
-  cargo-check:
+  check:
     runs-on: ubuntu-latest
     steps:
-    - run: rustup update stable && rustup default stable
-    - uses: actions/checkout@v5
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-    - run: cargo check --all --all-features
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-check-
+      - run: sudo apt-get update && sudo apt-get install -y just
+      - run: just check
 
-  cargo-fmt:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-test-
+      - run: sudo apt-get update && sudo apt-get install -y just
+      - run: just test
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-wasm-
+      # clang, because sqlite-wasm-rs compiles the sqlite amalgamation for the target
+      - run: sudo apt-get update && sudo apt-get install -y just clang
+      - run: just wasm
+
+  fmt:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-    - run: rustup update stable && rustup default stable
-    - uses: actions/checkout@v5
-    - run: cargo fmt --check
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - run: sudo apt-get update && sudo apt-get install -y just
+      - run: just fmt-check
 
-  cargo-clippy:
+  clippy:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-    - run: rustup update stable && rustup default stable
-    - uses: actions/checkout@v5
-    - run: cargo clippy --all --all-features
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-clippy-
+      - run: sudo apt-get update && sudo apt-get install -y just
+      - run: just clippy
