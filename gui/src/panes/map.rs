@@ -195,10 +195,10 @@ impl PaneUi for MapPane {
             }
 
             let new_gps = system
-                .messages_since::<GlobalPositionInt>(path.last_gps)
+                .messages_since::<GlobalPositionInt>(path.last_gps, None)
                 .unwrap_or_default();
             let new_heartbeats = system
-                .messages_since::<Heartbeat>(path.last_heartbeat)
+                .messages_since::<Heartbeat>(path.last_heartbeat, None)
                 .unwrap_or_default();
 
             for (ts, hb) in new_heartbeats {

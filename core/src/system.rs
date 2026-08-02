@@ -164,8 +164,9 @@ impl System {
     pub fn messages_since<M: MessageExt + Default>(
         &self,
         since: Option<DateTime<Utc>>,
+        limit: Option<usize>,
     ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
-        self.db.messages_since(self.system_id, 0x01, since)
+        self.db.messages_since(self.system_id, 0x01, since, limit)
     }
 
     pub fn message_count<M: MessageExt + Default>(&self) -> usize {

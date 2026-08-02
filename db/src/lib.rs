@@ -292,14 +292,16 @@ impl Db {
         system_id: u8,
         component_id: u8,
     ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
-        self.messages_since(system_id, component_id, None)
+        self.messages_since(system_id, component_id, None, None)
     }
 
+    /// The oldest `limit` messages newer than `since`, or all of them if no limit is given.
     pub fn messages_since<M: MessageExt + Default>(
         &self,
         system_id: u8,
         component_id: u8,
         since: Option<DateTime<Utc>>,
+        limit: Option<usize>,
     ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
         puffin::profile_function!();
 
@@ -310,12 +312,15 @@ impl Db {
             "SELECT {}, received_at FROM {}
                 WHERE system_id=:system_id AND component_id=:component_id
                     AND received_at > :since
-                ORDER BY received_at ASC",
+                ORDER BY received_at ASC
+                LIMIT :limit",
             M::default().rows().join(","),
             M::default().table(),
         );
 
         let since = since.map_or(i64::MIN, |t| t.timestamp_micros());
+        // SQLite reads a negative LIMIT as no upper bound.
+        let limit = limit.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
         let mut stmt = conn.prepare_cached(&query)?;
         let table = M::default().table().to_owned();
         let rows = stmt
@@ -324,6 +329,7 @@ impl Db {
                     ":system_id": system_id,
                     ":component_id": component_id,
                     ":since": since,
+                    ":limit": limit,
                 },
                 |row| {
                     let m = M::from_row(row)?;
