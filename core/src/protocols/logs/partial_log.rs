@@ -280,7 +280,7 @@ impl PartialLogSlow {
                     // found:       |-------|
                     // missing: |--------|
                     self.missing[i] = new_missing_left.clone();
-                    self.missing_size -= found.start - missing.start;
+                    self.missing_size -= missing.end - found.start;
                 }
                 found = new_found_right;
                 i += 1;
