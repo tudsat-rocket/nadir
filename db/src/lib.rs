@@ -5,6 +5,13 @@ use chrono::{DateTime, Utc};
 use mavinspect::protocol::MavType;
 use mavspec::rust::spec::MessageSpec;
 
+// Nothing calls into this crate directly - it exists to supply the `sqlite3_*` symbols that
+// libsqlite3-sys expects. Without the reference rustc drops it, and wasm-ld quietly turns every
+// one of those symbols into an unresolved `env` import instead of failing the link, so the breakage
+// only shows up as a module-instantiation error in the browser.
+#[cfg(target_arch = "wasm32")]
+use sqlite_wasm_rs as _;
+
 const FREQ_WINDOW_SECS: i64 = 5;
 
 #[derive(Default)]
