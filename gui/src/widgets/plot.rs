@@ -6,8 +6,8 @@ use eframe::egui::PointerButton;
 use egui::{Color32, TextStyle};
 use egui_plot::{Corner, Legend};
 
+use core::mav::{ComponentId, SystemId};
 use core::{MessageInstance, format_message_label};
-use maviola::protocol::{ComponentId, SystemId};
 
 /// State shared by all linked plots
 pub struct SharedPlotState {

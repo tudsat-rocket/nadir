@@ -1,6 +1,6 @@
+use core::mav::SystemId;
 use eframe::egui;
 use egui::Align;
-use maviola::protocol::SystemId;
 
 use crate::{
     panes::{PaneUi, TreeBehavior},

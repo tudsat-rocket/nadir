@@ -1,8 +1,8 @@
 use core::System;
+use core::mav::ChannelDetails;
 
 use eframe::egui;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
-use maviola::core::io::ChannelDetails;
 use mavspec::rust::dialects::common::messages::{LinkNodeStatus, RadioStatus};
 
 use crate::{

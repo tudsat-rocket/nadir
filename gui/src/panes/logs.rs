@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+
 use tokio::sync::mpsc;
 
 use eframe::egui;
 use egui::{Color32, ProgressBar, RichText};
 
-use crate::panes::PaneUi;
 use core::System;
 use core::{FlightLogUiState, GlobLogDownloadState, LogDlCommand, LogItem, PartialLogCompleteness};
+
+use crate::panes::PaneUi;
 
 /// For downloading and saving flight logs from vehicle.
 pub struct LogsPane {
@@ -280,6 +282,14 @@ fn show_save_button(
     if ui.button("💾  Save").clicked() {
         let path = match &item.state.data_file {
             Some(p) => p.clone(),
+            #[cfg(target_arch = "wasm32")]
+            None => {
+                // No filesystem to save into; a browser build would hand the bytes to a download
+                // instead, which is a different flow than picking a path up front.
+                tracing::warn!("Saving a flight log needs a native build");
+                return;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             None => {
                 let default_name = format!(
                     "{}_flightlog_{:04}.bin",

@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use core::mav::{Event, V2};
 use egui::{Color32, Key, Margin, Modifiers};
-use maviola::asnc::node::Event;
-use maviola::prelude::V2;
 use mavspec::rust::dialects::Common;
 use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 
@@ -14,6 +13,7 @@ use crate::views::{LIVE, Overview, SettingsView, SourceId, View};
 use crate::widgets::SharedPlotState;
 
 pub struct App {
+    #[cfg(not(target_arch = "wasm32"))]
     core: core::Core,
     live: core::Source,
     /// Telemetry logs opened alongside the live source. A map rather than a list because closing
@@ -43,24 +43,36 @@ impl App {
         let (event_tx, event_rx) = std::sync::mpsc::channel::<Event<V2>>();
         let ctx2 = ctx.clone();
 
+        // Only ever the defaults on wasm, where there is no file to read.
         let settings = core::Settings::load();
 
-        let mut builder = core::Core::builder();
-        for link in &settings.links {
-            builder = builder.link(link.clone());
-        }
-        if settings.autoconnect_usb {
-            builder = builder.autoconnect_to_usb();
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let core = {
+            let mut builder = core::Core::builder();
+            for link in &settings.links {
+                builder = builder.link(link.clone());
+            }
+            if settings.autoconnect_usb {
+                builder = builder.autoconnect_to_usb();
+            }
 
-        let core = builder
-            .on_event(Box::new(move |event| {
-                let _ = event_tx.send(event.clone());
-                ctx2.request_repaint_after(std::time::Duration::from_millis(16));
-            }))
-            .spawn();
+            builder
+                .on_event(Box::new(move |event| {
+                    let _ = event_tx.send(event.clone());
+                    ctx2.request_repaint_after(std::time::Duration::from_millis(16));
+                }))
+                .spawn()
+        };
 
+        #[cfg(not(target_arch = "wasm32"))]
         let live = core.live.clone();
+
+        #[cfg(target_arch = "wasm32")]
+        let live = {
+            // Nothing feeds this yet: no links here, and no stream transport written.
+            let _ = (&event_tx, &ctx2);
+            core::Source::detached()
+        };
 
         let mut tiles = egui_tiles::Tiles::default();
 
@@ -103,6 +115,7 @@ impl App {
         let tiles_tree = egui_tiles::Tree::new("my_tree", bottom, tiles);
 
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             core,
             live,
             event_rx,
@@ -331,7 +344,11 @@ impl eframe::App for App {
             })
             .show(ctx, |ui| match self.active_view {
                 View::Overview => {
+                    #[cfg(not(target_arch = "wasm32"))]
                     let links = self.core.links();
+                    #[cfg(target_arch = "wasm32")]
+                    let links = Vec::new();
+
                     to_open = self.overview.ui(ui, &links, &self.logs);
                 }
                 View::Settings => {
