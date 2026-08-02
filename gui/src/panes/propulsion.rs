@@ -267,7 +267,7 @@ fn valve_bar(
         let x = rect.left() + rect.width() * c;
         painter.line_segment(
             [pos2(x, rect.top() + 1.0), pos2(x, rect.bottom() - 1.0)],
-            Stroke::new(2.0, Color32::WHITE),
+            Stroke::new(2.0_f32, Color32::WHITE),
         );
     }
 
@@ -280,7 +280,7 @@ fn valve_bar(
             let x = rect.left() + rect.width() * t;
             painter.line_segment(
                 [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(2.0, COLOR_INDICATOR_GOOD),
+                Stroke::new(2.0_f32, COLOR_INDICATOR_GOOD),
             );
             if resp.drag_stopped() {
                 target = Some(t);
@@ -304,9 +304,9 @@ fn valve_bar(
     );
 
     let border = if blink && crate::colors::blink_on(time) {
-        Stroke::new(2.0, COLOR_INDICATOR_WARNING)
+        Stroke::new(2.0_f32, COLOR_INDICATOR_WARNING)
     } else {
-        Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color)
+        Stroke::new(1.0_f32, visuals.widgets.noninteractive.bg_stroke.color)
     };
     painter.rect(
         rect,

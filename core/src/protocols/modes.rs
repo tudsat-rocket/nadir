@@ -214,7 +214,7 @@ pub async fn discover_available_modes(
                     tracing::error!("Mode discovery failed, will keep retrying.");
                 }
 
-                crate::time::sleep(Duration::from_millis(10000)).await;
+                crate::time::sleep(Duration::from_secs(10)).await;
             }
         }
 

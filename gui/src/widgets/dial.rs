@@ -33,19 +33,19 @@ impl egui::Widget for Dial {
             .map(|i| min * PI * (i as f32) / (N as f32))
             .map(|r| dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius)
             .collect();
-        painter.line(points, Stroke::new(1.5, Color32::RED));
+        painter.line(points, Stroke::new(1.5_f32, Color32::RED));
 
         let points = (0..=N)
             .map(|i| min * PI + (max - min) * PI * (i as f32) / (N as f32))
             .map(|r| dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius)
             .collect();
-        painter.line(points, Stroke::new(1.5, Color32::WHITE));
+        painter.line(points, Stroke::new(1.5_f32, Color32::WHITE));
 
         let points = (0..=N)
             .map(|i| max * PI + (1.0 - max) * PI * (i as f32) / (N as f32))
             .map(|r| dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius)
             .collect();
-        painter.line(points, Stroke::new(1.5, Color32::RED));
+        painter.line(points, Stroke::new(1.5_f32, Color32::RED));
 
         for i in 0..=10 {
             let f = (i as f32) / 10.0;
@@ -61,7 +61,7 @@ impl egui::Widget for Dial {
                     dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius,
                     dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 0.9,
                 ],
-                Stroke::new(0.75, color),
+                Stroke::new(0.75_f32, color),
             );
         }
 
@@ -72,7 +72,7 @@ impl egui::Widget for Dial {
                 dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 0.8,
                 dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 1.3,
             ],
-            Stroke::new(2.5, COLOR_INDICATOR_GOOD),
+            Stroke::new(2.5_f32, COLOR_INDICATOR_GOOD),
         );
 
         if let Some(trim) = self.trim {
@@ -83,7 +83,7 @@ impl egui::Widget for Dial {
                     dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius,
                     dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 0.7,
                 ],
-                Stroke::new(2.0, Color32::WHITE),
+                Stroke::new(2.0_f32, Color32::WHITE),
             );
         }
 

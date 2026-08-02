@@ -98,11 +98,11 @@ impl ArtificialHorizon {
                 projected.clone(),
                 Stroke::new(
                     if pitch_tick == 0 {
-                        2.0
+                        2.0_f32
                     } else if pitch_tick % 20 == 10 || pitch_tick % 10 == 5 {
-                        0.5
+                        0.5_f32
                     } else {
-                        1.0
+                        1.0_f32
                     },
                     Color32::WHITE,
                 ),
@@ -162,9 +162,12 @@ impl ArtificialHorizon {
 
             painter.add(Shape::line(
                 projected.clone(),
-                Stroke::new(3.0, Color32::RED),
+                Stroke::new(3.0_f32, Color32::RED),
             ));
-            painter.add(Shape::line(projected, Stroke::new(2.0, Color32::ORANGE)));
+            painter.add(Shape::line(
+                projected,
+                Stroke::new(2.0_f32, Color32::ORANGE),
+            ));
         }
     }
 
@@ -206,7 +209,7 @@ impl ArtificialHorizon {
             } else {
                 painter.line(
                     vec![center.lerp(tip, 1.0 - 0.05), tip],
-                    Stroke::new(1.0, Color32::WHITE),
+                    Stroke::new(1.0_f32, Color32::WHITE),
                 );
             }
         }
@@ -217,7 +220,7 @@ impl ArtificialHorizon {
             Rect::from_center_size(indicator_pos, Vec2::new(48.0, 25.0)),
             CornerRadius::ZERO.at_least(1),
             Color32::BLACK,
-            Stroke::new(0.5, Color32::WHITE),
+            Stroke::new(0.5_f32, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
 
@@ -268,7 +271,10 @@ impl ArtificialHorizon {
                     center_side - Vec2::new(0.0, y),
                     center_side - Vec2::new(len * side, y),
                 ],
-                Stroke::new(if abs_tick % 50 == 0 { 2.0 } else { 1.0 }, Color32::WHITE),
+                Stroke::new(
+                    if abs_tick % 50 == 0 { 2.0_f32 } else { 1.0_f32 },
+                    Color32::WHITE,
+                ),
             );
 
             if abs_tick % 50 == 0 {
@@ -293,7 +299,7 @@ impl ArtificialHorizon {
                     center_side,
                     center_side - Vec2::new(0.0, throttle * rect.height() / 2.0),
                 ],
-                Stroke::new(12.0, Color32::RED),
+                Stroke::new(12.0_f32, Color32::RED),
             );
         }
 
@@ -302,7 +308,7 @@ impl ArtificialHorizon {
                 center_side + Vec2::new(0.0, value * POINTS_PER_UNIT),
                 center_side - Vec2::new(0.0, rect.height() / 2.0),
             ],
-            Stroke::new(4.0, COLOR_DIAL),
+            Stroke::new(4.0_f32, COLOR_DIAL),
         );
 
         let box_left = if side > 0.0 { -87.0 } else { 80.0 };
@@ -315,7 +321,7 @@ impl ArtificialHorizon {
                 center_side + Vec2::new(box_left, 12.0),
             ],
             Color32::BLACK,
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
         ));
 
         let text_x = if side > 0.0 { -22.0 } else { 76.0 };
@@ -415,7 +421,7 @@ impl egui::Widget for ArtificialHorizon {
         );
         painter.line(
             vec![rect.left_center(), rect.right_center()],
-            Stroke::new(3.0, Color32::WHITE),
+            Stroke::new(3.0_f32, Color32::WHITE),
         );
 
         // draw our horizon and roll indicators

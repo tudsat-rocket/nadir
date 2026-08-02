@@ -58,11 +58,11 @@ pub fn draw_rotors(ui: &mut egui::Ui, system: &System, square: Rect) {
         let normal = Vec2::new(vector.y, -vector.x).normalized();
         ui.painter().line(
             vec![square.center() + normal * 5.0, pos + normal * 5.0],
-            Stroke::new(1.0, ui.visuals().weak_text_color()),
+            Stroke::new(1.0_f32, ui.visuals().weak_text_color()),
         );
         ui.painter().line(
             vec![square.center() - normal * 5.0, pos - normal * 5.0],
-            Stroke::new(1.0, ui.visuals().weak_text_color()),
+            Stroke::new(1.0_f32, ui.visuals().weak_text_color()),
         );
 
         let all_servos = [

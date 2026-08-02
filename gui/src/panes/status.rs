@@ -282,19 +282,21 @@ impl PaneUi for StatusPane {
                                 job.halign = egui::Align::Center;
                                 let galley = col_ui.fonts(|fonts| fonts.layout_job(job));
 
-                                let button =
-                                    if selected {
-                                        let button = Button::new("").selected(true);
-                                        if auto_mode {
-                                            button.fill(COLOR_INDICATOR_AUTONOMY)
-                                        } else {
-                                            button
-                                        }
+                                let button = if selected {
+                                    let button = Button::new("").selected(true);
+                                    if auto_mode {
+                                        button.fill(COLOR_INDICATOR_AUTONOMY)
                                     } else {
-                                        Button::new("").fill(Color32::TRANSPARENT).stroke(
-                                            Stroke::new(1.0, col_ui.visuals().weak_text_color()),
-                                        )
-                                    };
+                                        button
+                                    }
+                                } else {
+                                    Button::new("")
+                                        .fill(Color32::TRANSPARENT)
+                                        .stroke(Stroke::new(
+                                            1.0_f32,
+                                            col_ui.visuals().weak_text_color(),
+                                        ))
+                                };
 
                                 let size = Vec2::new(col_ui.available_width(), row_h);
                                 let mut resp = col_ui

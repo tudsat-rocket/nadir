@@ -175,7 +175,7 @@ impl egui::Widget for Plot<'_> {
                     .map(|(t, v)| [(t - self.source.plot_origin).as_seconds_f64(), v * scale])
                     .collect();
 
-                let mut l = egui_plot::Line::new(name, plot_data).width(1.0);
+                let mut l = egui_plot::Line::new(name, plot_data).width(1.0_f32);
                 if let Some(color) = line.color {
                     l = l.color(color);
                 }

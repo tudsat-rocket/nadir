@@ -41,7 +41,7 @@ pub async fn request_message_intervals(
                 ..Default::default()
             });
 
-            let ack_result = crate::time::timeout(Duration::from_millis(1000), async {
+            let ack_result = crate::time::timeout(Duration::from_secs(1), async {
                 loop {
                     let msg = message_rx.recv().await;
                     if let Ok(Common::CommandAck(ack)) = msg
@@ -58,6 +58,6 @@ pub async fn request_message_intervals(
             }
         }
 
-        crate::time::sleep(Duration::from_millis(10_000)).await;
+        crate::time::sleep(Duration::from_secs(10)).await;
     }
 }

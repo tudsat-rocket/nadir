@@ -47,7 +47,7 @@ pub async fn run(addr: SocketAddr, sender: Sender<(LinkId, Event<V2>)>) {
                 log_failure = false;
             }
             _ => {
-                crate::time::sleep(Duration::from_millis(5000)).await;
+                crate::time::sleep(Duration::from_secs(5)).await;
             }
         }
     }

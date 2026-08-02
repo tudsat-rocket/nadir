@@ -68,7 +68,7 @@ impl egui::Widget for MeasurementIndicator {
         let border = if self.blink && blink_on(ui.input(|i| i.time)) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(60));
-            Stroke::new(2.0, COLOR_INDICATOR_WARNING)
+            Stroke::new(2.0_f32, COLOR_INDICATOR_WARNING)
         } else {
             style.visuals.window_stroke()
         };

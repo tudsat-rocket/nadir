@@ -294,7 +294,7 @@ pub fn draw_hybrid(
     );
 
     let stroke_col = ui.visuals().weak_text_color();
-    let stroke = Stroke::new(1.5, stroke_col);
+    let stroke = Stroke::new(1.5_f32, stroke_col);
     let fill = ui.visuals().extreme_bg_color;
     let painter = ui.painter().clone();
     let hatch_stride = (0.012 * n).max(4.0);
@@ -377,8 +377,8 @@ pub fn draw_hybrid(
     let time = ui.input(|i| i.time);
     let valve_fill_closed = Color32::BLACK;
     let valve_fill_open = COLOR_INDICATOR_WARNING;
-    let valve_stroke_closed = Stroke::new(1.5, Color32::WHITE);
-    let valve_stroke_open = Stroke::new(1.5, COLOR_INDICATOR_WARNING);
+    let valve_stroke_closed = Stroke::new(1.5_f32, Color32::WHITE);
+    let valve_stroke_open = Stroke::new(1.5_f32, COLOR_INDICATOR_WARNING);
     // Solid fill/stroke reflect the reported state; the intended (commanded)
     // position is drawn separately as hatching, and a mismatch blinks a box.
     let style_for = |id: ValveId| -> (Stroke, Color32) {
@@ -999,9 +999,9 @@ fn draw_valve_mode_toggle(ui: &egui::Ui, square: Rect, mode: &mut ValveInteracti
             ] {
                 let selected = *mode == m;
                 let stroke = if selected {
-                    Stroke::new(1.0, Color32::WHITE)
+                    Stroke::new(1.0_f32, Color32::WHITE)
                 } else {
-                    Stroke::new(0.5, Color32::from_gray(120))
+                    Stroke::new(0.5_f32, Color32::from_gray(120))
                 };
                 let button = Button::new(RichText::new(label).size(12.0))
                     .fill(Color32::TRANSPARENT)
@@ -1529,7 +1529,7 @@ fn draw_valve(
             Rect::from_center_size(center, size).expand(4.0),
             CornerRadius::same(2),
             Color32::TRANSPARENT,
-            Stroke::new(2.0, COLOR_INDICATOR_WARNING),
+            Stroke::new(2.0_f32, COLOR_INDICATOR_WARNING),
             StrokeKind::Outside,
         );
     }
@@ -1573,7 +1573,7 @@ fn interact_valve(
             rect.expand(2.0),
             CornerRadius::same(2),
             Color32::from_white_alpha(15),
-            Stroke::new(1.0, Color32::from_white_alpha(60)),
+            Stroke::new(1.0_f32, Color32::from_white_alpha(60)),
             StrokeKind::Middle,
         );
     }

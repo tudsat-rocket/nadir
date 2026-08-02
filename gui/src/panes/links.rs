@@ -97,9 +97,14 @@ impl LinksPane {
             .and_then(|lq| lq.is_normal().then_some(lq))
             .unwrap_or(0.0);
 
-        let uplink_stroke = Stroke::new(1.0, Color32::WHITE.gamma_multiply(0.2 + 0.8 * lq_uplink));
-        let downlink_stroke =
-            Stroke::new(1.0, Color32::WHITE.gamma_multiply(0.2 + 0.8 * lq_downlink));
+        let uplink_stroke = Stroke::new(
+            1.0_f32,
+            Color32::WHITE.gamma_multiply(0.2 + 0.8 * lq_uplink),
+        );
+        let downlink_stroke = Stroke::new(
+            1.0_f32,
+            Color32::WHITE.gamma_multiply(0.2 + 0.8 * lq_downlink),
+        );
 
         if dashed {
             painter.add(Shape::dashed_line(&points_uplink, uplink_stroke, 4.0, 2.0));

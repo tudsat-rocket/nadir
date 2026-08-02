@@ -73,9 +73,9 @@ impl PaneUi for HorizonPane {
                     ] {
                         let selected = self.velocity_mode == mode;
                         let stroke = if selected {
-                            Stroke::new(1.0, Color32::WHITE)
+                            Stroke::new(1.0_f32, Color32::WHITE)
                         } else {
-                            Stroke::new(0.5, Color32::from_gray(120))
+                            Stroke::new(0.5_f32, Color32::from_gray(120))
                         };
                         let button = egui::Button::new(egui::RichText::new(label).size(12.0))
                             .fill(Color32::TRANSPARENT)
@@ -101,9 +101,9 @@ impl PaneUi for HorizonPane {
                         let has_data = src.has_data(&behavior.source, system_id);
                         let selected = *behavior.position_source == src;
                         let stroke = if selected {
-                            Stroke::new(1.0, Color32::WHITE)
+                            Stroke::new(1.0_f32, Color32::WHITE)
                         } else {
-                            Stroke::new(0.5, Color32::from_gray(120))
+                            Stroke::new(0.5_f32, Color32::from_gray(120))
                         };
                         let button = egui::Button::new(egui::RichText::new(label).size(12.0))
                             .fill(Color32::TRANSPARENT)

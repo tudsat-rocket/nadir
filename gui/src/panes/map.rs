@@ -90,7 +90,7 @@ impl walkers::Plugin for LinePlugin {
 
         let shape = Shape::dashed_line(
             &[Pos2::new(a_pos.x, a_pos.y), Pos2::new(b_pos.x, b_pos.y)],
-            Stroke::new(2.0, self.color),
+            Stroke::new(2.0_f32, self.color),
             12.0,
             8.0,
         );
@@ -285,7 +285,7 @@ impl PaneUi for MapPane {
                 LabeledSymbol {
                     position: *pos,
                     //Position::new(-8.292362108248733, 39.394546258787685),
-                    label: format!("System 0x{s_id:02x}\n☁ {alt}m\n↕ {vz}m/s",),
+                    label: format!("System 0x{s_id:02x}\n☁ {alt}m\n↕ {vz}m/s"),
                     symbol: Some(Symbol::Circle(s.icon().to_string())),
                     style: LabeledSymbolStyle {
                         symbol_size: 20.0,

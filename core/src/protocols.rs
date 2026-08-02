@@ -65,7 +65,7 @@ pub(crate) async fn gather<M: Gatherable + Debug + Clone + Default>(
     progress_cb: Option<Box<dyn Fn(usize, usize) + Send>>,
 ) -> Result<Vec<M>, MavResult> {
     const MAX_RETRIES: usize = 3;
-    const REQUEST_TIMEOUT: Duration = Duration::from_millis(1000);
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
     let message_id = M::default().id();
     let protocol = mavspec::definitions::protocol();
