@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use maviola::protocol::ComponentId;
+use crate::mav::ComponentId;
 use mavspec::rust::dialects::Common;
 use mavspec::rust::dialects::ardupilotmega::enums::{CopterMode, PlaneMode};
 use mavspec::rust::dialects::common::{
@@ -214,7 +214,7 @@ pub async fn discover_available_modes(
                     tracing::error!("Mode discovery failed, will keep retrying.");
                 }
 
-                tokio::time::sleep(Duration::from_millis(10000)).await;
+                crate::time::sleep(Duration::from_millis(10000)).await;
             }
         }
 

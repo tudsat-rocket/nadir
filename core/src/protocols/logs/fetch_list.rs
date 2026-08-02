@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::mav::ComponentId;
 use chrono::Utc;
-use maviola::protocol::ComponentId;
 use mavspec::rust::dialects::common::{
     Common,
     messages::{LogEntry, LogRequestList},

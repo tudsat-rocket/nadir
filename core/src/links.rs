@@ -1,15 +1,14 @@
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Sender;
-
-use maviola::asnc::node::Event;
-use maviola::prelude::*;
 
 use crate::stats::LinkStats;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tcp;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod udp;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod usb;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -27,8 +26,12 @@ pub struct Link {
     pub stats: LinkStats,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LinkId {
-    pub fn spawn(&self, sender: Sender<(LinkId, Event<V2>)>) -> Link {
+    pub fn spawn(
+        &self,
+        sender: tokio::sync::mpsc::Sender<(LinkId, crate::mav::Event<crate::mav::V2>)>,
+    ) -> Link {
         let _event_loop_task = match self {
             Self::TcpClient(addr) => tokio::spawn(tcp::run(*addr, sender)),
             Self::UdpServer(addr) => tokio::spawn(udp::run(*addr, sender)),

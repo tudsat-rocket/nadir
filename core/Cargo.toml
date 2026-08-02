@@ -9,19 +9,28 @@ edition = "2024"
 db = { workspace = true }
 
 chrono = { workspace = true }
-directories = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
-
 mavspec = { workspace = true }
-maviola = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
 rapid-dialect = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+directories = { workspace = true }
+tokio = { workspace = true }
+maviola = { workspace = true }
 socketcan = { version = "3.5.0", features = [ "tokio" ] }
 tokio-serial = "5.4.5"
 
-serde = { workspace = true }
-toml = { workspace = true }
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# maviola cannot build for wasm (tokio net/fs + tokio-serial, unconditionally), so the wasm build
+# talks to mavio directly and gets its timers and clock from the web platform.
+mavio = { version = "0.5.10", default-features = false, features = ["alloc", "dlct-common", "dlct-ardupilotmega"] }
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros"] }
+wasmtimer = "0.4.3"
+web-time = "1.1"
 
 [dev-dependencies]
 tempfile = "3"

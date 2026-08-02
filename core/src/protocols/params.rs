@@ -1,7 +1,8 @@
 use std::f32;
 use std::{collections::HashMap, time::Duration};
 
-use maviola::protocol::ComponentId;
+use crate::mav::ComponentId;
+use crate::time::sleep;
 use mavspec::rust::{
     default_dialect::messages::ParamValue,
     dialects::{
@@ -12,7 +13,6 @@ use mavspec::rust::{
         },
     },
 };
-use tokio::time::sleep;
 
 use crate::{
     System,

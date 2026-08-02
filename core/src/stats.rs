@@ -1,6 +1,6 @@
+use crate::time::Instant;
 use std::collections::VecDeque;
 use std::f32;
-use std::time::Instant;
 
 #[derive(Clone, Debug, Default)]
 pub struct LinkStats {

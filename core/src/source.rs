@@ -10,12 +10,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{broadcast, mpsc};
 
-use maviola::asnc::node::Callback;
-use maviola::prelude::{Frame, V2};
-use maviola::protocol::SystemId;
-use maviola::protocol::dialects::{Ardupilotmega, Common};
+use crate::mav::dialects::{Ardupilotmega, Common};
+use crate::mav::{Callback, Frame, SystemId, V2};
 use mavspec::rust::dialects::common::enums::MavSeverity;
 
 use db::Db;
@@ -121,20 +118,13 @@ pub struct Source {
     /// does not shift the data under the cursor.
     pub plot_origin: DateTime<Utc>,
     pub origin: Origin,
-    can_proxy: Option<(
-        mpsc::Sender<socketcan::CanFrame>,
-        broadcast::Sender<socketcan::CanFrame>,
-    )>,
+    can_proxy: Option<crate::CanProxy>,
 }
 
 impl Source {
     /// The source the links feed.
-    pub(crate) fn live(
-        can_proxy: Option<(
-            mpsc::Sender<socketcan::CanFrame>,
-            broadcast::Sender<socketcan::CanFrame>,
-        )>,
-    ) -> Self {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn live(can_proxy: Option<crate::CanProxy>) -> Self {
         Self {
             db: Db::init(),
             tlog: Some(tlog::Writer::spawn()),
@@ -142,6 +132,20 @@ impl Source {
             plot_origin: Utc::now(),
             origin: Origin::Live,
             can_proxy,
+        }
+    }
+
+    /// A source with no feed behind it. The wasm build has no links to construct a live one from,
+    /// and no stream transport yet either, so this just gives the UI an empty store to draw.
+    #[cfg(target_arch = "wasm32")]
+    pub fn detached() -> Self {
+        Self {
+            db: Db::init(),
+            tlog: None,
+            systems: Arc::new(Mutex::new(HashMap::new())),
+            plot_origin: Utc::now(),
+            origin: Origin::Live,
+            can_proxy: None,
         }
     }
 

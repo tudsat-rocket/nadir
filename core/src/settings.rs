@@ -44,6 +44,14 @@ pub enum SaveError {
 }
 
 impl Settings {
+    /// `None` on wasm, where there is no filesystem to keep a file in, so a browser build only ever
+    /// has the defaults.
+    #[cfg(target_arch = "wasm32")]
+    pub fn config_file() -> Option<PathBuf> {
+        None
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn config_file() -> Option<PathBuf> {
         let Some(dirs) = directories::ProjectDirs::from("space", "tudsat", "nadir") else {
             tracing::error!(

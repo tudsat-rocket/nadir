@@ -6,13 +6,10 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use tokio::sync::{broadcast, mpsc};
 
-use maviola::asnc::node::Callback;
-use maviola::core::io::{ChannelId, ChannelInfo};
-use maviola::prelude::Frame;
-use maviola::prelude::Message;
-use maviola::prelude::V2;
-use maviola::prelude::{CallbackApi as _, Endpoint, MavLinkId};
-use maviola::protocol::SystemId;
+use crate::mav::{
+    Callback, CallbackApi as _, ChannelId, ChannelInfo, Endpoint, Frame, MavLinkId, Message,
+    SystemId, V2,
+};
 use mavspec::rust::default_dialect::enums::MavProtocolCapability;
 use mavspec::rust::dialects::common::enums::{
     MavAutopilot, MavCmd, MavFrame, MavModeFlag, MavStandardMode, MavType,
@@ -54,16 +51,15 @@ pub struct System {
 }
 
 impl System {
+    // `can_proxy` is uninhabited off native, where the bridge tasks below are compiled out.
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     pub fn new(
         system_id: SystemId,
         db: Db,
         tlog: Option<crate::tlog::Writer>,
         origin: Origin,
         callback: Option<Callback<V2>>,
-        can_proxy: Option<(
-            mpsc::Sender<socketcan::CanFrame>,
-            broadcast::Sender<socketcan::CanFrame>,
-        )>,
+        can_proxy: Option<crate::CanProxy>,
     ) -> Self {
         let available_modes = Arc::new(Mutex::new(None));
         let params = Arc::new(Mutex::new(ParamProgress::Unknown));
@@ -125,6 +121,7 @@ impl System {
             log_cmd_rx,
         )));
 
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some((tx_sender, rx_publisher)) = can_proxy {
             std::mem::drop(tokio::spawn(crate::protocols::can::forward_to_socketcan(
                 message_sender.subscribe(),

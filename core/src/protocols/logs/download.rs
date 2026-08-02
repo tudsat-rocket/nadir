@@ -1,9 +1,9 @@
+use crate::time::timeout;
 use chrono::Utc;
 use std::sync::{Arc, Mutex};
-use tokio::time::timeout;
 use tracing::warn;
 
-use maviola::protocol::ComponentId;
+use crate::mav::ComponentId;
 use mavspec::rust::dialects::common::messages::LogRequestEnd;
 use mavspec::rust::dialects::common::{Common, messages::LogRequestData};
 

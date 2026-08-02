@@ -10,13 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use crate::time::Instant;
+
+use crate::mav::{Frame, FrameError, SystemId, V2};
 use chrono::{DateTime, NaiveDateTime, TimeDelta, Utc};
-use directories::ProjectDirs;
-use maviola::error::FrameError;
-use maviola::prelude::{Frame, V2};
-use maviola::protocol::SystemId;
 
 const QUEUE_CAPACITY: usize = 4096;
 const BUFFER_CAPACITY: usize = 64 * 1024;
@@ -472,9 +471,17 @@ fn parse_name(path: &Path) -> (Option<DateTime<Utc>>, Option<SystemId>) {
     )
 }
 
-/// Directory holding the telemetry logs, created if it does not exist yet.
+/// `None` on wasm, where there is no directory to hold them in. Downstream already treats that as
+/// "logging is unavailable" rather than as a failure.
+#[cfg(target_arch = "wasm32")]
 pub fn log_dir() -> Option<PathBuf> {
-    let Some(dirs) = ProjectDirs::from("space", "tudsat", "nadir") else {
+    None
+}
+
+/// Directory holding the telemetry logs, created if it does not exist yet.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn log_dir() -> Option<PathBuf> {
+    let Some(dirs) = directories::ProjectDirs::from("space", "tudsat", "nadir") else {
         tracing::error!("Could not determine a data directory, telemetry logging is disabled");
         return None;
     };
@@ -495,7 +502,7 @@ pub fn log_dir() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    use maviola::prelude::{Endpoint, MavLinkId};
+    use crate::mav::{Endpoint, MavLinkId};
     use mavspec::rust::dialects::common::messages::Heartbeat;
 
     fn frame() -> Frame<V2> {

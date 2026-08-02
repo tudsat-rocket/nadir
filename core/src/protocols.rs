@@ -1,13 +1,14 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
+use crate::mav::{ComponentId, Message};
+use crate::time::timeout;
 use db::MessageExt;
-use maviola::{prelude::Message, protocol::ComponentId};
 use mavspec::rust::dialects::{Common, common::enums::MavResult};
-use tokio::time::timeout;
 
 use crate::System;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod can;
 pub mod heartbeat;
 pub mod intervals;

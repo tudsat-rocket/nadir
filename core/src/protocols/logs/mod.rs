@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::System;
-use maviola::protocol::ComponentId;
+use crate::mav::ComponentId;
 use mavspec::rust::dialects::common::Common;
 
 pub mod download;

@@ -75,6 +75,6 @@ pub async fn autoconnect(core: Core) {
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        crate::time::sleep(Duration::from_millis(500)).await;
     }
 }

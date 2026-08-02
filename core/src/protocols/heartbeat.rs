@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tokio::time::sleep;
+use crate::time::sleep;
 
 use mavspec::rust::dialects::common::{
     enums::{MavAutopilot, MavModeFlag, MavState, MavType},
