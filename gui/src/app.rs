@@ -10,7 +10,7 @@ use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
 use crate::shell::{Sidebar, StatusBar};
-use crate::views::{LIVE, Overview, SourceId, View};
+use crate::views::{LIVE, Overview, SettingsView, SourceId, View};
 use crate::widgets::SharedPlotState;
 
 pub struct App {
@@ -26,6 +26,7 @@ pub struct App {
     sidebar: Sidebar,
     status_bar: StatusBar,
     overview: Overview,
+    settings: SettingsView,
     shared_plot_state: SharedPlotState,
     position_source: PositionSource,
     active_view: View,
@@ -41,12 +42,17 @@ impl App {
         let (event_tx, event_rx) = std::sync::mpsc::channel::<Event<V2>>();
         let ctx2 = ctx.clone();
 
-        let core = core::Core::builder()
-            .udp_server("0.0.0.0:14550".parse().unwrap())
-            .tcp_client("127.0.0.1:5760".parse().unwrap())
-            .tcp_client("127.0.0.1:5761".parse().unwrap())
-            .tcp_client("127.0.0.1:5762".parse().unwrap())
-            .autoconnect_to_usb()
+        let settings = core::Settings::load();
+
+        let mut builder = core::Core::builder();
+        for link in &settings.links {
+            builder = builder.link(link.clone());
+        }
+        if settings.autoconnect_usb {
+            builder = builder.autoconnect_to_usb();
+        }
+
+        let core = builder
             .on_event(Box::new(move |event| {
                 let _ = event_tx.send(event.clone());
                 ctx2.request_repaint_after(std::time::Duration::from_millis(16));
@@ -55,7 +61,10 @@ impl App {
 
         let mut tiles = egui_tiles::Tiles::default();
 
-        let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(ctx, None))));
+        let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(
+            ctx,
+            settings.map.mapbox_access_token.clone(),
+        ))));
         let propulsion = tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx)));
         let preflight = tiles.insert_pane(Pane::Preflight(PreflightPane::new(ctx)));
         let navigation = tiles.insert_pane(Pane::Navigation(NavigationPane::new(ctx)));
@@ -108,6 +117,7 @@ impl App {
             sidebar: Sidebar::new(),
             status_bar: StatusBar::new(ctx),
             overview: Overview::new(),
+            settings: SettingsView::new(&settings),
             shared_plot_state: SharedPlotState::new(),
             position_source: PositionSource::default(),
             active_view: View::Overview,
@@ -322,7 +332,7 @@ impl eframe::App for App {
                     to_open = self.overview.ui(ui, &self.core, &self.logs);
                 }
                 View::Settings => {
-                    ui.label("TODO");
+                    self.settings.ui(ui);
                 }
                 View::System { .. } => {
                     self.tiles_tree.ui(&mut behavior, ui);

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
 use maviola::asnc::node::Event;
@@ -11,7 +12,8 @@ pub mod tcp;
 pub mod udp;
 pub mod usb;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", content = "addr", rename_all = "snake_case")]
 pub enum LinkId {
     TcpClient(SocketAddr),
     UdpServer(SocketAddr),

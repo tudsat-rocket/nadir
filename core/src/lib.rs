@@ -10,6 +10,7 @@ use maviola::prelude::*;
 mod can_proxy;
 mod links;
 mod protocols;
+pub mod settings;
 mod source;
 mod stats;
 mod system;
@@ -19,6 +20,7 @@ pub use db::{MessageInstance, MessageSummary, format_message_label};
 pub use links::*;
 pub use protocols::logs::types::*;
 pub use protocols::params::{Param, ParamId, ParamProgress, ParamVal};
+pub use settings::Settings;
 pub use source::*;
 pub use system::*;
 
@@ -55,6 +57,11 @@ impl CoreBuilder {
 
     pub fn tcp_client(mut self, addr: SocketAddr) -> Self {
         self.links.push(LinkId::TcpClient(addr));
+        self
+    }
+
+    pub fn link(mut self, id: LinkId) -> Self {
+        self.links.push(id);
         self
     }
 

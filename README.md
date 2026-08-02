@@ -45,7 +45,7 @@ See https://mavlink.io/en/services/ for documentation.
 
 ## Connection Protocols
 
-By default, the ground station listens for UDP packets on port `14550` and attempts to connect to TCP ports `5760` - `5762` on localhost. Any connected USB serial ports are also opened. (TODO: make configurable)
+By default, the ground station listens for UDP packets on port `14550` and attempts to connect to TCP ports `5760` - `5762` on localhost. Any connected USB serial ports are also opened.
 
 MAVLink's message signing is currently not supported.
 

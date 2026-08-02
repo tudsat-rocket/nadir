@@ -820,10 +820,13 @@ dependencies = [
  "maviola",
  "mavspec",
  "rapid-dialect",
+ "serde",
  "socketcan",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-serial",
+ "toml",
  "tracing",
 ]
 
