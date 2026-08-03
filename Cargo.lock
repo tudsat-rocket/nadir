@@ -839,6 +839,7 @@ dependencies = [
  "tokio-serial",
  "toml",
  "tracing",
+ "wasm-bindgen-futures",
  "wasmtimer",
  "web-time",
 ]

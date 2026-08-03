@@ -7,6 +7,7 @@ pub mod settings;
 mod source;
 mod stats;
 mod system;
+mod task;
 mod time;
 pub mod tlog;
 

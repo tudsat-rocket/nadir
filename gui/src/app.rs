@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
 
 use core::mav::{Event, V2};
 use egui::{Color32, Key, Margin, Modifiers};
@@ -8,7 +10,7 @@ use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
-use crate::shell::{Sidebar, StatusBar};
+use crate::shell::{Sidebar, SidebarAction, StatusBar};
 use crate::views::{LIVE, Overview, SettingsView, SourceId, View};
 use crate::widgets::SharedPlotState;
 
@@ -21,6 +23,11 @@ pub struct App {
     logs: BTreeMap<SourceId, core::Source>,
     next_source_id: SourceId,
     event_rx: std::sync::mpsc::Receiver<Event<V2>>,
+    /// Logs the file picker has read, by name and contents.
+    #[cfg(target_arch = "wasm32")]
+    picked_tx: std::sync::mpsc::Sender<(String, Vec<u8>)>,
+    #[cfg(target_arch = "wasm32")]
+    picked_rx: std::sync::mpsc::Receiver<(String, Vec<u8>)>,
     log_collector: egui_tracing::tracing::collector::EventCollector,
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
@@ -41,6 +48,8 @@ impl App {
         ctx: &egui::Context,
     ) -> Self {
         let (event_tx, event_rx) = std::sync::mpsc::channel::<Event<V2>>();
+        #[cfg(target_arch = "wasm32")]
+        let (picked_tx, picked_rx) = std::sync::mpsc::channel::<(String, Vec<u8>)>();
         let ctx2 = ctx.clone();
 
         // Only ever the defaults on wasm, where there is no file to read.
@@ -131,6 +140,10 @@ impl App {
             tiles_tree,
             logs: BTreeMap::new(),
             next_source_id: LIVE + 1,
+            #[cfg(target_arch = "wasm32")]
+            picked_tx,
+            #[cfg(target_arch = "wasm32")]
+            picked_rx,
             sidebar: Sidebar::new(),
             status_bar: StatusBar::new(ctx),
             overview: Overview::new(),
@@ -152,7 +165,19 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn open_log(&mut self, path: &Path) {
+        self.add_log(path, core::Source::open_log(path));
+    }
+
+    /// A log the browser handed over whole, since there is no path there to open.
+    #[cfg(target_arch = "wasm32")]
+    fn open_log_bytes(&mut self, name: &str, bytes: impl AsRef<[u8]> + 'static) {
+        let opened = core::Source::open_log_bytes(name, bytes);
+        self.add_log(Path::new(name), opened);
+    }
+
+    fn add_log(&mut self, path: &Path, opened: Result<core::Source, core::LogError>) {
         let already_open = self.logs.values().any(|source| match &source.origin {
             core::Origin::Log(progress) => progress.path == path,
             core::Origin::Live => false,
@@ -165,7 +190,7 @@ impl App {
             return;
         }
 
-        match core::Source::open_log(path) {
+        match opened {
             Ok(source) => {
                 let id = self.next_source_id;
                 self.next_source_id += 1;
@@ -181,6 +206,39 @@ impl App {
                 self.toasts.error(format!("{e}"));
             }
         }
+    }
+
+    /// Asks for a telemetry log to open. Blocks on the native dialog, as the log downloader's save
+    /// dialog does.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pick_log(&mut self, _ctx: &egui::Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Telemetry log", &["tlog"])
+            .pick_file()
+        {
+            self.open_log(&path);
+        }
+    }
+
+    /// The same, for a browser: the picker is a promise, and the file arrives as bytes on the
+    /// channel `update` drains.
+    #[cfg(target_arch = "wasm32")]
+    fn pick_log(&mut self, ctx: &egui::Context) {
+        let picked_tx = self.picked_tx.clone();
+        let ctx = ctx.clone();
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let Some(handle) = rfd::AsyncFileDialog::new()
+                .add_filter("Telemetry log", &["tlog"])
+                .pick_file()
+                .await
+            else {
+                return;
+            };
+
+            let _ = picked_tx.send((handle.file_name(), handle.read().await));
+            ctx.request_repaint();
+        });
     }
 
     fn close_log(&mut self, id: SourceId) {
@@ -248,19 +306,32 @@ impl eframe::App for App {
             }
         }
 
+        #[cfg(target_arch = "wasm32")]
+        while let Ok((name, bytes)) = self.picked_rx.try_recv() {
+            self.open_log_bytes(&name, bytes);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
         for path in dropped_logs(ctx) {
             self.open_log(&path);
         }
 
-        let close = self.sidebar.show(
+        #[cfg(target_arch = "wasm32")]
+        for (name, bytes) in dropped_logs(ctx) {
+            self.open_log_bytes(&name, bytes);
+        }
+
+        let action = self.sidebar.show(
             ctx,
             &self.live,
             &self.logs,
             &mut self.active_view,
             &mut self.logs_shown,
         );
-        if let Some(id) = close {
-            self.close_log(id);
+        match action {
+            Some(SidebarAction::OpenLog) => self.pick_log(ctx),
+            Some(SidebarAction::CloseLog(id)) => self.close_log(id),
+            None => {}
         }
 
         if self.logs_shown {
@@ -359,6 +430,8 @@ impl eframe::App for App {
                 }
             });
 
+        // Only ever `Some` where there is a log directory to list, which a browser has not.
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = to_open {
             self.open_log(&path);
         }
@@ -373,6 +446,7 @@ impl eframe::App for App {
 }
 
 /// Paths dropped onto the window that look like telemetry logs.
+#[cfg(not(target_arch = "wasm32"))]
 fn dropped_logs(ctx: &egui::Context) -> Vec<PathBuf> {
     ctx.input(|input| {
         input
@@ -384,6 +458,25 @@ fn dropped_logs(ctx: &egui::Context) -> Vec<PathBuf> {
                 path.extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("tlog"))
             })
+            .collect()
+    })
+}
+
+/// The same, in a browser, which hands over the contents instead: `path` is the windowing backend's
+/// to fill in and stays empty here.
+#[cfg(target_arch = "wasm32")]
+fn dropped_logs(ctx: &egui::Context) -> Vec<(String, std::sync::Arc<[u8]>)> {
+    ctx.input(|input| {
+        input
+            .raw
+            .dropped_files
+            .iter()
+            .filter(|file| {
+                Path::new(&file.name)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tlog"))
+            })
+            .filter_map(|file| Some((file.name.clone(), file.bytes.clone()?)))
             .collect()
     })
 }

@@ -30,13 +30,15 @@ walkers = "0.46"
 puffin = { git = "https://github.com/EmbarkStudios/puffin", rev = "c5276b9", optional = true }
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", rev = "c5276b9", optional = true }
 nalgebra = "0.34.1"
+# One file picker for both targets: the wasm backend is an `<input type="file">` behind the same
+# `AsyncFileDialog`.
+rfd = "0.17.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
 maviola = { workspace = true }
 egui-wgpu = { workspace = true }
 egui-winit = { workspace = true }
-rfd = "0.17.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros"] }

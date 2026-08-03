@@ -3,7 +3,7 @@
 //! widgets it hosts, and mounts itself on the [`egui::Context`] through a single `show`.
 
 mod sidebar;
-pub use sidebar::Sidebar;
+pub use sidebar::{Sidebar, SidebarAction};
 
 mod status_bar;
 pub use status_bar::StatusBar;

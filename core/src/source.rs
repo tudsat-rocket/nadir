@@ -153,21 +153,69 @@ impl Source {
     ///
     /// Returns as soon as the file is known to hold telemetry; the rest arrives on a thread of its
     /// own.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open_log(path: &Path) -> Result<Self, LogError> {
         let total_bytes = std::fs::metadata(path)?.len();
+        let first = Self::first_record(tlog::Reader::open(path)?, path)?;
+        let (source, progress) = Self::recording(path.to_path_buf(), total_bytes, first);
 
-        // The plot origin has to be known before anything is drawn against it, and reading the
-        // first record is also what tells us this is a telemetry log at all.
-        let first = tlog::Reader::open(path)?
+        let loader = source.clone();
+        let reader = tlog::Reader::open(path)?;
+
+        std::thread::spawn(move || {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime.block_on(loader.load(reader, progress)),
+                Err(e) => tracing::error!("Failed to start the telemetry log loader: {e}"),
+            }
+        });
+
+        Ok(source)
+    }
+
+    /// The same, for a log handed over whole: a browser can read a file the user picked, but has no
+    /// path to open and no thread to load it on.
+    #[cfg(target_arch = "wasm32")]
+    pub fn open_log_bytes(name: &str, bytes: impl AsRef<[u8]> + 'static) -> Result<Self, LogError> {
+        use std::io::Cursor;
+
+        let path = PathBuf::from(name);
+        let total_bytes = bytes.as_ref().len() as u64;
+        let first = Self::first_record(tlog::Reader::new(Cursor::new(bytes.as_ref())), &path)?;
+        let (source, progress) = Self::recording(path, total_bytes, first);
+
+        let reader = tlog::Reader::new(Cursor::new(bytes));
+        crate::task::spawn(source.clone().load(reader, progress));
+
+        Ok(source)
+    }
+
+    /// When the first record was received, which is the plot origin. Reading it is also what tells
+    /// us this is a telemetry log at all.
+    fn first_record<R: std::io::Read>(
+        reader: tlog::Reader<R>,
+        path: &Path,
+    ) -> Result<DateTime<Utc>, LogError> {
+        reader
             .flatten()
             .next()
-            .ok_or_else(|| LogError::Empty(path.to_path_buf()))?;
+            .map(|record| record.received_at)
+            .ok_or_else(|| LogError::Empty(path.to_path_buf()))
+    }
 
+    /// The empty source a loader fills, and the handle it reports through.
+    fn recording(
+        path: PathBuf,
+        total_bytes: u64,
+        first: DateTime<Utc>,
+    ) -> (Self, Arc<LogProgress>) {
         let progress = Arc::new(LogProgress {
-            path: path.to_path_buf(),
+            path,
             total_bytes,
             read_bytes: AtomicU64::new(0),
-            cursor_micros: AtomicI64::new(first.received_at.timestamp_micros()),
+            cursor_micros: AtomicI64::new(first.timestamp_micros()),
             records: AtomicU64::new(0),
             errors: AtomicU64::new(0),
             done: AtomicBool::new(false),
@@ -178,25 +226,12 @@ impl Source {
             db: Db::init(),
             tlog: None,
             systems: Arc::new(Mutex::new(HashMap::new())),
-            plot_origin: first.received_at,
+            plot_origin: first,
             origin: Origin::Log(Arc::clone(&progress)),
             can_proxy: None,
         };
 
-        let loader = source.clone();
-        let reader = tlog::Reader::open(path)?;
-
-        std::thread::spawn(move || {
-            match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => runtime.block_on(loader.load(reader, &progress)),
-                Err(e) => tracing::error!("Failed to start the telemetry log loader: {e}"),
-            }
-        });
-
-        Ok(source)
+        (source, progress)
     }
 
     /// The latest moment this source knows about: see [`Origin::now`].
@@ -215,7 +250,7 @@ impl Source {
         self.systems.lock().unwrap().get(&id).cloned()
     }
 
-    async fn load<R: std::io::Read>(self, mut reader: tlog::Reader<R>, progress: &LogProgress) {
+    async fn load<R: std::io::Read>(self, mut reader: tlog::Reader<R>, progress: Arc<LogProgress>) {
         let mut since_yield = 0;
 
         while let Some(result) = reader.next() {
@@ -246,7 +281,7 @@ impl Source {
             since_yield += 1;
             if since_yield >= INGEST_BATCH {
                 since_yield = 0;
-                tokio::task::yield_now().await;
+                crate::task::yield_now().await;
             }
         }
 

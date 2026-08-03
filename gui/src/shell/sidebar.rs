@@ -16,6 +16,12 @@ const WIDTH: f32 = 300.0;
 /// Collapsed, the bar keeps just enough width for one icon per row.
 const COLLAPSED_WIDTH: f32 = 37.0;
 
+/// What the user asked of the sidebar this frame. At most one, since each comes from its own click.
+pub enum SidebarAction {
+    OpenLog,
+    CloseLog(SourceId),
+}
+
 /// Left strip listing the known systems and the global navigation: which view is active, whether the
 /// log panel is shown, and the collapse toggle.
 #[derive(Default)]
@@ -40,9 +46,9 @@ impl Sidebar {
         logs: &BTreeMap<SourceId, Source>,
         active_view: &mut View,
         logs_shown: &mut bool,
-    ) -> Option<SourceId> {
+    ) -> Option<SidebarAction> {
         let collapsed = self.collapsed;
-        let mut close = None;
+        let mut action = None;
 
         egui::SidePanel::left("sidepanel")
             .resizable(false)
@@ -75,7 +81,7 @@ impl Sidebar {
                             ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
                                 ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
                                     if ui.small_button("✖").on_hover_text("Close log").clicked() {
-                                        close = Some(*id);
+                                        action = Some(SidebarAction::CloseLog(*id));
                                     }
                                 })
                                 .response
@@ -139,10 +145,18 @@ impl Sidebar {
                         View::Overview,
                         if collapsed { "🖧" } else { "🖧 Overview" },
                     );
+
+                    if ui
+                        .button(if collapsed { "📂" } else { "📂 Open Log" })
+                        .on_hover_text("Open a telemetry log")
+                        .clicked()
+                    {
+                        action = Some(SidebarAction::OpenLog);
+                    }
                 });
             });
 
-        close
+        action
     }
 
     /// The systems of one source, live or recorded.
