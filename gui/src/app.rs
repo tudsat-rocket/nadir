@@ -321,6 +321,13 @@ impl eframe::App for App {
             self.open_log_bytes(&name, bytes);
         }
 
+        if self.logs.values().any(|source| match &source.origin {
+            core::Origin::Log(progress) => !progress.done(),
+            _ => false,
+        }) {
+            ctx.request_repaint();
+        }
+
         let action = self.sidebar.show(
             ctx,
             &self.live,
