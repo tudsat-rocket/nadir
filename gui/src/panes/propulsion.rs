@@ -42,17 +42,11 @@ enum ValveKind {
 // Single source of truth for the rocket's valves: identity, label, capability.
 // A valve's position in this table indexes the per-valve pane state and blink flags.
 const VALVES: [(ValveId, &str, ValveKind); VALVE_COUNT] = [
-    (
-        ValveId::PressurantVent,
-        "Pressurant Vent",
-        ValveKind::Solenoid,
-    ),
+    (ValveId::PressurantVent, "Pressurant Vent", ValveKind::Servo),
     (ValveId::Pressurization, "Pressurization", ValveKind::Servo),
     (ValveId::OxidizerVent, "Oxidizer Vent", ValveKind::Solenoid),
     (ValveId::OxidizerFill, "Oxidizer Fill", ValveKind::Servo),
     (ValveId::Main, "Main", ValveKind::Servo),
-    // Ground-support fill valves mirror their onboard counterparts (servo);
-    // the reserved external vents are binary solenoids like the other vents.
     (
         ValveId::ExternalPressurantFill,
         "Ext Pressurant Fill",
