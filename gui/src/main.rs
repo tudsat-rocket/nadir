@@ -70,7 +70,7 @@ fn main() -> Result<(), eframe::Error> {
     puffin::set_scopes_on(true);
 
     eframe::run_native(
-        "rapid-control",
+        "nadir",
         options,
         Box::new(|cc| Ok(build_app(cc, collector))),
     )
