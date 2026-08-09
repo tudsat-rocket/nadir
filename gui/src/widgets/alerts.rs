@@ -9,7 +9,7 @@ use mavspec::rust::dialects::common::messages::{
     CommandAck, LinkNodeStatus, RadioStatus, SysStatus,
 };
 
-use crate::colors::{COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING};
+use crate::colors::{COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on};
 use crate::widgets::small_text;
 
 fn short_sensor_name(name: &str) -> String {
@@ -167,9 +167,7 @@ impl egui::Widget for AlertLine<'_> {
         };
         let tokens = self.tokens();
 
-        // Slow blink: the lamp turns off but the colored "gel" stays visible, so the caution is
-        // legible in both phases.
-        let lit = ui.input(|i| i.time).rem_euclid(1.6) < 0.9;
+        let lit = blink_on(ui.input(|i| i.time));
         let gel = |c: Color32| if lit { c } else { c.gamma_multiply(0.35) };
 
         let response = ui
