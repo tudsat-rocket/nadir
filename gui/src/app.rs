@@ -46,6 +46,7 @@ impl App {
     pub fn new(
         log_collector: egui_tracing::tracing::collector::EventCollector,
         ctx: &egui::Context,
+        #[cfg(not(target_arch = "wasm32"))] initial_logs: Vec<PathBuf>,
     ) -> Self {
         let (event_tx, event_rx) = std::sync::mpsc::channel::<Event<V2>>();
         #[cfg(target_arch = "wasm32")]
@@ -123,7 +124,8 @@ impl App {
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", bottom, tiles);
 
-        Self {
+        #[allow(unused_mut)]
+        let mut app = Self {
             #[cfg(not(target_arch = "wasm32"))]
             core,
             live,
@@ -153,7 +155,14 @@ impl App {
             active_view: View::Overview,
             never_connected: true,
             logs_shown: false,
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        for path in initial_logs {
+            app.open_log(&path);
         }
+
+        app
     }
 
     /// The source a view names, or `None` once a log it pointed at has been closed.

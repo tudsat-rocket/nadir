@@ -16,6 +16,7 @@ mod widgets;
 fn build_app(
     cc: &eframe::CreationContext<'_>,
     collector: egui_tracing::EventCollector,
+    #[cfg(not(target_arch = "wasm32"))] logs: Vec<std::path::PathBuf>,
 ) -> Box<dyn eframe::App> {
     // This gives us image support:
     egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -41,7 +42,12 @@ fn build_app(
         .insert(0, "B612 Mono".to_owned());
     cc.egui_ctx.set_fonts(fonts);
 
-    Box::new(app::App::new(collector, &cc.egui_ctx))
+    Box::new(app::App::new(
+        collector,
+        &cc.egui_ctx,
+        #[cfg(not(target_arch = "wasm32"))]
+        logs,
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -69,10 +75,12 @@ fn main() -> Result<(), eframe::Error> {
     #[cfg(feature = "profiling")]
     puffin::set_scopes_on(true);
 
+    let logs: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
+
     eframe::run_native(
         "nadir",
         options,
-        Box::new(|cc| Ok(build_app(cc, collector))),
+        Box::new(move |cc| Ok(build_app(cc, collector, logs))),
     )
 }
 
