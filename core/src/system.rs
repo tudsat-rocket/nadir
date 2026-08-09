@@ -152,9 +152,7 @@ impl System {
             .last_message_filtered(self.system_id, 0x01, instance)
     }
 
-    pub fn all_messages<M: MessageExt + Default>(
-        &self,
-    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+    pub fn all_messages<M: MessageExt + Default>(&self) -> Vec<(DateTime<Utc>, M)> {
         self.db.all_messages(self.system_id, 0x01)
     }
 
@@ -162,12 +160,12 @@ impl System {
         &self,
         since: Option<DateTime<Utc>>,
         limit: Option<usize>,
-    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+    ) -> Vec<(DateTime<Utc>, M)> {
         self.db.messages_since(self.system_id, 0x01, since, limit)
     }
 
     pub fn message_count<M: MessageExt + Default>(&self) -> usize {
-        self.db.count_message_cached::<M>(self.system_id, 0x01)
+        self.db.message_count::<M>(self.system_id, 0x01)
     }
 
     #[deprecated]
@@ -248,7 +246,7 @@ impl System {
 
         // TODO: build a better way to track sent commands
         if message.id() == 75 || message.id() == 76 {
-            let _ = self.db.write_message(self.system_id, 0x01, message);
+            self.db.write_message(self.system_id, 0x01, message);
         }
 
         if let Err(e) = callback.respond(&frame) {

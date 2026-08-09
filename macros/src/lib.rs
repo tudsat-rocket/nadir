@@ -68,33 +68,14 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
 
     let type_idents: Vec<_> = filtered_messages
         .iter()
-        .map(|msg_spec| {
-            let lower_case = msg_spec.name().to_lowercase();
-            let type_name: String = lower_case
-                .split('_')
-                .map(|s| {
-                    let (h, t) = s.split_at(1);
-                    format!("{}{}", h.to_uppercase(), t)
-                })
-                .collect();
-            format_ident!("{}", type_name)
-        })
+        .map(|msg_spec| message_type_ident(msg_spec.name()))
         .collect();
 
-    let inner_message_match_arms: Vec<_> = type_idents
+    let inner_store_match_arms: Vec<_> = type_idents
         .iter()
         .map(|type_ident| {
             quote! {
-                Self::#type_ident(inner) => inner.insert(conn, system_id, component_id, received_at)
-            }
-        })
-        .collect();
-
-    let inner_table_match_arms: Vec<_> = type_idents
-        .iter()
-        .map(|type_ident| {
-            quote! {
-                Self::#type_ident(inner) => inner.table()
+                Self::#type_ident(inner) => inner.store(db, system_id, component_id, received_at)
             }
         })
         .collect();
@@ -108,18 +89,11 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
         })
         .collect();
 
-    // We derive `MessageExt` for the main enum for each dialect as well. We only use the insertion
-    // functionality of that right now, maybe that should be refactored into a separate trait.
+    // A decoded frame arrives as one of these enums, so the enum impl only dispatches a write to
+    // its variant's concrete type. Everything read back out is read through that type.
     let dialect_impl = quote! {
         impl MessageExt for #dialect_type {
-            fn table(&self) -> &str {
-                match self {
-                    #(#inner_table_match_arms),* ,
-                    _ => unimplemented!()
-                }
-            }
-
-            fn rows(&self) -> &[&str] {
+            fn rows() -> &'static [&'static str] {
                 unreachable!()
             }
 
@@ -130,21 +104,21 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 }
             }
 
-            fn insert<'a>(
-                &'a self,
-                conn: &rusqlite::Connection,
+            fn field_f64(&self, index: usize) -> Option<f64> {
+                unreachable!()
+            }
+
+            fn store(
+                &self,
+                db: &Db,
                 system_id: u8,
                 component_id: u8,
                 received_at: chrono::DateTime<chrono::Utc>,
-            ) -> Result<(), rusqlite::Error> {
+            ) {
                 match self {
-                    #(#inner_message_match_arms),* ,
-                    _ => unimplemented!()
+                    #(#inner_store_match_arms),* ,
+                    _ => {}
                 }
-            }
-
-            fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
-                unreachable!()
             }
         }
     };
@@ -161,46 +135,26 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 || common.get_message_by_id(msg_spec.id()).is_none()
         })
         .map(|msg_spec| {
-            let lower_case = msg_spec.name().to_lowercase();
-            let type_name: String = lower_case
-                .split('_')
-                .map(|s| {
-                    let (h, t) = s.split_at(1);
-                    format!("{}{}", h.to_uppercase(), t)
-                })
-                .collect();
+            let type_ident = message_type_ident(msg_spec.name());
 
-            let type_ident = format_ident!("{}", type_name);
-
-            let table_name = format!("messages_{lower_case}");
+            // The MAVLink field names rather than the mangled Rust ones below, since a caller
+            // addressing a field by name has what the definitions say.
             let row_names: Vec<_> = msg_spec
                 .fields()
                 .iter()
-                .map(|f| match f.name() {
-                    "index" => "index_".to_owned(),
-                    "type" => "type_".to_owned(),
-                    n => n.to_lowercase(),
-                })
+                .map(|f| f.name().to_owned())
                 .collect();
 
             let var_names: Vec<_> = msg_spec
                 .fields()
                 .iter()
-                .map(|f| {
-                    match f.name() {
-                        "I2Cerr" => "i2_cerr".to_owned(),
-                        "EAS2TAS" => "eas2tas".to_owned(),
-                        "type" => "type_".to_owned(),
-                        n if n.chars().any(char::is_uppercase)
-                            => n.to_case(Case::Snake),
-                        n => n.to_owned(),
-                    }
+                .map(|f| match f.name() {
+                    "I2Cerr" => "i2_cerr".to_owned(),
+                    "EAS2TAS" => "eas2tas".to_owned(),
+                    "type" => "type_".to_owned(),
+                    n if n.chars().any(char::is_uppercase) => n.to_case(Case::Snake),
+                    n => n.to_owned(),
                 })
-            .collect();
-
-            let param_names: Vec<_> = var_names
-                .iter()
-                .map(|varname| format!(":{varname}"))
                 .collect();
 
             let instance_value_impl = msg_spec
@@ -237,39 +191,11 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                     MavType::Array(_, _) => None,
                     _ => Some(row_name.clone()),
                 })
-                .map_or_else(
-                    || quote! { None },
-                    |row_name| quote! { Some(#row_name) },
-                );
+                .map_or_else(|| quote! { None }, |row_name| quote! { Some(#row_name) });
 
-            let param_assignments: Vec<_> = msg_spec
-                .fields()
-                .iter()
-                .zip(var_names.iter())
-                .map(|(f, varname)| {
-                    let param_name = format!(":{varname}");
-                    let var_ident = format_ident!("{}", varname);
-
-                    match (f.r#type(), f.r#enum()) {
-                        (MavType::Array(_, _), Some(_)) if is_field_bitmask(f) => quote!{
-                            #param_name: self.#var_ident.iter().map(|x| x.bits().to_be_bytes()).flatten().collect::<Vec<_>>()
-                        },
-                        (MavType::Array(_, _), Some(_)) => quote!{
-                            #param_name: self.#var_ident.iter().map(|x| x.value().to_be_bytes()).flatten().collect::<Vec<_>>()
-                        },
-                        (MavType::Array(_, _), None) => quote!{
-                            #param_name: self.#var_ident.iter().map(|x| x.to_be_bytes()).flatten().collect::<Vec<_>>()
-                        },
-                        (_, Some(_)) if is_field_bitmask(f) => quote!{ #param_name: self.#var_ident.bits() },
-                        (_, Some(_)) => quote!{ #param_name: self.#var_ident.value() },
-                        (MavType::Float, _) => quote!{ #param_name: self.#var_ident.to_bits() },
-                        (MavType::Double, _) => quote!{ #param_name: self.#var_ident.to_bits() },
-                        _ => quote!{ #param_name: self.#var_ident }
-                    }
-                })
-                .collect();
-
-            let value_assignments: Vec<_> = msg_spec
+            // Each field as a plain number, indexed as `row_names` is. An array field has no
+            // single number, and so nothing to plot.
+            let field_value_arms: Vec<_> = msg_spec
                 .fields()
                 .iter()
                 .enumerate()
@@ -278,86 +204,19 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                     let var_ident = format_ident!("{}", varname);
 
                     match (f.r#type(), f.r#enum()) {
-                        // TODO: Reading of arrays of enums/bitmasks not implemented so far.
-                        // We don't currently use any messages which need this.
-                        (MavType::Array(_, _), Some(_)) if is_field_bitmask(f) => quote! {
-                            #var_ident: {
-                                unimplemented!()
-                            }
+                        (MavType::Array(_, _), _) => quote! { #i => None },
+                        (_, Some(_)) if is_field_bitmask(f) => quote! {
+                            #i => Some(self.#var_ident.bits() as f64)
                         },
-                        (MavType::Array(_, _), Some(_)) => quote! {
-                            #var_ident: {
-                                unimplemented!()
-                            }
-                        },
-                        (MavType::Array(element_type, _len), None) => {
-                            let size = element_type.size();
-                            let rust_type = format_ident!("{}", element_type.rust_type());
-
-                            quote! {
-                                #var_ident: {
-                                    let blob = row.get::<usize, Vec<u8>>(#i)?;
-                                    let vec: Vec<_> = blob.chunks(#size).map(|chunk| {
-                                        let chunk_array: [u8; #size] = chunk.try_into().unwrap();
-                                        #rust_type::from_be_bytes(chunk_array)
-                                    }).collect();
-                                    vec.try_into().unwrap()
-                                }
-                            }
-                        }
-                        (_, Some(e)) if is_field_bitmask(f) => {
-                            let enum_type = e.to_case(Case::Pascal);
-                            let enum_ident = format_ident!("{}", enum_type);
-
-                            quote! {
-                                #var_ident: #dialect_mod::enums::#enum_ident::from_bits(row.get::<usize, _>(#i)?).unwrap()
-                            }
-                        }
-                        // Enums like MAV_CMD are shared across dialects and extended per-dialect
-                        // (e.g. rapid's custom valve commands); a row written by one dialect may
-                        // hold a value the dialect used to read it back doesn't recognize. Surface
-                        // that as a query error instead of panicking the whole process.
-                        (_, Some(enum_name @ "MAV_REMOTE_LOG_DATA_BLOCK_COMMANDS")) => quote! {
-                            #var_ident: {
-                                let raw: u32 = row.get(#i)?;
-                                core::convert::TryFrom::try_from(raw).map_err(|_| {
-                                    rusqlite::Error::InvalidColumnType(#i, format!("invalid {} value {raw}", #enum_name), rusqlite::types::Type::Integer)
-                                })?
-                            }
-                        },
-                        (_, Some(enum_name @ "MAV_CMD")) => quote! {
-                            #var_ident: {
-                                let raw: u16 = row.get(#i)?;
-                                core::convert::TryFrom::try_from(raw).map_err(|_| {
-                                    rusqlite::Error::InvalidColumnType(#i, format!("invalid {} value {raw}", #enum_name), rusqlite::types::Type::Integer)
-                                })?
-                            }
-                        },
-                        (_, Some(enum_name)) => quote! {
-                            #var_ident: {
-                                let raw: u8 = row.get(#i)?;
-                                core::convert::TryFrom::try_from(raw).map_err(|_| {
-                                    rusqlite::Error::InvalidColumnType(#i, format!("invalid {} value {raw}", #enum_name), rusqlite::types::Type::Integer)
-                                })?
-                            }
-                        },
-                        (MavType::Float, _) => quote! { #var_ident: f32::from_bits(row.get::<usize, u32>(#i)?) },
-                        (MavType::Double, _) => quote! { #var_ident: f64::from_bits(row.get::<usize, u64>(#i)?) },
-                        _ => quote! { #var_ident: row.get(#i)? }
+                        (_, Some(_)) => quote! { #i => Some(self.#var_ident.value() as f64) },
+                        _ => quote! { #i => Some(self.#var_ident as f64) },
                     }
                 })
                 .collect();
 
-            let row_names_list = row_names.join(",");
-            let param_names_list = param_names.join(",");
-
             quote! {
                 impl MessageExt for #dialect_mod::messages::#type_ident {
-                    fn table(&self) -> &str {
-                        #table_name
-                    }
-
-                    fn rows(&self) -> &[&str] {
+                    fn rows() -> &'static [&'static str] {
                         &[
                             #(#row_names),*
                         ]
@@ -371,107 +230,46 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         #instance_field_impl
                     }
 
-                    fn insert<'a>(
-                        &'a self,
-                        conn: &rusqlite::Connection,
+                    fn field_f64(&self, index: usize) -> Option<f64> {
+                        match index {
+                            #(#field_value_arms,)*
+                            _ => None
+                        }
+                    }
+
+                    fn store(
+                        &self,
+                        db: &Db,
                         system_id: u8,
                         component_id: u8,
                         received_at: chrono::DateTime<chrono::Utc>,
-                    ) -> Result<(), rusqlite::Error> {
-                        let query = format!(
-                            "INSERT INTO {}
-                                (received_at, system_id, component_id, {})
-                                VALUES (:received_at, :system_id, :component_id, {})",
-                            #table_name,
-                            #row_names_list,
-                            #param_names_list,
-                        );
-
-                        conn.execute(
-                            &query,
-                            rusqlite::named_params! {
-                                ":received_at": received_at.timestamp_micros(),
-                                ":system_id": system_id,
-                                ":component_id": component_id,
-                                #(#param_assignments),*
-                            }
-                        )?;
-
-                        Ok(())
-                    }
-
-                    #[allow(unreachable_code)] // see TODO above
-                    fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
-                        Ok(Self {
-                            #(#value_assignments),*
-                        })
+                    ) {
+                        db.push(system_id, component_id, received_at, self.clone());
                     }
                 }
             }
         })
         .collect();
-
-    let debug_fn_ident = format_ident!("last_message_debug_{}", dialect_name);
-    let debug_match_arms: Vec<_> = dialect
-        .messages()
-        .into_iter()
-        .filter(|msg_spec| {
-            // rapid lives in its own type universe (rapid-dialect generates its
-            // own `common` module), so the common-dialect MessageExt impls don't
-            // cover its inherited variants - emit impls for all rapid messages.
-            dialect.name() == "common"
-                || dialect_name == "rapid"
-                || common.get_message_by_id(msg_spec.id()).is_none()
-        })
-        .map(|msg_spec| {
-            let upper_case = msg_spec.name().to_string();
-            let lower_case = msg_spec.name().to_lowercase();
-            let type_name: String = lower_case
-                .split('_')
-                .map(|s| {
-                    let (h, t) = s.split_at(1);
-                    format!("{}{}", h.to_uppercase(), t)
-                })
-                .collect();
-
-            let type_ident = format_ident!("{}", type_name);
-
-            quote! {
-                #upper_case => db
-                    .last_message_filtered::<#dialect_mod::messages::#type_ident>(
-                        system_id,
-                        component_id,
-                        instance,
-                    )
-                    .map(|m| Some(format!("{m:#?}")))
-            }
-        })
-        .collect();
-
-    let debug_fn = quote! {
-        pub fn #debug_fn_ident(
-            db: &Db,
-            name: &str,
-            system_id: u8,
-            component_id: u8,
-            instance: Option<(&str, i64)>,
-        ) -> Result<Option<String>, DbError> {
-            match name {
-                #(#debug_match_arms),* ,
-                _ => {
-                    let _ = instance;
-                    Ok(None)
-                }
-            }
-        }
-    };
 
     quote! {
         #dialect_impl
         #(#message_impls)*
-        #debug_fn
     }
     .into()
+}
+
+/// The Rust type mavspec generates for a message, e.g. `GLOBAL_POSITION_INT` -> `GlobalPositionInt`.
+fn message_type_ident(name: &str) -> syn::Ident {
+    let type_name: String = name
+        .to_lowercase()
+        .split('_')
+        .map(|s| {
+            let (head, tail) = s.split_at(1);
+            format!("{}{}", head.to_uppercase(), tail)
+        })
+        .collect();
+
+    format_ident!("{}", type_name)
 }
 
 // For some reason, the bitmask flag is not set correctly for some messages, work around that.

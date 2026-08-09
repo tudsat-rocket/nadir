@@ -58,10 +58,8 @@ impl PositionSource {
 
     pub fn has_data(self, source: &Source, system_id: u8) -> bool {
         let count = match self {
-            Self::LocalPositionNed => source
-                .db
-                .count_message_cached::<LocalPositionNed>(system_id, 1),
-            Self::VfrHud => source.db.count_message_cached::<VfrHud>(system_id, 1),
+            Self::LocalPositionNed => source.db.message_count::<LocalPositionNed>(system_id, 1),
+            Self::VfrHud => source.db.message_count::<VfrHud>(system_id, 1),
         };
 
         count > 0

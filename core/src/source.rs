@@ -239,7 +239,17 @@ impl Source {
         self.origin.now()
     }
 
+    /// Systems stay hidden while a recording loads, so the UI draws a whole recording rather than
+    /// a growing part of one.
+    pub fn loading(&self) -> bool {
+        matches!(&self.origin, Origin::Log(progress) if !progress.done())
+    }
+
     pub fn known_system_ids(&self) -> Vec<SystemId> {
+        if self.loading() {
+            return Vec::new();
+        }
+
         let mut system_ids: Vec<SystemId> = self.systems.lock().unwrap().keys().copied().collect();
         system_ids.sort_unstable();
         system_ids.dedup();
@@ -247,6 +257,10 @@ impl Source {
     }
 
     pub fn system(&self, id: SystemId) -> Option<System> {
+        if self.loading() {
+            return None;
+        }
+
         self.systems.lock().unwrap().get(&id).cloned()
     }
 
@@ -346,14 +360,12 @@ impl Source {
     }
 
     fn write<M: db::MessageExt>(&self, frame: &Frame<V2>, message: &M, received_at: DateTime<Utc>) {
-        if let Err(e) = self.db.write_message_at(
+        self.db.write_message_at(
             frame.system_id(),
             frame.component_id(),
             message,
             received_at,
-        ) {
-            tracing::error!("Failed to process message: {e:?}");
-        }
+        );
     }
 }
 

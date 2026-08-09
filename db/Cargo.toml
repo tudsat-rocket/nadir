@@ -9,23 +9,11 @@ edition = "2024"
 macros = { workspace = true }
 
 chrono = { workspace = true }
-tracing = { workspace = true }
 thiserror = { workspace = true }
 
 mavspec = { workspace = true, features = ["rust-dialects", "dlct-ardupilotmega"] }
 mavinspect = { version = "0.6.6" }
 rapid-dialect = { workspace = true }
-
-puffin = { git = "https://github.com/EmbarkStudios/puffin" }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rusqlite = { version = "0.40.1", features = ["bundled", "chrono", "fallible_uint"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# No `bundled`: the amalgamation needs a C toolchain with a wasm sysroot, which does not exist for
-# this target. rusqlite's default `ffi-sqlite-wasm-rs` drops libsqlite3-sys here and takes the same
-# C API from sqlite-wasm-rs, which ships it already compiled for wasm.
-rusqlite = { version = "0.40.1", features = ["chrono", "fallible_uint"] }
 
 [lints]
 workspace = true

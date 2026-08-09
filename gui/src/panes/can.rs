@@ -48,9 +48,7 @@ impl SystemState {
         }
         self.counted = total;
 
-        let new = system
-            .messages_since::<CanFrame>(self.last_seen, Some(Self::POLL_LIMIT))
-            .unwrap_or_default();
+        let new = system.messages_since::<CanFrame>(self.last_seen, Some(Self::POLL_LIMIT));
         let saturated = new.len() == Self::POLL_LIMIT;
 
         for (received_at, frame) in new {

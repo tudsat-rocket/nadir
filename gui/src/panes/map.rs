@@ -198,12 +198,8 @@ impl PaneUi for MapPane {
                 continue;
             }
 
-            let new_gps = system
-                .messages_since::<GlobalPositionInt>(path.last_gps, None)
-                .unwrap_or_default();
-            let new_heartbeats = system
-                .messages_since::<Heartbeat>(path.last_heartbeat, None)
-                .unwrap_or_default();
+            let new_gps = system.messages_since::<GlobalPositionInt>(path.last_gps, None);
+            let new_heartbeats = system.messages_since::<Heartbeat>(path.last_heartbeat, None);
 
             for (ts, hb) in new_heartbeats {
                 path.pending_heartbeats.push_back((ts, hb.custom_mode));

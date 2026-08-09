@@ -7,9 +7,10 @@ use convert_case::{Case, Casing as _};
 use eframe::egui;
 use egui::{Align, DragValue, Layout, RichText, TextStyle};
 use egui_extras::{Column, TableBuilder};
+use mavspec::rust::dialects::common::messages as common;
 // rapid's MAV_CMD/MAV_FRAME enums are supersets of common's (they inherit common's entries
-// and add rapid-specific ones, e.g. the valve commands), so decoding/sending through these
-// types covers both common and rapid-dialect commands rather than only common's.
+// and add rapid-specific ones, e.g. the valve commands), so sending through these types covers
+// both common and rapid-dialect commands rather than only common's.
 // TODO: properly handle an arbitrary number of supersets of common
 use rapid_dialect::rapid::{
     enums::{MavCmd, MavFrame},
@@ -104,6 +105,80 @@ impl Command {
             Self::Long(inner) => inner.command,
             Self::Int(inner) => inner.command,
         }
+    }
+
+    /// Every command this system has been sent, oldest first.
+    ///
+    /// A command is stored under whichever dialect's type decoded it, so a valve command is a
+    /// rapid `COMMAND_LONG` while an arm command is a common one. Both are read, and the common
+    /// ones widened into rapid's superset.
+    fn history(system: &System) -> Vec<(DateTime<Utc>, Self)> {
+        let widen_long = |(t, c): (DateTime<Utc>, common::CommandLong)| {
+            Some((
+                t,
+                Self::Long(CommandLong {
+                    command: MavCmd::try_from(c.command.value()).ok()?,
+                    target_system: c.target_system,
+                    target_component: c.target_component,
+                    confirmation: c.confirmation,
+                    param1: c.param1,
+                    param2: c.param2,
+                    param3: c.param3,
+                    param4: c.param4,
+                    param5: c.param5,
+                    param6: c.param6,
+                    param7: c.param7,
+                }),
+            ))
+        };
+
+        let widen_int = |(t, c): (DateTime<Utc>, common::CommandInt)| {
+            Some((
+                t,
+                Self::Int(CommandInt {
+                    command: MavCmd::try_from(c.command.value()).ok()?,
+                    frame: MavFrame::try_from(c.frame.value()).ok()?,
+                    target_system: c.target_system,
+                    target_component: c.target_component,
+                    current: c.current,
+                    autocontinue: c.autocontinue,
+                    param1: c.param1,
+                    param2: c.param2,
+                    param3: c.param3,
+                    param4: c.param4,
+                    x: c.x,
+                    y: c.y,
+                    z: c.z,
+                }),
+            ))
+        };
+
+        let mut commands: Vec<(DateTime<Utc>, Self)> = system
+            .all_messages::<CommandLong>()
+            .into_iter()
+            .map(|(t, c)| (t, Self::Long(c)))
+            .chain(
+                system
+                    .all_messages::<CommandInt>()
+                    .into_iter()
+                    .map(|(t, c)| (t, Self::Int(c))),
+            )
+            .chain(
+                system
+                    .all_messages::<common::CommandLong>()
+                    .into_iter()
+                    .filter_map(widen_long),
+            )
+            .chain(
+                system
+                    .all_messages::<common::CommandInt>()
+                    .into_iter()
+                    .filter_map(widen_int),
+            )
+            .collect();
+
+        commands.sort_by_key(|(t, _)| *t);
+        commands
     }
 }
 
@@ -222,16 +297,7 @@ impl PaneUi for CommandsPane {
 
         ui.separator();
 
-        let command_longs = system.all_messages::<CommandLong>().unwrap_or_default();
-        let command_ints = system.all_messages::<CommandInt>().unwrap_or_default();
-
-        let mut commands: Vec<(DateTime<Utc>, Command)> = command_longs
-            .into_iter()
-            .map(|(t, c)| (t, Command::Long(c)))
-            .chain(command_ints.into_iter().map(|(t, c)| (t, Command::Int(c))))
-            .collect();
-
-        commands.sort_by_key(|(t, _c)| t.timestamp_micros());
+        let commands = Command::history(&system);
 
         TableBuilder::new(ui)
             .striped(true)

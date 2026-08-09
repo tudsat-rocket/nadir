@@ -33,10 +33,7 @@ impl PaneUi for MessagesPane {
             ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;
         }
 
-        let summary = system
-            .db
-            .message_summary(system.system_id, 0x01)
-            .unwrap_or_default();
+        let summary = system.db.message_summary(system.system_id, 0x01);
 
         let has_detail = self.selected_message.is_some();
         let total = ui.available_rect_before_wrap();

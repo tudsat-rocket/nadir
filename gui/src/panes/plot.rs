@@ -125,11 +125,7 @@ impl PaneUi for PlotPane {
             return;
         };
 
-        let summary = behavior
-            .source
-            .db
-            .message_summary(system_id, 1)
-            .unwrap_or_default();
+        let summary = behavior.source.db.message_summary(system_id, 1);
 
         ui.with_layout(
             egui::Layout::left_to_right(Align::TOP).with_cross_justify(true),

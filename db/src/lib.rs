@@ -1,40 +1,56 @@
-use std::collections::{HashMap, VecDeque};
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use mavinspect::protocol::MavType;
 use mavspec::rust::spec::MessageSpec;
 
+/// Window the rates in [`MessageSummary`] are averaged over.
 const FREQ_WINDOW_SECS: i64 = 5;
 
-#[derive(Default)]
-struct RowStats {
-    count: u64,
-    last: Option<DateTime<Utc>>,
-    recent: VecDeque<DateTime<Utc>>,
-}
+/// (`system_id`, `component_id`, `message_id`, stored message type, `instance_value`)
+///
+/// Keyed by Rust type as well as by message ID, because a dialect extending `common` generates its
+/// own type for every message it inherits: `common::CommandLong` and `rapid::CommandLong` are both
+/// message 76, and a series holds one or the other. Queries that name a message match on the ID,
+/// and so see every dialect's version of it at once.
+type SeriesKey = (u8, u8, u32, TypeId, Option<i64>);
 
-/// (`system_id`, `component_id`, `message_id`, `instance_value`)
-type StatsKey = (u8, u8, u32, Option<i64>);
-type Stats = Arc<Mutex<HashMap<StatsKey, RowStats>>>;
+/// Every value is a `Vec<(DateTime<Utc>, M)>` for the single concrete `M` its key names.
+type SeriesMap = HashMap<SeriesKey, Box<dyn Series>>;
 
 #[derive(Clone)]
 pub struct Db {
-    conn: Arc<Mutex<rusqlite::Connection>>,
+    series: Arc<Mutex<SeriesMap>>,
     instance_fields: Arc<HashMap<u32, String>>,
-    stats: Stats,
+    msg_names: Arc<HashMap<u32, String>>,
+    /// Message name to its ID and field names, unioned over the dialects defining it. Taken from
+    /// the definitions rather than from the series, so a query naming a message that has not
+    /// arrived yet still tells a bad field name from a good one.
+    msg_defs: Arc<HashMap<String, (u32, Vec<String>)>>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
-    #[error("Failed to execute query: {0}")]
-    Query(#[from] rusqlite::Error),
+    #[error("No {0} stored for this system")]
+    NotFound(&'static str),
+    #[error("Unknown message or field: {0}")]
+    UnknownField(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageInstance {
     pub field: String,
     pub value: i64,
+}
+
+/// One [`MessageSummary`] while it is still being accumulated over a message's dialect types.
+#[derive(Default)]
+struct SummaryRow {
+    count: usize,
+    recent: usize,
+    last: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,251 +63,277 @@ pub struct MessageSummary {
     pub last: DateTime<Utc>,
 }
 
-fn datetime_from_micros(col: usize, micros: i64) -> Result<DateTime<Utc>, rusqlite::Error> {
-    DateTime::from_timestamp_micros(micros)
-        .ok_or(rusqlite::Error::IntegralValueOutOfRange(col, micros))
-}
-
-pub trait MessageExt: MessageSpec {
-    fn table(&self) -> &str;
-    fn rows(&self) -> &[&str];
+/// The supertraits are what let a message be stored behind [`Any`] and handed back out by value.
+pub trait MessageExt: MessageSpec + Clone + Debug + Send + Sync + 'static {
+    /// Field names, in wire order. Indices into this are what [`Self::field_f64`] takes.
+    fn rows() -> &'static [&'static str];
 
     /// Numeric value of the message's `instance="true"` field, if any.
     fn instance_value(&self) -> Option<i64> {
         None
     }
 
-    /// SQL column name of the message's `instance="true"` field, if any.
+    /// Name of the message's `instance="true"` field, if any.
     fn instance_field() -> Option<&'static str> {
         None
     }
 
-    fn insert(
-        &self,
-        conn: &rusqlite::Connection,
-        system_id: u8,
-        component_id: u8,
-        received_at: DateTime<Utc>,
-    ) -> Result<(), rusqlite::Error>;
+    /// Numeric value of the field at `index`, or `None` for an array field, which has no single
+    /// number to plot.
+    fn field_f64(&self, index: usize) -> Option<f64>;
 
-    fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error>
-    where
-        Self: Sized;
+    /// Appends a clone of self to its series. The dialect enums dispatch to the inner variant, so
+    /// what lands in the store is always a concrete message type.
+    fn store(&self, db: &Db, system_id: u8, component_id: u8, received_at: DateTime<Utc>);
 }
 
-macro_rules! define_message_tables {
-    ($conn:expr, $dialect:expr) => {
-        for message in $dialect.messages() {
-            use mavspec::rust::spec::Dialect;
+/// The type-erased face of a stored series: everything a query addressing a message by name needs.
+///
+/// Windowing and field lookup read through it, so they are compiled once rather than once per
+/// message type. The impl below is all that is still monomorphised over the several hundred of
+/// them, and it dominates the crate's build, so keep its methods short.
+trait Series: Any + Send + Sync {
+    fn samples(&self) -> usize;
 
-            // Skip messages from common in other dialects derived from it
-            if $dialect.name() != "common" && mavspec::rust::dialects::Common::message_info(message.id()).is_ok() {
-                continue;
-            }
+    /// Samples received after `cutoff`, for the message rates in [`MessageSummary`].
+    fn count_since(&self, cutoff: DateTime<Utc>) -> usize;
 
-            let columns: Vec<String> = message
-                .fields()
-                .iter()
-                .map(|f| {
-                    use mavinspect::protocol::MavType;
+    fn field_index(&self, field_name: &str) -> Option<usize>;
 
-                    let colname = match f.name() {
-                        "index" => "index_",
-                        "type" => "type_",
-                        n => n,
-                    };
+    /// One field within `(since, until]`, as plot points.
+    fn points(
+        &self,
+        index: usize,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> Vec<(DateTime<Utc>, f64)>;
 
-                    let coltype = match f.r#type() {
-                        MavType::Array(_type, _len) => "BLOB",
-                        // Since SQLite doesn't properly handle NaN, we store even floats
-                        // as integers.
-                        _ => "INTEGER",
-                    };
+    fn last_time(&self) -> Option<DateTime<Utc>>;
 
-                    format!("{colname} {coltype}")
-                })
-                .collect::<Vec<_>>();
+    fn last_debug(&self) -> Option<String>;
+}
 
-            let query = if message.name() == "COMMAND_INT" || message.name() == "COMMAND_LONG" {
-                format!(
-                    "CREATE TABLE messages_{} (received_at INTEGER, system_id INTEGER, component_id INTEGER, acked_at INTEGER, result INTEGER, {})",
-                    message.name(),
-                    columns.join(", ")
-                )
-            } else {
-                format!(
-                    "CREATE TABLE messages_{} (received_at INTEGER, system_id INTEGER, component_id INTEGER, {})",
-                    message.name(),
-                    columns.join(", ")
-                )
-            };
-            $conn.execute(&query, rusqlite::params![]).unwrap();
+impl<M: MessageExt> Series for Vec<(DateTime<Utc>, M)> {
+    fn samples(&self) -> usize {
+        self.len()
+    }
 
-            let query = format!(
-                "CREATE INDEX index_{} ON messages_{} (system_id, component_id, received_at)",
-                message.name(),
-                message.name(),
-            );
-            $conn.execute(&query, rusqlite::params![]).unwrap();
-        }
-    };
+    fn count_since(&self, cutoff: DateTime<Utc>) -> usize {
+        Db::window(self, Some(cutoff), None).len()
+    }
+
+    fn field_index(&self, field_name: &str) -> Option<usize> {
+        M::rows().iter().position(|row| *row == field_name)
+    }
+
+    fn points(
+        &self,
+        index: usize,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> Vec<(DateTime<Utc>, f64)> {
+        Db::window(self, since, until)
+            .iter()
+            .filter_map(|(t, msg)| Some((*t, msg.field_f64(index)?)))
+            .collect()
+    }
+
+    fn last_time(&self) -> Option<DateTime<Utc>> {
+        Some(self.last()?.0)
+    }
+
+    fn last_debug(&self) -> Option<String> {
+        Some(format!("{:#?}", self.last()?.1))
+    }
 }
 
 impl Db {
     pub fn init() -> Self {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-
-        conn.set_prepared_statement_cache_capacity(256);
-
         let protocol = mavspec::definitions::protocol();
-        define_message_tables!(conn, protocol.get_dialect_by_name("common").unwrap());
-        define_message_tables!(conn, protocol.get_dialect_by_name("ardupilotmega").unwrap());
-        define_message_tables!(
-            conn,
-            rapid_dialect::definitions::protocol()
-                .get_dialect_by_canonical_name("rapid")
-                .unwrap()
-        );
-
-        let instance_fields: HashMap<u32, String> = [
+        let dialects = [
             protocol.get_dialect_by_name("common").unwrap(),
             protocol.get_dialect_by_name("ardupilotmega").unwrap(),
             rapid_dialect::definitions::protocol()
                 .get_dialect_by_canonical_name("rapid")
                 .unwrap(),
-        ]
-        .into_iter()
-        .flat_map(collect_instance_fields)
-        .collect();
+        ];
 
         Self {
-            conn: Arc::new(Mutex::new(conn)),
-            instance_fields: Arc::new(instance_fields),
-            stats: Arc::new(Mutex::new(HashMap::new())),
+            series: Arc::new(Mutex::new(HashMap::new())),
+            instance_fields: Arc::new(
+                dialects
+                    .into_iter()
+                    .flat_map(Self::collect_instance_fields)
+                    .collect(),
+            ),
+            msg_names: Arc::new(
+                dialects
+                    .into_iter()
+                    .flat_map(|dialect| {
+                        dialect
+                            .messages()
+                            .into_iter()
+                            .map(|message| (message.id(), message.name().to_owned()))
+                    })
+                    .collect(),
+            ),
+            msg_defs: Arc::new(dialects.into_iter().fold(
+                HashMap::new(),
+                |mut defs: HashMap<String, (u32, Vec<String>)>, dialect| {
+                    for message in dialect.messages() {
+                        let (_, fields) = defs
+                            .entry(message.name().to_owned())
+                            .or_insert_with(|| (message.id(), Vec::new()));
+
+                        for field in message.fields() {
+                            if !fields.iter().any(|known| known == field.name()) {
+                                fields.push(field.name().to_owned());
+                            }
+                        }
+                    }
+
+                    defs
+                },
+            )),
         }
     }
 
-    pub fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
-        self.conn.lock().unwrap()
+    fn collect_instance_fields(dialect: &mavinspect::protocol::Dialect) -> HashMap<u32, String> {
+        dialect
+            .messages()
+            .into_iter()
+            .filter_map(|message: &mavinspect::protocol::Message| {
+                let field = message.fields().iter().find(|f| f.instance())?;
+                Some((message.id(), field.name().to_owned()))
+            })
+            .collect()
     }
 
-    pub fn write_message<M: MessageExt>(
+    /// Appends one message to its series. Called by the generated [`MessageExt::store`] impls,
+    /// which are what resolve `M` to a concrete type.
+    pub fn push<M: MessageExt>(
         &self,
         system_id: u8,
         component_id: u8,
-        msg: &M,
-    ) -> Result<(), DbError> {
-        self.write_message_at(system_id, component_id, msg, Utc::now())
+        received_at: DateTime<Utc>,
+        msg: M,
+    ) {
+        let key = (
+            system_id,
+            component_id,
+            msg.id(),
+            TypeId::of::<M>(),
+            msg.instance_value(),
+        );
+
+        let mut series = self.series.lock().unwrap();
+        let stored: &mut dyn Any = &mut **series
+            .entry(key)
+            .or_insert_with(|| Box::new(Vec::<(DateTime<Utc>, M)>::new()));
+
+        stored
+            .downcast_mut::<Vec<(DateTime<Utc>, M)>>()
+            .expect("a series key names the type that series holds")
+            .push((received_at, msg));
     }
 
-    #[allow(clippy::unwrap_in_result)]
+    /// Every series holding an `M` for this system, one per instance value.
+    fn slices<M: MessageExt>(
+        series: &SeriesMap,
+        system_id: u8,
+        component_id: u8,
+    ) -> impl Iterator<Item = (&SeriesKey, &[(DateTime<Utc>, M)])> {
+        let type_id = TypeId::of::<M>();
+
+        series
+            .iter()
+            .filter(move |((sys, comp, _, ty, _), _)| {
+                *sys == system_id && *comp == component_id && *ty == type_id
+            })
+            .filter_map(|(key, stored)| {
+                let stored: &dyn Any = &**stored;
+                let rows = stored.downcast_ref::<Vec<(DateTime<Utc>, M)>>()?;
+                Some((key, rows.as_slice()))
+            })
+    }
+
+    /// The part of a series within `(since, until]`.
+    ///
+    /// Binary search, which holds because a series is appended in receive order: live ingest is
+    /// sequential, and a recording is read in file order.
+    fn window<M>(
+        rows: &[(DateTime<Utc>, M)],
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> &[(DateTime<Utc>, M)] {
+        let start = since.map_or(0, |since| rows.partition_point(|(t, _)| *t <= since));
+        let end = until.map_or(rows.len(), |until| {
+            rows.partition_point(|(t, _)| *t <= until)
+        });
+
+        rows.get(start..end.max(start)).unwrap_or_default()
+    }
+
+    pub fn write_message<M: MessageExt>(&self, system_id: u8, component_id: u8, msg: &M) {
+        self.write_message_at(system_id, component_id, msg, Utc::now());
+    }
+
     pub fn write_message_at<M: MessageExt>(
         &self,
         system_id: u8,
         component_id: u8,
         msg: &M,
         received_at: DateTime<Utc>,
-    ) -> Result<(), DbError> {
-        let conn = self.conn();
-        conn.busy_timeout(std::time::Duration::from_millis(10))?;
-        msg.insert(&conn, system_id, component_id, received_at)?;
-        drop(conn);
-
-        let now = received_at;
-        let cutoff = now - chrono::TimeDelta::seconds(FREQ_WINDOW_SECS);
-        let key = (system_id, component_id, msg.id(), msg.instance_value());
-        let mut stats = self.stats.lock().unwrap();
-        let entry = stats.entry(key).or_default();
-        entry.count += 1;
-        entry.last = Some(now);
-        entry.recent.push_back(now);
-        while entry.recent.front().is_some_and(|t| *t < cutoff) {
-            entry.recent.pop_front();
-        }
-        Ok(())
+    ) {
+        msg.store(self, system_id, component_id, received_at);
     }
 
+    #[allow(
+        clippy::unwrap_in_result,
+        reason = "a poisoned store is not recoverable"
+    )]
     pub fn last_message<M: MessageExt + Default>(
         &self,
         system_id: u8,
         component_id: u8,
     ) -> Result<M, DbError> {
-        puffin::profile_function!();
+        let series = self.series.lock().unwrap();
 
-        let conn = self.conn();
-        conn.busy_timeout(std::time::Duration::from_millis(10))?;
-
-        let query = format!(
-            "SELECT {} FROM {}
-                WHERE system_id=:system_id AND component_id=:component_id
-                ORDER BY received_at DESC
-                LIMIT 1",
-            M::default().rows().join(","),
-            M::default().table(),
-        );
-
-        let mut stmt = conn.prepare_cached(&query)?;
-        let msg = stmt.query_one(
-            &[(":system_id", &system_id), (":component_id", &component_id)],
-            |row| M::from_row(row),
-        )?;
-
-        Ok(msg)
+        Self::slices::<M>(&series, system_id, component_id)
+            .filter_map(|(_, rows)| rows.last())
+            .max_by_key(|(t, _)| *t)
+            .map(|(_, msg)| msg.clone())
+            .ok_or_else(|| DbError::NotFound(std::any::type_name::<M>()))
     }
 
+    #[allow(
+        clippy::unwrap_in_result,
+        reason = "a poisoned store is not recoverable"
+    )]
     pub fn last_message_filtered<M: MessageExt + Default>(
         &self,
         system_id: u8,
         component_id: u8,
         instance: Option<(&str, i64)>,
     ) -> Result<M, DbError> {
-        puffin::profile_function!();
-
-        let conn = self.conn();
-        conn.busy_timeout(std::time::Duration::from_millis(10))?;
-
-        let extra_where = match instance {
-            Some((col, _)) => format!(" AND {col} = :instance_value"),
-            None => String::new(),
+        let Some((_, value)) = instance else {
+            return self.last_message(system_id, component_id);
         };
 
-        let query = format!(
-            "SELECT {} FROM {}
-                WHERE system_id=:system_id AND component_id=:component_id{}
-                ORDER BY received_at DESC
-                LIMIT 1",
-            M::default().rows().join(","),
-            M::default().table(),
-            extra_where,
-        );
+        let series = self.series.lock().unwrap();
 
-        let mut stmt = conn.prepare_cached(&query)?;
-        let msg = match instance {
-            Some((_, value)) => stmt.query_one(
-                rusqlite::named_params! {
-                    ":system_id": system_id,
-                    ":component_id": component_id,
-                    ":instance_value": value,
-                },
-                |row| M::from_row(row),
-            )?,
-            None => stmt.query_one(
-                rusqlite::named_params! {
-                    ":system_id": system_id,
-                    ":component_id": component_id,
-                },
-                |row| M::from_row(row),
-            )?,
-        };
-
-        Ok(msg)
+        Self::slices::<M>(&series, system_id, component_id)
+            .find(|((.., instance), _)| *instance == Some(value))
+            .and_then(|(_, rows)| rows.last())
+            .map(|(_, msg)| msg.clone())
+            .ok_or_else(|| DbError::NotFound(std::any::type_name::<M>()))
     }
 
     pub fn all_messages<M: MessageExt + Default>(
         &self,
         system_id: u8,
         component_id: u8,
-    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
+    ) -> Vec<(DateTime<Utc>, M)> {
         self.messages_since(system_id, component_id, None, None)
     }
 
@@ -302,187 +344,106 @@ impl Db {
         component_id: u8,
         since: Option<DateTime<Utc>>,
         limit: Option<usize>,
-    ) -> Result<Vec<(DateTime<Utc>, M)>, DbError> {
-        puffin::profile_function!();
+    ) -> Vec<(DateTime<Utc>, M)> {
+        let series = self.series.lock().unwrap();
+        let limit = limit.unwrap_or(usize::MAX);
 
-        let conn = self.conn();
-        conn.busy_timeout(std::time::Duration::from_millis(10))?;
+        let mut windows = Self::slices::<M>(&series, system_id, component_id)
+            .map(|(_, rows)| Self::window(rows, since, None))
+            .filter(|rows| !rows.is_empty());
 
-        let query = format!(
-            "SELECT {}, received_at FROM {}
-                WHERE system_id=:system_id AND component_id=:component_id
-                    AND received_at > :since
-                ORDER BY received_at ASC
-                LIMIT :limit",
-            M::default().rows().join(","),
-            M::default().table(),
-        );
+        let Some(first) = windows.next() else {
+            return Vec::new();
+        };
 
-        let since = since.map_or(i64::MIN, |t| t.timestamp_micros());
-        // SQLite reads a negative LIMIT as no upper bound.
-        let limit = limit.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
-        let mut stmt = conn.prepare_cached(&query)?;
-        let table = M::default().table().to_owned();
-        let rows = stmt
-            .query_map(
-                rusqlite::named_params! {
-                    ":system_id": system_id,
-                    ":component_id": component_id,
-                    ":since": since,
-                    ":limit": limit,
-                },
-                |row| {
-                    let m = M::from_row(row)?;
-                    let col = M::default().rows().len();
-                    let t = datetime_from_micros(col, row.get(col)?)?;
-                    Ok((t, m))
-                },
-            )?
-            // A row may have been written by a dialect whose enum extensions (e.g. MAV_CMD)
-            // the requested type M doesn't know about; skip just that row rather than
-            // failing the whole query.
-            .filter_map(|r| match r {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    tracing::warn!("skipping unparseable {table} row: {e}");
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        // The common case is a message with no instance field, and so a single series, already in
+        // receive order and needing no merge.
+        let Some(second) = windows.next() else {
+            return first.iter().take(limit).cloned().collect();
+        };
 
-        Ok(rows)
+        let mut merged: Vec<(DateTime<Utc>, M)> = first
+            .iter()
+            .chain(second)
+            .chain(windows.flatten())
+            .cloned()
+            .collect();
+        merged.sort_by_key(|(t, _)| *t);
+        merged.truncate(limit);
+
+        merged
     }
 
-    /// Number of stored messages of this type, taken from the in-memory write stats instead of a
-    /// `COUNT(*)` scan whose cost grows with session length. Exact, since every write updates the
-    /// stats.
-    pub fn count_message_cached<M: MessageExt + Default>(
-        &self,
-        system_id: u8,
-        component_id: u8,
-    ) -> usize {
-        let msg_id = M::default().id();
-        let stats = self.stats.lock().unwrap();
-        stats
-            .iter()
-            .filter(|((sys, comp, id, _instance), _)| {
-                *sys == system_id && *comp == component_id && *id == msg_id
-            })
-            .map(|(_, rs)| usize::try_from(rs.count).unwrap_or(usize::MAX))
+    /// Number of stored messages of this type, over every instance of it.
+    pub fn message_count<M: MessageExt + Default>(&self, system_id: u8, component_id: u8) -> usize {
+        let series = self.series.lock().unwrap();
+        Self::slices::<M>(&series, system_id, component_id)
+            .map(|(_, rows)| rows.len())
             .sum()
     }
 
-    pub fn count_message<M: MessageExt + Default>(
-        &self,
-        system_id: u8,
-        component_id: u8,
-    ) -> Result<usize, DbError> {
-        let conn = self.conn();
-        conn.busy_timeout(std::time::Duration::from_millis(10))?;
-
-        let mut stmt = conn.prepare_cached(&format!(
-            "SELECT COUNT(*) FROM {}
-                WHERE system_id=:system_id AND component_id=:component_id",
-            M::default().table()
-        ))?;
-
-        let count = stmt.query_one(
-            &[(":system_id", &system_id), (":component_id", &component_id)],
-            |row| row.get(0),
-        )?;
-
-        Ok(count)
-    }
-
-    pub fn count_message_by_name(
-        &self,
-        message_name: &str,
-        system_id: u8,
-        component_id: u8,
-    ) -> Result<usize, DbError> {
-        let conn = self.conn();
-        conn.busy_timeout(std::time::Duration::from_millis(10))?;
-
-        let table_name = format!("messages_{}", message_name.to_lowercase());
-        let mut stmt = conn.prepare_cached(&format!(
-            "SELECT COUNT(*) FROM {table_name}
-                WHERE system_id=:system_id AND component_id=:component_id",
-        ))?;
-
-        let count = stmt.query_one(
-            &[(":system_id", &system_id), (":component_id", &component_id)],
-            |row| row.get(0),
-        )?;
-
-        Ok(count)
-    }
-
-    /// One row per `(message_type, instance_value)` pair received for the
-    /// given system/component, sorted by message ID and instance value.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn message_summary(
-        &self,
-        system_id: u8,
-        component_id: u8,
-    ) -> Result<Vec<MessageSummary>, DbError> {
-        puffin::profile_function!();
-
+    /// One row per `(message_id, instance_value)` pair stored for the given system/component,
+    /// sorted by message ID and instance value.
+    pub fn message_summary(&self, system_id: u8, component_id: u8) -> Vec<MessageSummary> {
         let cutoff = Utc::now() - chrono::TimeDelta::seconds(FREQ_WINDOW_SECS);
-        let protocol = mavspec::definitions::protocol();
-        let rapid = rapid_dialect::definitions::protocol();
+        let series = self.series.lock().unwrap();
 
-        let mut result = Vec::new();
-        let mut stats = self.stats.lock().unwrap();
-        for ((sys, comp, msg_id, instance_value), rs) in stats.iter_mut() {
+        // A message two dialects define is stored once per dialect type, and reported as one row.
+        let mut rows: HashMap<(u32, Option<i64>), SummaryRow> = HashMap::new();
+        for ((sys, comp, msg_id, _, instance_value), stored) in series.iter() {
             if *sys != system_id || *comp != component_id {
                 continue;
             }
-            // Pop stale window entries so freq_hz decays correctly when
-            // the stream goes silent between writes.
-            while rs.recent.front().is_some_and(|t| *t < cutoff) {
-                rs.recent.pop_front();
-            }
-            let Some(last) = rs.last else { continue };
-
-            let msg_name = lookup_msg_name(*msg_id, protocol, rapid);
-            let instance = match (instance_value, self.instance_fields.get(msg_id)) {
-                (Some(value), Some(field)) => Some(MessageInstance {
-                    field: field.clone(),
-                    value: *value,
-                }),
-                _ => None,
+            let Some(last) = stored.last_time() else {
+                continue;
             };
-            #[allow(
-                clippy::cast_precision_loss,
-                clippy::cast_possible_truncation,
-                reason = "count and recent.len() are bounded by realistic message rates; precision loss is irrelevant for display"
-            )]
-            result.push(MessageSummary {
-                msg_id: *msg_id,
-                name: msg_name,
-                instance,
-                count: rs.count as usize,
-                freq_hz: rs.recent.len() as f32 / FREQ_WINDOW_SECS as f32,
-                last,
-            });
+
+            let row = rows.entry((*msg_id, *instance_value)).or_default();
+            row.count += stored.samples();
+            row.recent += stored.count_since(cutoff);
+            row.last = row.last.max(Some(last));
         }
 
-        drop(stats);
+        drop(series);
 
-        result.sort_by(|a, b| {
-            a.msg_id.cmp(&b.msg_id).then_with(|| {
-                a.instance
-                    .as_ref()
-                    .map(|i| i.value)
-                    .cmp(&b.instance.as_ref().map(|i| i.value))
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "a sample count is bounded by realistic message rates; precision loss is irrelevant for display"
+        )]
+        let mut result: Vec<MessageSummary> = rows
+            .into_iter()
+            .filter_map(|((msg_id, instance_value), row)| {
+                Some(MessageSummary {
+                    msg_id,
+                    name: self
+                        .msg_names
+                        .get(&msg_id)
+                        .cloned()
+                        .unwrap_or_else(|| format!("UNKNOWN_{msg_id}")),
+                    instance: instance_value.zip(self.instance_fields.get(&msg_id)).map(
+                        |(value, field)| MessageInstance {
+                            field: field.clone(),
+                            value,
+                        },
+                    ),
+                    count: row.count,
+                    freq_hz: row.recent as f32 / FREQ_WINDOW_SECS as f32,
+                    last: row.last?,
+                })
             })
-        });
+            .collect();
 
-        Ok(result)
+        result.sort_by_key(|row| (row.msg_id, row.instance.as_ref().map(|i| i.value)));
+
+        result
     }
 
-    /// Fetch the last message of a given type, decoded into its concrete Rust
-    /// struct and pretty-printed via `Debug`.
+    /// Fetch the last message of a given name, pretty-printed via `Debug`. `None` when no dialect
+    /// defines it.
+    #[allow(
+        clippy::unwrap_in_result,
+        reason = "a poisoned store is not recoverable"
+    )]
     pub fn last_message_debug_by_name(
         &self,
         msg_name: &str,
@@ -490,115 +451,93 @@ impl Db {
         component_id: u8,
         instance: Option<(&str, i64)>,
     ) -> Result<Option<String>, DbError> {
-        if let Some(s) =
-            last_message_debug_common(self, msg_name, system_id, component_id, instance)?
-        {
-            return Ok(Some(s));
-        }
+        let Some((msg_id, _)) = self.msg_defs.get(msg_name) else {
+            return Ok(None);
+        };
 
-        if let Some(s) =
-            last_message_debug_ardupilotmega(self, msg_name, system_id, component_id, instance)?
-        {
-            return Ok(Some(s));
-        }
+        let series = self.series.lock().unwrap();
 
-        last_message_debug_rapid(self, msg_name, system_id, component_id, instance)
+        Self::matching(&series, *msg_id, system_id, component_id, instance)
+            .filter_map(|(_, stored)| Some((stored.last_time()?, stored)))
+            .max_by_key(|(last, _)| *last)
+            .and_then(|(_, stored)| stored.last_debug())
+            .map(Some)
+            .ok_or(DbError::NotFound("message"))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// One field of one message type over time, for plotting.
+    ///
+    /// A message several dialects define is stored under whichever of their types decoded it, so
+    /// one line's points can be spread across them, as they are across the instances of a
+    /// multi-instance message. A plot is an aggregation rather than a typed read, so unlike
+    /// `all_messages` those series simply merge.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::unwrap_in_result,
+        reason = "a poisoned store is not recoverable"
+    )]
     pub fn timeseries_by_name(
         &self,
         msg_name: &str,
         field_name: &str,
         system_id: u8,
         component_id: u8,
-        since: Option<chrono::DateTime<chrono::Utc>>,
-        _until: Option<chrono::DateTime<chrono::Utc>>,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
         instance: Option<(&str, i64)>,
-    ) -> Result<Vec<(chrono::DateTime<chrono::Utc>, f64)>, DbError> {
-        puffin::profile_function!(msg_name.to_owned() + "." + field_name);
+    ) -> Result<Vec<(DateTime<Utc>, f64)>, DbError> {
+        let (msg_id, fields) = self
+            .msg_defs
+            .get(msg_name)
+            .ok_or_else(|| DbError::UnknownField(msg_name.to_owned()))?;
 
-        let conn = self.conn();
-        let lower_case = msg_name.to_lowercase();
+        if !fields.iter().any(|field| field == field_name) {
+            return Err(DbError::UnknownField(field_name.to_owned()));
+        }
 
-        let since = since.unwrap_or_default().timestamp_micros();
+        let series = self.series.lock().unwrap();
+        let mut points = Vec::new();
+        let mut contributions = 0;
 
-        let protocol = mavspec::definitions::protocol();
-        let Some(field) = ["common", "ardupilotmega"]
-            .iter()
-            .find_map(|dn| {
-                let dialect = protocol.get_dialect_by_name(dn).unwrap();
-                dialect
-                    .get_message_by_name(msg_name)
-                    .and_then(|msg| msg.get_field_by_name(field_name))
-            })
-            .or_else(|| {
-                rapid_dialect::definitions::protocol()
-                    .get_dialect_by_canonical_name("rapid")
-                    .unwrap()
-                    .get_message_by_name(msg_name)
-                    .and_then(|msg| msg.get_field_by_name(field_name))
-            })
-        else {
-            unreachable!();
-        };
-
-        let extra_where = match instance {
-            Some((col, _)) => format!(" AND {col} = ?4"),
-            None => String::new(),
-        };
-
-        // Look Ma, SQL injection
-        let query = format!(
-            "SELECT received_at, {field_name} FROM messages_{lower_case}
-                    WHERE system_id=?1 AND component_id=?2 AND received_at >= ?3{extra_where}
-                    ORDER BY received_at ASC"
-        );
-
-        let mut stmt = conn.prepare_cached(&query)?;
-        let row_mapper = |row: &rusqlite::Row<'_>| {
-            let timestamp = datetime_from_micros(0, row.get(0)?)?;
-            let int: i64 = row.get(1)?;
-            let value = match field.r#type() {
-                MavType::Float => f64::from(f32::from_bits(int as u32)),
-                MavType::Double => f64::from_bits(int as u64),
-                _ => int as f64,
+        for (_, stored) in Self::matching(&series, *msg_id, system_id, component_id, instance) {
+            // A shared message can have a different field set in each dialect; the ones without
+            // this field contribute nothing rather than failing the whole line.
+            let Some(index) = stored.field_index(field_name) else {
+                continue;
             };
-            Ok((timestamp, value))
-        };
-        let timeseries = match instance {
-            Some((_, value)) => stmt
-                .query_map(
-                    rusqlite::params![&system_id, &component_id, &since, &value],
-                    row_mapper,
-                )?
-                .collect::<Result<Vec<_>, _>>()?,
-            None => stmt
-                .query_map(
-                    rusqlite::params![&system_id, &component_id, &since],
-                    row_mapper,
-                )?
-                .collect::<Result<Vec<_>, _>>()?,
-        };
 
-        Ok(timeseries)
+            let found = stored.points(index, since, until);
+            if !found.is_empty() {
+                contributions += 1;
+                points.extend(found);
+            }
+        }
+
+        if contributions > 1 {
+            points.sort_by_key(|(t, _)| *t);
+        }
+
+        Ok(points)
     }
-}
 
-fn collect_instance_fields(dialect: &mavinspect::protocol::Dialect) -> HashMap<u32, String> {
-    dialect
-        .messages()
-        .into_iter()
-        .filter_map(|message: &mavinspect::protocol::Message| {
-            let field = message.fields().iter().find(|f| f.instance())?;
-            let colname = match field.name() {
-                "index" => "index_",
-                "type" => "type_",
-                n => n,
-            };
-            Some((message.id(), colname.to_owned()))
-        })
-        .collect()
+    /// Every series of one message for this system, one per dialect type and instance value.
+    fn matching<'a>(
+        series: &'a SeriesMap,
+        msg_id: u32,
+        system_id: u8,
+        component_id: u8,
+        instance: Option<(&str, i64)>,
+    ) -> impl Iterator<Item = (&'a SeriesKey, &'a dyn Series)> {
+        series
+            .iter()
+            .filter(move |((sys, comp, id, _, value), _)| {
+                *sys == system_id
+                    && *comp == component_id
+                    && *id == msg_id
+                    && instance.is_none_or(|(_, wanted)| *value == Some(wanted))
+            })
+            .map(|(key, stored)| (key, &**stored))
+    }
 }
 
 pub fn format_message_label(name: &str, instance: Option<&MessageInstance>) -> String {
@@ -606,30 +545,6 @@ pub fn format_message_label(name: &str, instance: Option<&MessageInstance>) -> S
         Some(i) => format!("{name}[{}={}]", i.field, i.value),
         None => name.to_owned(),
     }
-}
-
-fn lookup_msg_name(
-    id: u32,
-    protocol: &mavinspect::protocol::Protocol,
-    rapid: &mavinspect::protocol::Protocol,
-) -> String {
-    ["common", "ardupilotmega"]
-        .iter()
-        .find_map(|dn| {
-            protocol
-                .get_dialect_by_name(dn)
-                .unwrap()
-                .get_message_by_id(id)
-                .map(|m| m.name().to_owned())
-        })
-        .or_else(|| {
-            rapid
-                .get_dialect_by_canonical_name("rapid")
-                .unwrap()
-                .get_message_by_id(id)
-                .map(|m| m.name().to_owned())
-        })
-        .unwrap_or_else(|| format!("UNKNOWN_{id}"))
 }
 
 macros::implement_message_ext_for_dialect!(
@@ -648,68 +563,284 @@ macros::implement_message_ext_for_dialect!("rapid", rapid_dialect::Rapid, rapid_
 mod tests {
     use super::*;
 
+    use mavspec::rust::dialects::common::messages as common;
+    use rapid_dialect::rapid::messages as rapid;
+
     #[test]
-    fn valve_command_does_not_poison_command_long_reads() {
+    fn the_summary_counts_every_instance_and_dialect_of_a_message() {
         let db = Db::init();
 
-        let normal = mavspec::rust::dialects::common::messages::CommandLong {
-            target_system: 1,
-            target_component: 1,
-            command: mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm,
-            ..Default::default()
-        };
-        db.write_message(1, 1, &normal).unwrap();
+        for (id, pressure1) in [(0_u8, 100_u16), (1, 200), (0, 150)] {
+            db.write_message(
+                1,
+                1,
+                &rapid::PressureVessel {
+                    id,
+                    pressure1,
+                    ..Default::default()
+                },
+            );
+        }
+        // Both are message 76, stored under two types and reported as one row.
+        db.write_message(1, 1, &common::CommandLong::default());
+        db.write_message(1, 1, &rapid::CommandLong::default());
+        db.write_message(2, 1, &common::Attitude::default());
 
-        let valve = rapid_dialect::rapid::messages::CommandLong {
-            target_system: 1,
-            target_component: 1,
-            command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
-            ..Default::default()
+        let summary = db.message_summary(1, 1);
+        let row = |name: &str, instance| {
+            summary
+                .iter()
+                .find(|row| row.name == name && row.instance.as_ref().map(|i| i.value) == instance)
+                .map(|row| (row.count, row.freq_hz))
         };
-        db.write_message(1, 1, &valve).unwrap();
 
-        let rows = db
-            .all_messages::<mavspec::rust::dialects::common::messages::CommandLong>(1, 1)
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].1.command,
-            mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm
+        assert_eq!(row("PRESSURE_VESSEL", Some(0)), Some((2, 0.4)));
+        assert_eq!(row("PRESSURE_VESSEL", Some(1)), Some((1, 0.2)));
+        assert_eq!(row("COMMAND_LONG", None), Some((2, 0.4)));
+
+        // Another system's messages stay out of it, and the rows are sorted by id then instance.
+        assert!(row("ATTITUDE", None).is_none());
+        assert!(
+            summary
+                .windows(2)
+                .all(|w| (w[0].msg_id, w[0].instance.as_ref().map(|i| i.value))
+                    < (w[1].msg_id, w[1].instance.as_ref().map(|i| i.value)))
         );
     }
 
     #[test]
-    fn rapid_command_long_reads_decode_both_common_and_rapid_commands() {
+    fn a_dialects_own_type_reads_back_only_its_own_messages() {
         let db = Db::init();
 
-        let normal = mavspec::rust::dialects::common::messages::CommandLong {
-            target_system: 1,
-            target_component: 1,
-            command: mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm,
-            ..Default::default()
-        };
-        db.write_message(1, 1, &normal).unwrap();
-
-        let valve = rapid_dialect::rapid::messages::CommandLong {
-            target_system: 1,
-            target_component: 1,
-            command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
-            ..Default::default()
-        };
-        db.write_message(1, 1, &valve).unwrap();
-
-        let mut rows = db
-            .all_messages::<rapid_dialect::rapid::messages::CommandLong>(1, 1)
-            .unwrap();
-        rows.sort_by_key(|(t, _)| *t);
-        assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0].1.command,
-            rapid_dialect::rapid::enums::MavCmd::ComponentArmDisarm
+        db.write_message(
+            1,
+            1,
+            &common::CommandLong {
+                command: mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm,
+                ..Default::default()
+            },
         );
+
+        db.write_message(
+            1,
+            1,
+            &rapid::CommandLong {
+                command: rapid_dialect::rapid::enums::MavCmd::CommandValve,
+                ..Default::default()
+            },
+        );
+
+        // Both are message 76, but they are separate Rust types and so separate series. Callers
+        // that want every command read both, as the commands pane does.
+        let common_rows = db.all_messages::<common::CommandLong>(1, 1);
+        assert_eq!(common_rows.len(), 1);
         assert_eq!(
-            rows[1].1.command,
+            common_rows[0].1.command,
+            mavspec::rust::dialects::common::enums::MavCmd::ComponentArmDisarm
+        );
+
+        let rapid_rows = db.all_messages::<rapid::CommandLong>(1, 1);
+        assert_eq!(rapid_rows.len(), 1);
+        assert_eq!(
+            rapid_rows[0].1.command,
             rapid_dialect::rapid::enums::MavCmd::CommandValve
         );
+    }
+
+    #[test]
+    fn floats_round_trip_through_the_timeseries_path() {
+        let db = Db::init();
+
+        for roll in [0.0_f32, -1.5, f32::MAX, f32::NAN] {
+            db.write_message(
+                1,
+                1,
+                &common::Attitude {
+                    roll,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let series = db
+            .timeseries_by_name("ATTITUDE", "roll", 1, 1, None, None, None)
+            .unwrap();
+
+        let values: Vec<f32> = series.iter().map(|(_, v)| *v as f32).collect();
+        assert_eq!(values.len(), 4);
+        assert_eq!(values[0], 0.0);
+        assert_eq!(values[1], -1.5);
+        assert_eq!(values[2], f32::MAX);
+        // A NaN reading survives rather than becoming a hole in the series.
+        assert!(values[3].is_nan());
+        assert!(
+            db.last_message::<common::Attitude>(1, 1)
+                .unwrap()
+                .roll
+                .is_nan()
+        );
+    }
+
+    #[test]
+    fn array_fields_survive_a_round_trip() {
+        let db = Db::init();
+
+        db.write_message(
+            1,
+            1,
+            &common::CanFrame {
+                id: 0x42,
+                data: [1, 2, 3, 4, 5, 6, 7, 8],
+                ..Default::default()
+            },
+        );
+
+        let rows = db.all_messages::<common::CanFrame>(1, 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1.id, 0x42);
+        assert_eq!(rows[0].1.data, [1, 2, 3, 4, 5, 6, 7, 8]);
+
+        // An array has no single number to plot, so it yields no points rather than an error.
+        let series = db
+            .timeseries_by_name("CAN_FRAME", "data", 1, 1, None, None, None)
+            .unwrap();
+        assert!(series.is_empty());
+    }
+
+    #[test]
+    fn instances_of_one_message_are_stored_apart() {
+        let db = Db::init();
+
+        let base = DateTime::from_timestamp_micros(1_000_000).unwrap();
+        for (i, (id, pressure1)) in [(0_u8, 100_u16), (1, 200), (0, 150)]
+            .into_iter()
+            .enumerate()
+        {
+            db.write_message_at(
+                1,
+                1,
+                &rapid::PressureVessel {
+                    id,
+                    pressure1,
+                    ..Default::default()
+                },
+                base + chrono::TimeDelta::milliseconds(i as i64),
+            );
+        }
+
+        let field = rapid::PressureVessel::instance_field().unwrap();
+        let vessel = |id| {
+            db.last_message_filtered::<rapid::PressureVessel>(1, 1, Some((field, id)))
+                .unwrap()
+                .pressure1
+        };
+
+        assert_eq!(vessel(0), 150);
+        assert_eq!(vessel(1), 200);
+
+        // Unfiltered, the newest across every instance.
+        assert_eq!(
+            db.last_message::<rapid::PressureVessel>(1, 1)
+                .unwrap()
+                .pressure1,
+            150
+        );
+
+        let pressures = |instance| {
+            db.timeseries_by_name("PRESSURE_VESSEL", "pressure1", 1, 1, None, None, instance)
+                .unwrap()
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect::<Vec<_>>()
+        };
+
+        // A plot line for one instance sees only that instance; without one, every instance
+        // merges in receive order.
+        assert_eq!(pressures(Some((field, 0))), [100.0, 150.0]);
+        assert_eq!(pressures(None), [100.0, 200.0, 150.0]);
+    }
+
+    #[test]
+    fn messages_since_excludes_the_cursor_and_honours_the_limit() {
+        let db = Db::init();
+
+        let base = DateTime::from_timestamp_micros(1_000_000).unwrap();
+        for i in 0..5 {
+            db.write_message_at(
+                1,
+                1,
+                &common::Attitude {
+                    time_boot_ms: i,
+                    ..Default::default()
+                },
+                base + chrono::TimeDelta::milliseconds(i64::from(i)),
+            );
+        }
+
+        let boot_ms = |rows: Vec<(DateTime<Utc>, common::Attitude)>| {
+            rows.into_iter()
+                .map(|(_, m)| m.time_boot_ms)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(boot_ms(db.all_messages(1, 1)), [0, 1, 2, 3, 4]);
+
+        // Strictly newer than the cursor, so re-polling with the last timestamp yields no repeats.
+        let cursor = base + chrono::TimeDelta::milliseconds(2);
+        assert_eq!(boot_ms(db.messages_since(1, 1, Some(cursor), None)), [3, 4]);
+
+        assert_eq!(boot_ms(db.messages_since(1, 1, None, Some(2))), [0, 1]);
+    }
+
+    #[test]
+    fn the_debug_view_follows_the_instance_it_was_asked_for() {
+        let db = Db::init();
+
+        for (id, pressure1) in [(0_u8, 100_u16), (1, 200)] {
+            db.write_message(
+                1,
+                1,
+                &rapid::PressureVessel {
+                    id,
+                    pressure1,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let debug = |instance| {
+            db.last_message_debug_by_name("PRESSURE_VESSEL", 1, 1, instance)
+                .map(|found| found.is_some_and(|text| text.contains("pressure1: 200")))
+        };
+
+        let field = rapid::PressureVessel::instance_field().unwrap();
+        assert!(debug(Some((field, 1))).unwrap());
+        assert!(!debug(Some((field, 0))).unwrap());
+        // Unfiltered, the newest across every instance.
+        assert!(debug(None).unwrap());
+
+        assert!(matches!(
+            db.last_message_debug_by_name("ATTITUDE", 1, 1, None),
+            Err(DbError::NotFound(_))
+        ));
+        assert!(matches!(
+            db.last_message_debug_by_name("NOT_A_MESSAGE", 1, 1, None),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn an_unknown_message_or_field_is_an_error_rather_than_a_panic() {
+        let db = Db::init();
+
+        assert!(matches!(
+            db.timeseries_by_name("NOT_A_MESSAGE", "roll", 1, 1, None, None, None),
+            Err(DbError::UnknownField(_))
+        ));
+
+        assert!(matches!(
+            db.timeseries_by_name("ATTITUDE", "not_a_field", 1, 1, None, None, None),
+            Err(DbError::UnknownField(_))
+        ));
     }
 }
