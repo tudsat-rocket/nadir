@@ -7,9 +7,18 @@ use egui::{Color32, TextStyle};
 use egui_plot::{Corner, Legend, LineStyle, VLine};
 
 use core::mav::{ComponentId, SystemId};
-use core::{MessageInstance, format_message_label};
+use core::{MessageInstance, TimeseriesArgs, format_message_label};
 
 use crate::colors::{mode_color, readable};
+
+/// Points a single line may put on screen. Fixed rather than derived from the plot's width: the
+/// query costs the same either way, and a budget that moved with a splitter drag would keep
+/// recrossing the chunk sizes underneath and make the line shimmer.
+const MAX_POINTS: usize = 2_000;
+
+/// Seconds of data read either side of the view, so a line reaches both edges rather than stopping
+/// at the last sample inside it.
+const MARGIN_SECS: i64 = 5;
 
 /// State shared by all linked plots
 pub struct SharedPlotState {
@@ -89,6 +98,7 @@ impl<'a> Plot<'a> {
         lines: &[PlotLine],
         source: &core::Source,
         since: DateTime<Utc>,
+        until: DateTime<Utc>,
     ) -> Vec<(DateTime<Utc>, u32)> {
         let mut systems: Vec<_> = lines
             .iter()
@@ -99,14 +109,19 @@ impl<'a> Plot<'a> {
 
         let mut transitions = Vec::new();
         for (system_id, component_id) in systems {
+            // Read verbatim: a mode is a label, so the extremes of a chunk that held several would
+            // invent a transition into the lowest of them and lose the rest. HEARTBEAT is 1 Hz, so
+            // even a long recording is only thousands of samples.
             let Ok(heartbeats) = source.db.timeseries_by_name(
                 "HEARTBEAT",
                 "custom_mode",
-                system_id,
-                component_id,
-                Some(since),
-                None,
-                None,
+                TimeseriesArgs {
+                    system_id,
+                    component_id,
+                    since: Some(since),
+                    until: Some(until),
+                    ..Default::default()
+                },
             ) else {
                 continue;
             };
@@ -181,11 +196,15 @@ impl egui::Widget for Plot<'_> {
 
             let last_bounds = plot_ui.plot_bounds();
             let min_x = *last_bounds.range_x().start();
-            let _max_x = *last_bounds.range_x().end();
+            let max_x = *last_bounds.range_x().end();
 
-            let since = self.source.plot_origin + TimeDelta::seconds(min_x as i64 - 5);
+            let since = self.source.plot_origin + TimeDelta::seconds(min_x as i64 - MARGIN_SECS);
+            let until = self.source.plot_origin + TimeDelta::seconds(max_x as i64 + MARGIN_SECS);
 
             for line in self.lines {
+                #[cfg(feature = "profiling")]
+                puffin::profile_scope!("line");
+
                 let labelled = format_message_label(&line.message_name, line.instance.as_ref());
                 let id = format!("{labelled}.{}", line.field_name);
                 let base_name = line.alias.as_deref().unwrap_or(&id);
@@ -198,11 +217,15 @@ impl egui::Widget for Plot<'_> {
                 let timeseries = match self.source.db.timeseries_by_name(
                     &line.message_name,
                     &line.field_name,
-                    line.system_id,
-                    line.component_id,
-                    Some(since),
-                    None,
-                    instance_arg,
+                    TimeseriesArgs {
+                        system_id: line.system_id,
+                        component_id: line.component_id,
+                        since: Some(since),
+                        until: Some(until),
+                        instance: instance_arg,
+                        sentinel: line.sentinel,
+                        max_points: Some(MAX_POINTS),
+                    },
                 ) {
                     Ok(timeseries) => timeseries,
                     Err(e) => {
@@ -211,10 +234,11 @@ impl egui::Widget for Plot<'_> {
                     }
                 };
 
+                // Scaling commutes with the extremes the query picked, so it can be applied after
+                // the decimation rather than before it.
                 let scale = line.scale.unwrap_or(1.0);
                 let plot_data: Vec<_> = timeseries
                     .into_iter()
-                    .filter(|(_, v)| line.sentinel != Some(*v))
                     .map(|(t, v)| [(t - self.source.plot_origin).as_seconds_f64(), v * scale])
                     .collect();
 
@@ -226,7 +250,7 @@ impl egui::Widget for Plot<'_> {
                 plot_ui.line(l);
             }
 
-            for (t, mode) in Self::mode_transitions(self.lines, self.source, since) {
+            for (t, mode) in Self::mode_transitions(self.lines, self.source, since, until) {
                 // Unnamed so the transitions stay out of the legend.
                 plot_ui.vline(
                     VLine::new("", (t - self.source.plot_origin).as_seconds_f64())

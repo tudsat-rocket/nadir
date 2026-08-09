@@ -1,6 +1,7 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
@@ -20,9 +21,29 @@ type SeriesKey = (u8, u8, u32, TypeId, Option<i64>);
 /// Every value is a `Vec<(DateTime<Utc>, M)>` for the single concrete `M` its key names.
 type SeriesMap = HashMap<SeriesKey, Box<dyn Series>>;
 
+/// One field of one message over time, oldest first.
+type Points = Vec<(DateTime<Utc>, f64)>;
+
+/// (series, field index, samples per chunk, sentinel)
+///
+/// The sentinel is part of the key because two panes can plot one field with different ones - the
+/// propulsion pressures drop `u16::MAX`, the generic field browser does not - and both can be on
+/// screen at once.
+type ChunkKey = (SeriesKey, usize, usize, Option<u64>);
+
+/// Chunks a plot has already asked for, in series order. Whole ones only, so the edges a window
+/// cuts are never cached.
+type ChunkMap = HashMap<ChunkKey, Vec<Chunk>>;
+
+/// Below this a chunked read is not worth caching: the window is then at most a few tens of
+/// thousands of samples, and a level built for it would cover the whole series to serve one frame.
+const MIN_CACHED_STRIDE: usize = 64;
+
 #[derive(Clone)]
 pub struct Db {
     series: Arc<Mutex<SeriesMap>>,
+    /// Always locked after `series`, and only where both are held.
+    chunks: Arc<Mutex<ChunkMap>>,
     instance_fields: Arc<HashMap<u32, String>>,
     msg_names: Arc<HashMap<u32, String>>,
     /// Message name to its ID and field names, unioned over the dialects defining it. Taken from
@@ -82,6 +103,11 @@ pub trait MessageExt: MessageSpec + Clone + Debug + Send + Sync + 'static {
     /// number to plot.
     fn field_f64(&self, index: usize) -> Option<f64>;
 
+    /// As [`Self::field_f64`], with readings equal to `sentinel` dropped as "no reading".
+    fn field_value(&self, index: usize, sentinel: Option<f64>) -> Option<f64> {
+        self.field_f64(index).filter(|v| Some(*v) != sentinel)
+    }
+
     /// Appends a clone of self to its series. The dialect enums dispatch to the inner variant, so
     /// what lands in the store is always a concrete message type.
     fn store(&self, db: &Db, system_id: u8, component_id: u8, received_at: DateTime<Utc>);
@@ -89,7 +115,7 @@ pub trait MessageExt: MessageSpec + Clone + Debug + Send + Sync + 'static {
 
 /// The type-erased face of a stored series: everything a query addressing a message by name needs.
 ///
-/// Windowing and field lookup read through it, so they are compiled once rather than once per
+/// Windowing, chunking and caching read through it, so they are compiled once rather than once per
 /// message type. The impl below is all that is still monomorphised over the several hundred of
 /// them, and it dominates the crate's build, so keep its methods short.
 trait Series: Any + Send + Sync {
@@ -98,15 +124,18 @@ trait Series: Any + Send + Sync {
     /// Samples received after `cutoff`, for the message rates in [`MessageSummary`].
     fn count_since(&self, cutoff: DateTime<Utc>) -> usize;
 
-    fn field_index(&self, field_name: &str) -> Option<usize>;
-
-    /// One field within `(since, until]`, as plot points.
-    fn points(
+    fn window_range(
         &self,
-        index: usize,
         since: Option<DateTime<Utc>>,
         until: Option<DateTime<Utc>>,
-    ) -> Vec<(DateTime<Utc>, f64)>;
+    ) -> Range<usize>;
+
+    fn field_index(&self, field_name: &str) -> Option<usize>;
+
+    fn chunk(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Chunk;
+
+    /// Every sample in `range` as a plot point, undecimated.
+    fn points(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Points;
 
     fn last_time(&self) -> Option<DateTime<Utc>>;
 
@@ -119,22 +148,33 @@ impl<M: MessageExt> Series for Vec<(DateTime<Utc>, M)> {
     }
 
     fn count_since(&self, cutoff: DateTime<Utc>) -> usize {
-        Db::window(self, Some(cutoff), None).len()
+        Db::window_range(self, Some(cutoff), None).len()
+    }
+
+    fn window_range(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> Range<usize> {
+        Db::window_range(self, since, until)
     }
 
     fn field_index(&self, field_name: &str) -> Option<usize> {
         M::rows().iter().position(|row| *row == field_name)
     }
 
-    fn points(
-        &self,
-        index: usize,
-        since: Option<DateTime<Utc>>,
-        until: Option<DateTime<Utc>>,
-    ) -> Vec<(DateTime<Utc>, f64)> {
-        Db::window(self, since, until)
+    fn chunk(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Chunk {
+        Chunk::of(
+            self[range]
+                .iter()
+                .filter_map(|(t, msg)| Some((*t, msg.field_value(index, sentinel)?))),
+        )
+    }
+
+    fn points(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Points {
+        self[range]
             .iter()
-            .filter_map(|(t, msg)| Some((*t, msg.field_f64(index)?)))
+            .filter_map(|(t, msg)| Some((*t, msg.field_value(index, sentinel)?)))
             .collect()
     }
 
@@ -160,6 +200,7 @@ impl Db {
 
         Self {
             series: Arc::new(Mutex::new(HashMap::new())),
+            chunks: Arc::new(Mutex::new(HashMap::new())),
             instance_fields: Arc::new(
                 dialects
                     .into_iter()
@@ -257,21 +298,29 @@ impl Db {
             })
     }
 
-    /// The part of a series within `(since, until]`.
+    /// Where the part of a series within `(since, until]` sits in it.
     ///
     /// Binary search, which holds because a series is appended in receive order: live ingest is
     /// sequential, and a recording is read in file order.
-    fn window<M>(
+    fn window_range<M>(
         rows: &[(DateTime<Utc>, M)],
         since: Option<DateTime<Utc>>,
         until: Option<DateTime<Utc>>,
-    ) -> &[(DateTime<Utc>, M)] {
+    ) -> Range<usize> {
         let start = since.map_or(0, |since| rows.partition_point(|(t, _)| *t <= since));
         let end = until.map_or(rows.len(), |until| {
             rows.partition_point(|(t, _)| *t <= until)
         });
 
-        rows.get(start..end.max(start)).unwrap_or_default()
+        start..end.max(start)
+    }
+
+    fn window<M>(
+        rows: &[(DateTime<Utc>, M)],
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> &[(DateTime<Utc>, M)] {
+        &rows[Self::window_range(rows, since, until)]
     }
 
     pub fn write_message<M: MessageExt>(&self, system_id: u8, component_id: u8, msg: &M) {
@@ -472,7 +521,6 @@ impl Db {
     /// multi-instance message. A plot is an aggregation rather than a typed read, so unlike
     /// `all_messages` those series simply merge.
     #[allow(
-        clippy::too_many_arguments,
         clippy::unwrap_in_result,
         reason = "a poisoned store is not recoverable"
     )]
@@ -480,11 +528,7 @@ impl Db {
         &self,
         msg_name: &str,
         field_name: &str,
-        system_id: u8,
-        component_id: u8,
-        since: Option<DateTime<Utc>>,
-        until: Option<DateTime<Utc>>,
-        instance: Option<(&str, i64)>,
+        args: TimeseriesArgs<'_>,
     ) -> Result<Vec<(DateTime<Utc>, f64)>, DbError> {
         let (msg_id, fields) = self
             .msg_defs
@@ -496,28 +540,49 @@ impl Db {
         }
 
         let series = self.series.lock().unwrap();
-        let mut points = Vec::new();
-        let mut contributions = 0;
+        let mut found = Self::matching(
+            &series,
+            *msg_id,
+            args.system_id,
+            args.component_id,
+            args.instance,
+        )
+        // A shared message can have a different field set in each dialect; the ones without this
+        // field contribute nothing rather than failing the whole line.
+        .filter_map(|(key, stored)| {
+            let index = stored.field_index(field_name)?;
+            let window = stored.window_range(args.since, args.until);
+            (!window.is_empty()).then_some((key, stored, index, window))
+        });
 
-        for (_, stored) in Self::matching(&series, *msg_id, system_id, component_id, instance) {
-            // A shared message can have a different field set in each dialect; the ones without
-            // this field contribute nothing rather than failing the whole line.
-            let Some(index) = stored.field_index(field_name) else {
-                continue;
-            };
+        let (Some(first), second) = (found.next(), found.next()) else {
+            return Ok(Vec::new());
+        };
 
-            let found = stored.points(index, since, until);
-            if !found.is_empty() {
-                contributions += 1;
-                points.extend(found);
-            }
-        }
+        let Some(second) = second else {
+            let (key, stored, index, window) = first;
+            return Ok(self.line(key, stored, index, window, args));
+        };
 
-        if contributions > 1 {
-            points.sort_by_key(|(t, _)| *t);
-        }
+        // Chunks of two series fall on different boundaries, and one can come back decimated while
+        // the other is short enough to be exact, so a line spread across several has to be read
+        // verbatim and decimated as a whole. Having no series of its own, the merge is chunked from
+        // its own start rather than anchored, and cannot be cached.
+        let mut points: Points = [first, second]
+            .into_iter()
+            .chain(found)
+            .flat_map(|(_, stored, index, window)| stored.points(window, index, args.sentinel))
+            .collect();
+        points.sort_by_key(|(t, _)| *t);
 
-        Ok(points)
+        let Some(max_points) = args.max_points.filter(|budget| points.len() > *budget) else {
+            return Ok(points);
+        };
+
+        let stride = Chunk::stride(points.len(), max_points);
+        Ok(Chunk::assemble(0..points.len(), stride, &[], &|range| {
+            Chunk::of(points[range].iter().copied())
+        }))
     }
 
     /// Every series of one message for this system, one per dialect type and instance value.
@@ -538,6 +603,148 @@ impl Db {
             })
             .map(|(key, stored)| (key, &**stored))
     }
+
+    /// The visible part of one series as plot points, chunked down to the budget if it exceeds it.
+    fn line(
+        &self,
+        key: &SeriesKey,
+        series: &dyn Series,
+        index: usize,
+        window: Range<usize>,
+        args: TimeseriesArgs<'_>,
+    ) -> Points {
+        let Some(max_points) = args.max_points.filter(|budget| window.len() > *budget) else {
+            return series.points(window, index, args.sentinel);
+        };
+
+        let stride = Chunk::stride(window.len(), max_points);
+        let chunk = |range| series.chunk(range, index, args.sentinel);
+
+        if stride < MIN_CACHED_STRIDE {
+            return Chunk::assemble(window, stride, &[], &chunk);
+        }
+
+        let mut cache = self.chunks.lock().unwrap();
+        let chunks = cache
+            .entry((*key, index, stride, args.sentinel.map(f64::to_bits)))
+            .or_default();
+
+        // Chunks are only ever appended, because a series is: what is already there covers the
+        // same samples it did when it was built.
+        for i in chunks.len()..series.samples() / stride {
+            chunks.push(chunk(i * stride..(i + 1) * stride));
+        }
+
+        Chunk::assemble(window, stride, chunks, &chunk)
+    }
+}
+
+/// What a run of samples contributes to the drawn line: its extremes, and where it was interrupted.
+#[derive(Clone, Copy, Default)]
+struct Chunk {
+    min: Option<(DateTime<Utc>, f64)>,
+    max: Option<(DateTime<Utc>, f64)>,
+    nan_at: Option<DateTime<Utc>>,
+}
+
+impl Chunk {
+    /// How many samples one chunk covers, for a window of `samples` against a budget of
+    /// `max_points`. A power of two, so that resizing a pane wanders between few enough sizes for
+    /// [`Db::chunks`] to be worth keeping.
+    fn stride(samples: usize, max_points: usize) -> usize {
+        (samples / (max_points / 2).max(1))
+            .max(1)
+            .next_power_of_two()
+    }
+
+    fn of(points: impl Iterator<Item = (DateTime<Utc>, f64)>) -> Self {
+        let mut chunk = Self::default();
+
+        for (t, v) in points {
+            // A NaN is a deliberate gap, and `f64::min`/`max` would swallow it and draw straight
+            // through. Holding the extremes in an Option rather than seeding them with infinities
+            // matters for the same reason: a chunk with no finite sample would otherwise emit one,
+            // and a non-finite y bound makes egui_plot reset the whole plot to [-1, 1].
+            if v.is_nan() {
+                chunk.nan_at = chunk.nan_at.or(Some(t));
+                continue;
+            }
+
+            if chunk.min.is_none_or(|(_, m)| v < m) {
+                chunk.min = Some((t, v));
+            }
+            if chunk.max.is_none_or(|(_, m)| v > m) {
+                chunk.max = Some((t, v));
+            }
+        }
+
+        chunk
+    }
+
+    /// Its points, oldest first. Ordered by time and never by value, so that x stays monotonic and
+    /// a negative `scale` at the call site flips the line rather than reversing it.
+    fn points(self) -> impl Iterator<Item = (DateTime<Utc>, f64)> {
+        let mut points = [
+            self.min,
+            if self.max == self.min { None } else { self.max },
+            self.nan_at.map(|t| (t, f64::NAN)),
+        ];
+        points.sort_by_key(|point| point.map(|(t, _)| t));
+
+        points.into_iter().flatten()
+    }
+
+    /// Collapses `window` to roughly a budget's worth of points, keeping each chunk's extremes
+    /// rather than an average so that a spike survives being zoomed out.
+    ///
+    /// Chunks are anchored to the index of a sample in its whole series rather than to the window,
+    /// so their boundaries do not slide as the view pans and a chunk keeps contributing the same
+    /// points from frame to frame. `cached` answers for the chunks the window covers whole, as far
+    /// as it reaches; the two the window cuts in half are always read through `chunk`. Every sample
+    /// still lands in exactly one chunk, so the extremes, and with them the y range the plot picks,
+    /// are the same as if nothing had been dropped.
+    fn assemble(
+        window: Range<usize>,
+        stride: usize,
+        cached: &[Chunk],
+        chunk: &dyn Fn(Range<usize>) -> Chunk,
+    ) -> Points {
+        let Range { start, end } = window;
+        let head_end = (start.div_ceil(stride) * stride).min(end);
+        let tail_start = (end / stride * stride).max(head_end);
+
+        let mut points = Vec::new();
+
+        if start < head_end {
+            points.extend(chunk(start..head_end).points());
+        }
+        for i in head_end / stride..tail_start / stride {
+            let whole = cached
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| chunk(i * stride..(i + 1) * stride));
+            points.extend(whole.points());
+        }
+        if tail_start < end {
+            points.extend(chunk(tail_start..end).points());
+        }
+
+        points
+    }
+}
+
+/// What one plot line asks for.
+#[derive(Clone, Copy, Default)]
+pub struct TimeseriesArgs<'a> {
+    pub system_id: u8,
+    pub component_id: u8,
+    pub since: Option<DateTime<Utc>>,
+    pub until: Option<DateTime<Utc>>,
+    pub instance: Option<(&'a str, i64)>,
+    /// Stored value meaning "no reading", dropped before anything aggregates it.
+    pub sentinel: Option<f64>,
+    /// `None` returns every point. `Some(n)` collapses chunks to their extremes to stay near `n`.
+    pub max_points: Option<usize>,
 }
 
 pub fn format_message_label(name: &str, instance: Option<&MessageInstance>) -> String {
@@ -565,6 +772,277 @@ mod tests {
 
     use mavspec::rust::dialects::common::messages as common;
     use rapid_dialect::rapid::messages as rapid;
+
+    /// Every point of one system's series, which is what most of these tests want.
+    fn args<'a>(system_id: u8, component_id: u8) -> TimeseriesArgs<'a> {
+        TimeseriesArgs {
+            system_id,
+            component_id,
+            ..Default::default()
+        }
+    }
+
+    const BASE_MICROS: i64 = 1_000_000;
+
+    /// Timestamp of the `i`th sample the helpers below write.
+    fn at(i: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp_micros(BASE_MICROS).unwrap() + chrono::TimeDelta::milliseconds(i)
+    }
+
+    /// A store holding `rolls` as `ATTITUDE.roll`, one sample per millisecond.
+    fn attitudes(rolls: impl IntoIterator<Item = f32>) -> Db {
+        let db = Db::init();
+
+        for (i, roll) in rolls.into_iter().enumerate() {
+            db.write_message_at(
+                1,
+                1,
+                &common::Attitude {
+                    roll,
+                    ..Default::default()
+                },
+                at(i as i64),
+            );
+        }
+
+        db
+    }
+
+    fn rolls(db: &Db, args: TimeseriesArgs<'_>) -> Vec<(DateTime<Utc>, f64)> {
+        db.timeseries_by_name("ATTITUDE", "roll", args).unwrap()
+    }
+
+    #[test]
+    fn the_window_is_bounded_above_by_until() {
+        let db = attitudes((0..10u8).map(f32::from));
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                since: Some(at(1)),
+                until: Some(at(4)),
+                ..args(1, 1)
+            },
+        );
+
+        // Exclusive below, inclusive above.
+        let values: Vec<f64> = series.iter().map(|(_, v)| *v).collect();
+        assert_eq!(values, [2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn a_window_within_the_budget_is_returned_verbatim() {
+        let db = attitudes((0..100u8).map(f32::from));
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                max_points: Some(1000),
+                ..args(1, 1)
+            },
+        );
+
+        assert_eq!(series.len(), 100);
+        assert_eq!(series[7], (at(7), 7.0));
+    }
+
+    #[test]
+    fn decimation_keeps_the_extremes_and_their_timestamps() {
+        // A single-sample spike, the thing an averaging decimation would erase.
+        let db = attitudes((0..10_000).map(|i| if i == 4_321 { 999.0 } else { (i % 7) as f32 }));
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                max_points: Some(200),
+                ..args(1, 1)
+            },
+        );
+
+        assert!(series.len() < 400, "{} points", series.len());
+        assert!(series.contains(&(at(4_321), 999.0)));
+
+        let max = series.iter().map(|(_, v)| *v).fold(f64::MIN, f64::max);
+        let min = series.iter().map(|(_, v)| *v).fold(f64::MAX, f64::min);
+        assert_eq!((min, max), (0.0, 999.0));
+
+        assert!(series.windows(2).all(|w| w[0].0 <= w[1].0));
+    }
+
+    #[test]
+    fn the_chunk_grid_does_not_move_with_the_window() {
+        let db = attitudes((0..10_000).map(|i| ((i * 37) % 101) as f32));
+        let decimated = |since| {
+            rolls(
+                &db,
+                TimeseriesArgs {
+                    since,
+                    max_points: Some(200),
+                    ..args(1, 1)
+                },
+            )
+        };
+
+        // Two windows whose starts fall in different places inside the same chunk.
+        let from_start = decimated(None);
+        let shifted = decimated(Some(at(5)));
+
+        let overlap: Vec<_> = from_start
+            .iter()
+            .filter(|(t, _)| *t > at(1_000))
+            .copied()
+            .collect();
+        let shifted_overlap: Vec<_> = shifted
+            .iter()
+            .filter(|(t, _)| *t > at(1_000))
+            .copied()
+            .collect();
+        assert_eq!(overlap, shifted_overlap);
+    }
+
+    #[test]
+    fn a_nan_inside_a_chunk_still_breaks_the_line() {
+        let mut values: Vec<f32> = (0..10_000).map(|i| (i % 7) as f32).collect();
+        values[4_321] = f32::NAN;
+        let db = attitudes(values);
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                max_points: Some(200),
+                ..args(1, 1)
+            },
+        );
+
+        let nans: Vec<_> = series.iter().filter(|(_, v)| v.is_nan()).collect();
+        assert_eq!(nans.len(), 1);
+        assert_eq!(nans[0].0, at(4_321));
+    }
+
+    #[test]
+    fn a_chunk_with_nothing_finite_in_it_emits_no_extremes() {
+        let db = attitudes((0..10_000).map(|i| if i < 5_000 { f32::NAN } else { 1.0 }));
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                max_points: Some(200),
+                ..args(1, 1)
+            },
+        );
+
+        assert!(series.iter().all(|(_, v)| !v.is_infinite()));
+        assert!(series.iter().any(|(_, v)| *v == 1.0));
+    }
+
+    #[test]
+    fn a_sentinel_never_becomes_an_extreme() {
+        // The firmware's "no reading" value, larger than any real one.
+        let db = attitudes((0..10_000).map(|i| if i % 100 == 0 { 65535.0 } else { 1.0 }));
+        let sentinel = |sentinel| {
+            rolls(
+                &db,
+                TimeseriesArgs {
+                    sentinel,
+                    max_points: Some(200),
+                    ..args(1, 1)
+                },
+            )
+        };
+
+        let filtered = sentinel(Some(65535.0));
+        assert!(filtered.iter().all(|(_, v)| *v == 1.0));
+
+        // Dropped, not turned into a gap: the line still connects across a dead sensor.
+        assert!(filtered.iter().all(|(_, v)| !v.is_nan()));
+        assert!(sentinel(None).iter().any(|(_, v)| *v == 65535.0));
+    }
+
+    #[test]
+    fn a_constant_chunk_emits_one_point_per_chunk() {
+        let db = attitudes(std::iter::repeat_n(1.0, 10_000));
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                max_points: Some(200),
+                ..args(1, 1)
+            },
+        );
+
+        // 10_000 samples at stride 128 is 79 chunks, each contributing its single distinct sample.
+        assert_eq!(series.len(), 79);
+    }
+
+    #[test]
+    fn appending_extends_the_cache_rather_than_invalidating_it() {
+        let db = attitudes((0..200_000).map(|i| ((i * 37) % 101) as f32));
+        let decimated = || {
+            rolls(
+                &db,
+                TimeseriesArgs {
+                    until: Some(at(199_999)),
+                    max_points: Some(2_000),
+                    ..args(1, 1)
+                },
+            )
+        };
+
+        // Builds the chunks, then extends them over another 50_000 samples. What the first query
+        // covered has to come back identical, or a growing series would redraw its own past.
+        let before = decimated();
+        for i in 200_000..250_000i64 {
+            db.write_message_at(
+                1,
+                1,
+                &common::Attitude {
+                    roll: ((i * 37) % 101) as f32,
+                    ..Default::default()
+                },
+                at(i),
+            );
+        }
+
+        assert_eq!(before, decimated());
+    }
+
+    #[test]
+    fn the_cache_distinguishes_lines_by_their_sentinel() {
+        let db = attitudes((0..200_000).map(|i| if i % 1_000 == 0 { 65535.0 } else { 1.0 }));
+        let decimated = |sentinel| {
+            rolls(
+                &db,
+                TimeseriesArgs {
+                    sentinel,
+                    max_points: Some(2_000),
+                    ..args(1, 1)
+                },
+            )
+        };
+
+        let filtered = decimated(Some(65535.0));
+        let raw = decimated(None);
+
+        assert!(filtered.iter().all(|(_, v)| *v == 1.0));
+        assert!(raw.iter().any(|(_, v)| *v == 65535.0));
+        assert_eq!(filtered, decimated(Some(65535.0)));
+    }
+
+    #[test]
+    fn an_empty_window_is_empty_rather_than_an_error() {
+        let db = attitudes((0..10u8).map(f32::from));
+
+        let series = rolls(
+            &db,
+            TimeseriesArgs {
+                since: Some(at(100)),
+                max_points: Some(200),
+                ..args(1, 1)
+            },
+        );
+
+        assert!(series.is_empty());
+    }
 
     #[test]
     fn the_summary_counts_every_instance_and_dialect_of_a_message() {
@@ -663,7 +1141,7 @@ mod tests {
         }
 
         let series = db
-            .timeseries_by_name("ATTITUDE", "roll", 1, 1, None, None, None)
+            .timeseries_by_name("ATTITUDE", "roll", args(1, 1))
             .unwrap();
 
         let values: Vec<f32> = series.iter().map(|(_, v)| *v as f32).collect();
@@ -702,7 +1180,7 @@ mod tests {
 
         // An array has no single number to plot, so it yields no points rather than an error.
         let series = db
-            .timeseries_by_name("CAN_FRAME", "data", 1, 1, None, None, None)
+            .timeseries_by_name("CAN_FRAME", "data", args(1, 1))
             .unwrap();
         assert!(series.is_empty());
     }
@@ -747,11 +1225,18 @@ mod tests {
         );
 
         let pressures = |instance| {
-            db.timeseries_by_name("PRESSURE_VESSEL", "pressure1", 1, 1, None, None, instance)
-                .unwrap()
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect::<Vec<_>>()
+            db.timeseries_by_name(
+                "PRESSURE_VESSEL",
+                "pressure1",
+                TimeseriesArgs {
+                    instance,
+                    ..args(1, 1)
+                },
+            )
+            .unwrap()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<_>>()
         };
 
         // A plot line for one instance sees only that instance; without one, every instance
@@ -834,12 +1319,12 @@ mod tests {
         let db = Db::init();
 
         assert!(matches!(
-            db.timeseries_by_name("NOT_A_MESSAGE", "roll", 1, 1, None, None, None),
+            db.timeseries_by_name("NOT_A_MESSAGE", "roll", args(1, 1)),
             Err(DbError::UnknownField(_))
         ));
 
         assert!(matches!(
-            db.timeseries_by_name("ATTITUDE", "not_a_field", 1, 1, None, None, None),
+            db.timeseries_by_name("ATTITUDE", "not_a_field", args(1, 1)),
             Err(DbError::UnknownField(_))
         ));
     }

@@ -11,7 +11,7 @@ mod task;
 mod time;
 pub mod tlog;
 
-pub use db::{MessageInstance, MessageSummary, format_message_label};
+pub use db::{MessageInstance, MessageSummary, TimeseriesArgs, format_message_label};
 pub use links::*;
 pub use protocols::logs::types::*;
 pub use protocols::params::{Param, ParamId, ParamProgress, ParamVal};
