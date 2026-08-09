@@ -39,14 +39,28 @@
             # for rfd
             zenity
             xdg-desktop-portal
+            # for winit/wayland+x11 (may not all be needed, I guessed)
+            wayland
+            libxkbcommon
+            libGL
+            libx11
+            libxcursor
+            libxrandr
+            libxi
           ]
           ++ [ rustToolchain ];
         LD_LIBRARY_PATH =
           with pkgs;
           nixpkgs.lib.makeLibraryPath [
-            # for gui
+            # for gubi
             libGL
             libxkbcommon
+            # (may not all be needed, I guessed)
+            wayland
+            libx11
+            libxcursor
+            libxrandr
+            libxi
           ];
 
         rapid-control = pkgs.rustPlatform.buildRustPackage {
