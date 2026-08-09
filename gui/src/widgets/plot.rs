@@ -1,13 +1,15 @@
 //! A widget for plotting telemetry data and the corresponding state.
 
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 use eframe::egui;
 use eframe::egui::PointerButton;
 use egui::{Color32, TextStyle};
-use egui_plot::{Corner, Legend};
+use egui_plot::{Corner, Legend, LineStyle, VLine};
 
 use core::mav::{ComponentId, SystemId};
 use core::{MessageInstance, format_message_label};
+
+use crate::colors::mode_color;
 
 /// State shared by all linked plots
 pub struct SharedPlotState {
@@ -79,6 +81,46 @@ impl<'a> Plot<'a> {
             shared,
             ylimits,
         }
+    }
+
+    // Takes its arguments rather than `&self` so the plot closure captures only these fields,
+    // leaving `shared` usable for the interaction handling afterwards.
+    fn mode_transitions(
+        lines: &[PlotLine],
+        source: &core::Source,
+        since: DateTime<Utc>,
+    ) -> Vec<(DateTime<Utc>, u32)> {
+        let mut systems: Vec<_> = lines
+            .iter()
+            .map(|line| (line.system_id, line.component_id))
+            .collect();
+        systems.sort_unstable();
+        systems.dedup();
+
+        let mut transitions = Vec::new();
+        for (system_id, component_id) in systems {
+            let Ok(heartbeats) = source.db.timeseries_by_name(
+                "HEARTBEAT",
+                "custom_mode",
+                system_id,
+                component_id,
+                Some(since),
+                None,
+                None,
+            ) else {
+                continue;
+            };
+
+            let mut previous = None;
+            transitions.extend(heartbeats.into_iter().filter_map(|(t, mode)| {
+                let mode = mode as u32;
+                let changed = previous.is_some_and(|previous| previous != mode);
+                previous = Some(mode);
+                changed.then_some((t, mode))
+            }));
+        }
+
+        transitions
     }
 }
 
@@ -183,25 +225,20 @@ impl egui::Widget for Plot<'_> {
                 plot_ui.line(l);
             }
 
+            for (t, mode) in Self::mode_transitions(self.lines, self.source, since) {
+                // Unnamed so the transitions stay out of the legend.
+                plot_ui.vline(
+                    VLine::new("", (t - self.source.plot_origin).as_seconds_f64())
+                        .color(mode_color(mode))
+                        .style(LineStyle::Dashed { length: 4.0 }),
+                );
+            }
+
             //for (key, color) in &self.config.lines {
             //    let name = format!("{key}");
             //    let plot_data = self.backend.plot_metric(key, plot_ui.plot_bounds());
             //    let line = Line::new(plot_data).name(name).color(*color).width(1.2);
             //    plot_ui.line(line);
-            //}
-
-            //for (t, mode) in self
-            //    .backend
-            //    .enum_transitions::<FlightMode>(&Metric::FlightMode, plot_ui.plot_bounds())
-            //{
-            //    let line = VLine::new(t)
-            //        .color(mode.color())
-            //        .style(LineStyle::Dashed { length: 4.0 });
-            //    plot_ui.vline(line);
-            //}
-
-            //for vl in cache.borrow_mut().mode_lines(backend) {
-            //    plot_ui.vline(vl.style(LineStyle::Dashed { length: 4.0 }));
             //}
 
             //for (y, color) in &state.horizontal_lines {

@@ -6,7 +6,9 @@ use mavspec::rust::dialects::common::messages::Heartbeat;
 use eframe::egui;
 use egui::{Button, Color32, Frame, Margin, RichText, Stroke, Vec2};
 
-use crate::colors::{COLOR_INDICATOR_ADVANCED, COLOR_INDICATOR_AUTONOMY, COLOR_INDICATOR_WARNING};
+use crate::colors::{
+    COLOR_INDICATOR_ADVANCED, COLOR_INDICATOR_AUTONOMY, COLOR_INDICATOR_WARNING, mode_color,
+};
 use crate::panes::PaneUi;
 use crate::widgets::{AlertLine, AlertTier};
 
@@ -282,20 +284,20 @@ impl PaneUi for StatusPane {
                                 job.halign = egui::Align::Center;
                                 let galley = col_ui.fonts(|fonts| fonts.layout_job(job));
 
+                                let border = Stroke::new(
+                                    1.0_f32,
+                                    mode_color(mode_info.custom_mode).gamma_multiply(0.7),
+                                );
+
                                 let button = if selected {
-                                    let button = Button::new("").selected(true);
+                                    let button = Button::new("").selected(true).stroke(border);
                                     if auto_mode {
                                         button.fill(COLOR_INDICATOR_AUTONOMY)
                                     } else {
                                         button
                                     }
                                 } else {
-                                    Button::new("")
-                                        .fill(Color32::TRANSPARENT)
-                                        .stroke(Stroke::new(
-                                            1.0_f32,
-                                            col_ui.visuals().weak_text_color(),
-                                        ))
+                                    Button::new("").fill(Color32::TRANSPARENT).stroke(border)
                                 };
 
                                 let size = Vec2::new(col_ui.available_width(), row_h);
