@@ -1,5 +1,6 @@
 use egui::{Align2, Area, Color32, CornerRadius, Frame, Id, Order, Stroke, Vec2};
 
+use crate::colors::instrument_visuals;
 use crate::panes::{PaneUi, PositionSource, TreeBehavior};
 use crate::views::View;
 use crate::widgets::ArtificialHorizon;
@@ -42,6 +43,7 @@ impl PaneUi for HorizonPane {
         Frame::dark_canvas(ui.style())
             .corner_radius(CornerRadius::ZERO)
             .show(ui, |ui| {
+                instrument_visuals(ui);
                 ui.vertical(|ui| {
                     ui.set_width(ui.available_width());
                     ui.set_height(ui.available_height());
@@ -66,6 +68,7 @@ impl PaneUi for HorizonPane {
                 .pivot(Align2::LEFT_BOTTOM)
                 .fixed_pos(pane_rect.left_bottom() + Vec2::new(34.0, -14.0))
                 .show(ui.ctx(), |ui| {
+                    instrument_visuals(ui);
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (mode, label) in [
                         (VelocityMode::Speed, "SPEED"),
@@ -93,6 +96,7 @@ impl PaneUi for HorizonPane {
                 .pivot(Align2::RIGHT_BOTTOM)
                 .fixed_pos(pane_rect.right_bottom() - Vec2::new(34.0, 14.0))
                 .show(ui.ctx(), |ui| {
+                    instrument_visuals(ui);
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (src, label) in [
                         (PositionSource::LocalPositionNed, "LOCAL"),

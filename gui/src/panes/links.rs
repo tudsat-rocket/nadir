@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
 use mavspec::rust::dialects::common::messages::{LinkNodeStatus, RadioStatus};
 
 use crate::{
-    colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING},
+    colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable},
     panes::PaneUi,
 };
 
@@ -71,6 +71,7 @@ impl LinksPane {
     fn draw_link_lines(
         &mut self,
         painter: &egui::Painter,
+        ink: Color32,
         a: Pos2,
         b: Pos2,
         link_qualities: (Option<f32>, Option<f32>),
@@ -97,14 +98,8 @@ impl LinksPane {
             .and_then(|lq| lq.is_normal().then_some(lq))
             .unwrap_or(0.0);
 
-        let uplink_stroke = Stroke::new(
-            1.0_f32,
-            Color32::WHITE.gamma_multiply(0.2 + 0.8 * lq_uplink),
-        );
-        let downlink_stroke = Stroke::new(
-            1.0_f32,
-            Color32::WHITE.gamma_multiply(0.2 + 0.8 * lq_downlink),
-        );
+        let uplink_stroke = Stroke::new(1.0_f32, ink.gamma_multiply(0.2 + 0.8 * lq_uplink));
+        let downlink_stroke = Stroke::new(1.0_f32, ink.gamma_multiply(0.2 + 0.8 * lq_downlink));
 
         if dashed {
             painter.add(Shape::dashed_line(&points_uplink, uplink_stroke, 4.0, 2.0));
@@ -202,9 +197,9 @@ impl LinksPane {
         lq = lq.and_then(|lq| lq.is_normal().then_some(lq));
 
         let color = match lq {
-            Some(lq) if lq > 0.9 => COLOR_INDICATOR_GOOD,
-            Some(lq) if lq > 0.5 => COLOR_INDICATOR_WARNING,
-            Some(_) => COLOR_INDICATOR_LIMITS,
+            Some(lq) if lq > 0.9 => readable(COLOR_INDICATOR_GOOD, ui.visuals()),
+            Some(lq) if lq > 0.5 => readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+            Some(_) => readable(COLOR_INDICATOR_LIMITS, ui.visuals()),
             None => ui.visuals().weak_text_color(),
         };
 
@@ -306,6 +301,7 @@ impl PaneUi for LinksPane {
 
         let icon_font = FontId::proportional(18.0);
         let weak = ui.visuals().weak_text_color();
+        let ink = ui.visuals().strong_text_color();
         let align = Align2::CENTER_CENTER;
         painter.text(rect.left_center(), align, "🖳", icon_font.clone(), weak);
 
@@ -318,6 +314,7 @@ impl PaneUi for LinksPane {
         if radio_status.is_some() {
             self.draw_link_lines(
                 &painter,
+                ink,
                 rect.left_center() + Vec2::new(20.0, 0.0),
                 rect.center() - Vec2::new(20.0, 0.0),
                 (local_uplink_quality, local_downlink_quality),
@@ -325,6 +322,7 @@ impl PaneUi for LinksPane {
             );
             self.draw_link_lines(
                 &painter,
+                ink,
                 rect.center() + Vec2::new(20.0, 0.0),
                 rect.right_center() - Vec2::new(20.0, 0.0),
                 (remote_uplink_quality, remote_downlink_quality),
@@ -333,6 +331,7 @@ impl PaneUi for LinksPane {
         } else {
             self.draw_link_lines(
                 &painter,
+                ink,
                 rect.left_center() + Vec2::new(20.0, 0.0),
                 rect.right_center() - Vec2::new(20.0, 0.0),
                 (local_uplink_quality, local_downlink_quality),

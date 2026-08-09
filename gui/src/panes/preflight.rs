@@ -6,7 +6,7 @@ use mavspec::rust::dialects::common::enums::{
 };
 use mavspec::rust::dialects::common::messages::{AutopilotVersion, SysStatus};
 
-use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING};
+use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING, readable};
 use crate::panes::PaneUi;
 
 pub struct PreflightPane {}
@@ -66,13 +66,16 @@ impl PreflightPane {
             ui.weak("🚨 System Status Checks");
             if num_unhealthy > 0 || num_disabled > 0 {
                 if num_unhealthy > 0 {
-                    ui.colored_label(COLOR_INDICATOR_WARNING, format!("⚠ {num_unhealthy}"));
+                    ui.colored_label(
+                        readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                        format!("⚠ {num_unhealthy}"),
+                    );
                 }
                 if num_disabled > 0 {
                     ui.weak(format!("💤 {num_disabled}"));
                 }
             } else {
-                ui.colored_label(COLOR_INDICATOR_GOOD, "✔");
+                ui.colored_label(readable(COLOR_INDICATOR_GOOD, ui.visuals()), "✔");
             }
         });
         ui.add_space(5.0);
@@ -112,11 +115,17 @@ impl PreflightPane {
                             if !enabled {
                                 ui.weak("💤 Disabled");
                             } else if healthy {
-                                ui.colored_label(COLOR_INDICATOR_GOOD, "✔");
+                                ui.colored_label(readable(COLOR_INDICATOR_GOOD, ui.visuals()), "✔");
                             } else if stat == MavSysStatusSensor::MAV_SYS_STATUS_PREARM_CHECK {
-                                ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Not Ready");
+                                ui.colored_label(
+                                    readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                    "⚠ Not Ready",
+                                );
                             } else {
-                                ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Unhealthy");
+                                ui.colored_label(
+                                    readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                    "⚠ Unhealthy",
+                                );
                             }
 
                             ui.end_row();
@@ -151,13 +160,19 @@ impl PreflightPane {
                                 && stat
                                     == MavSysStatusSensorExtended::MAV_SYS_STATUS_RECOVERY_SYSTEM
                             {
-                                ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Disarmed");
+                                ui.colored_label(
+                                    readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                    "⚠ Disarmed",
+                                );
                             } else if !enabled {
                                 ui.weak("💤 Disabled");
                             } else if healthy {
-                                ui.colored_label(COLOR_INDICATOR_GOOD, "✔");
+                                ui.colored_label(readable(COLOR_INDICATOR_GOOD, ui.visuals()), "✔");
                             } else {
-                                ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Unhealthy");
+                                ui.colored_label(
+                                    readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                    "⚠ Unhealthy",
+                                );
                             }
 
                             ui.end_row();
@@ -243,7 +258,10 @@ impl PaneUi for PreflightPane {
                             let params = system.params.lock().unwrap();
                             match &*params {
                                 ParamProgress::Unknown => {
-                                    ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ Unknown");
+                                    ui.colored_label(
+                                        readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                        "⚠ Unknown",
+                                    );
                                 }
                                 ParamProgress::Progress(i, count) => {
                                     let pb = egui::ProgressBar::new((*i as f32) / (*count as f32))
@@ -253,13 +271,16 @@ impl PaneUi for PreflightPane {
                                 }
                                 ParamProgress::Failed(res) => {
                                     ui.colored_label(
-                                        COLOR_INDICATOR_WARNING,
+                                        readable(COLOR_INDICATOR_WARNING, ui.visuals()),
                                         format!("⚠ Failed: {res:?}"),
                                     );
                                 }
                                 ParamProgress::Complete(params) => {
                                     ui.horizontal(|ui| {
-                                        ui.colored_label(COLOR_INDICATOR_GOOD, "✔");
+                                        ui.colored_label(
+                                            readable(COLOR_INDICATOR_GOOD, ui.visuals()),
+                                            "✔",
+                                        );
                                         ui.weak(format!("{} params", params.len()));
                                     });
                                 }
@@ -271,7 +292,10 @@ impl PaneUi for PreflightPane {
 
                         ui.weak("Mission");
                         if mission_supported {
-                            ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ To be implemented");
+                            ui.colored_label(
+                                readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                "⚠ To be implemented",
+                            );
                         } else {
                             ui.weak("Not Supported");
                         }
@@ -279,7 +303,10 @@ impl PaneUi for PreflightPane {
 
                         ui.weak("Terrain");
                         if terrain_supported {
-                            ui.colored_label(COLOR_INDICATOR_WARNING, "⚠ To be implemented");
+                            ui.colored_label(
+                                readable(COLOR_INDICATOR_WARNING, ui.visuals()),
+                                "⚠ To be implemented",
+                            );
                         } else {
                             ui.weak("Not Supported");
                         }

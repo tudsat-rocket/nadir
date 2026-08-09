@@ -2,10 +2,12 @@
 
 use std::path::PathBuf;
 
+use core::settings::Theme;
 use core::{LinkId, Settings};
 
 use eframe::egui;
 
+use crate::colors::{COLOR_INDICATOR_LIMITS, readable};
 use crate::widgets::column_header;
 
 /// What kind of endpoint a link is, separated from its address so the two can be edited apart.
@@ -82,6 +84,7 @@ pub struct SettingsView {
     links: Vec<LinkDraft>,
     autoconnect_usb: bool,
     mapbox_access_token: String,
+    theme: Theme,
     /// What came of the last save, kept on screen until the next one.
     status: Option<Result<PathBuf, String>>,
 }
@@ -92,8 +95,18 @@ impl SettingsView {
             links: settings.links.iter().map(LinkDraft::from).collect(),
             autoconnect_usb: settings.autoconnect_usb,
             mapbox_access_token: settings.map.mapbox_access_token.clone().unwrap_or_default(),
+            theme: settings.theme,
             status: None,
         }
+    }
+
+    /// Also called at startup, before there is a view to edit the theme in.
+    pub fn apply_theme(ctx: &egui::Context, theme: Theme) {
+        ctx.set_theme(match theme {
+            Theme::System => egui::ThemePreference::System,
+            Theme::Dark => egui::ThemePreference::Dark,
+            Theme::Light => egui::ThemePreference::Light,
+        });
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -104,6 +117,9 @@ impl SettingsView {
 
                 ui.add_space(15.0);
                 self.map_ui(ui);
+
+                ui.add_space(15.0);
+                self.appearance_ui(ui);
 
                 ui.add_space(15.0);
                 self.save_ui(ui, links);
@@ -144,7 +160,7 @@ impl SettingsView {
                         }
                     }
                     Err(why) => {
-                        ui.colored_label(crate::colors::COLOR_INDICATOR_LIMITS, "⚠")
+                        ui.colored_label(readable(COLOR_INDICATOR_LIMITS, ui.visuals()), "⚠")
                             .on_hover_text(why);
                         built = Err(());
                     }
@@ -197,6 +213,25 @@ impl SettingsView {
         });
     }
 
+    fn appearance_ui(&mut self, ui: &mut egui::Ui) {
+        column_header(ui, "🎨 APPEARANCE");
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Theme");
+
+            for (theme, label) in [
+                (Theme::System, "System"),
+                (Theme::Dark, "Dark"),
+                (Theme::Light, "Light"),
+            ] {
+                if ui.selectable_value(&mut self.theme, theme, label).clicked() {
+                    Self::apply_theme(ui.ctx(), theme);
+                }
+            }
+        });
+    }
+
     fn save_ui(&mut self, ui: &mut egui::Ui, links: Result<Vec<LinkId>, ()>) {
         ui.horizontal(|ui| {
             ui.add_space(5.0);
@@ -215,7 +250,7 @@ impl SettingsView {
                     ui.weak(format!("Saved to {}", path.display()));
                 }
                 Some(Err(e)) => {
-                    ui.colored_label(crate::colors::COLOR_INDICATOR_LIMITS, e);
+                    ui.colored_label(readable(COLOR_INDICATOR_LIMITS, ui.visuals()), e);
                 }
                 None => {}
             }
@@ -225,7 +260,7 @@ impl SettingsView {
         ui.horizontal(|ui| {
             ui.add_space(5.0);
             // Honest rather than tidy: there is no way to retire a link once `Core` has spawned it.
-            ui.weak("Settings are read at startup. Restart to apply them.");
+            ui.weak("Links and the map token are read at startup. Restart to apply them.");
         });
     }
 
@@ -237,6 +272,7 @@ impl SettingsView {
                 mapbox_access_token: (!self.mapbox_access_token.is_empty())
                     .then_some(self.mapbox_access_token.clone()),
             },
+            theme: self.theme,
         };
 
         settings.save().map_err(|e| e.to_string())

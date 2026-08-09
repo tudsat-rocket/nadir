@@ -6,7 +6,9 @@ use mavspec::rust::dialects::common::messages::{
     BatteryStatus, GpsRawInt, Heartbeat, LocalPositionNed, SysStatus,
 };
 
-use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING};
+use crate::colors::{
+    COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable,
+};
 use crate::widgets::{
     AutopilotLogo, TEXT_SIZE, column_header, link_quality, small_text, soc_color,
 };
@@ -50,6 +52,9 @@ impl Vitals<'_> {
         let weak = ui.visuals().weak_text_color();
         let nodata = weak.gamma_multiply(0.5);
         let normal = ui.visuals().text_color();
+        let good = readable(COLOR_INDICATOR_GOOD, ui.visuals());
+        let warning = readable(COLOR_INDICATOR_WARNING, ui.visuals());
+        let limits = readable(COLOR_INDICATOR_LIMITS, ui.visuals());
 
         // Identity header: icon + system id on the left, firmware logo on the right (both used to
         // live on the status pane's removed header line).
@@ -105,7 +110,9 @@ impl Vitals<'_> {
             let mut cell = Vec::new();
             if !charge.is_empty() {
                 // A pack reporting only volts stays neutral, with nothing to color it by.
-                let color = soc.map_or(normal, |soc| soc_color(f32::from(soc) / 100.0));
+                let color = soc.map_or(normal, |soc| {
+                    soc_color(f32::from(soc) / 100.0, ui.visuals())
+                });
                 cell.push((charge.join(", "), color));
             }
             if let Some(i) = current {
@@ -138,9 +145,9 @@ impl Vitals<'_> {
                     None => format!("{} sat", g.satellites_visible),
                 };
                 let color = if g.satellites_visible >= 6 {
-                    COLOR_INDICATOR_GOOD
+                    good
                 } else {
-                    COLOR_INDICATOR_WARNING
+                    warning
                 };
                 (text, color)
             }
@@ -151,9 +158,9 @@ impl Vitals<'_> {
         // status bar entirely, and these two numbers are all that is left of it.
         let (downlink, uplink) = link_quality(system);
         let link_cell = |lq: Option<f32>| match lq {
-            Some(lq) if lq > 0.9 => (format!("{:.0}%", 100.0 * lq), COLOR_INDICATOR_GOOD),
-            Some(lq) if lq > 0.5 => (format!("{:.0}%", 100.0 * lq), COLOR_INDICATOR_WARNING),
-            Some(lq) => (format!("{:.0}%", 100.0 * lq), COLOR_INDICATOR_LIMITS),
+            Some(lq) if lq > 0.9 => (format!("{:.0}%", 100.0 * lq), good),
+            Some(lq) if lq > 0.5 => (format!("{:.0}%", 100.0 * lq), warning),
+            Some(lq) => (format!("{:.0}%", 100.0 * lq), limits),
             None => ("--".into(), nodata),
         };
 

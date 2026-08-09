@@ -8,6 +8,7 @@ use egui::{Button, Color32, Frame, Margin, RichText, Stroke, Vec2};
 
 use crate::colors::{
     COLOR_INDICATOR_ADVANCED, COLOR_INDICATOR_AUTONOMY, COLOR_INDICATOR_WARNING, mode_color,
+    readable,
 };
 use crate::panes::PaneUi;
 use crate::widgets::{AlertLine, AlertTier};
@@ -77,7 +78,7 @@ impl PaneUi for StatusPane {
                 ui.horizontal(|ui| {
                     let arm_button = if armed {
                         Button::selectable(true, RichText::new("ARMED").size(s))
-                            .fill(COLOR_INDICATOR_WARNING)
+                            .fill(readable(COLOR_INDICATOR_WARNING, ui.visuals()))
                     } else {
                         Button::selectable(false, RichText::new("ARM").size(s))
                     };
@@ -263,7 +264,9 @@ impl PaneUi for StatusPane {
                                 let text_color = match (selected, auto_mode) {
                                     (true, true) => Color32::BLACK,
                                     (true, false) => col_ui.visuals().selection.stroke.color,
-                                    (false, true) => COLOR_INDICATOR_AUTONOMY,
+                                    (false, true) => {
+                                        readable(COLOR_INDICATOR_AUTONOMY, col_ui.visuals())
+                                    }
                                     (false, false) => {
                                         col_ui.visuals().widgets.inactive.fg_stroke.color
                                     }
@@ -286,13 +289,17 @@ impl PaneUi for StatusPane {
 
                                 let border = Stroke::new(
                                     1.0_f32,
-                                    mode_color(mode_info.custom_mode).gamma_multiply(0.7),
+                                    readable(mode_color(mode_info.custom_mode), col_ui.visuals())
+                                        .gamma_multiply(0.7),
                                 );
 
                                 let button = if selected {
                                     let button = Button::new("").selected(true).stroke(border);
                                     if auto_mode {
-                                        button.fill(COLOR_INDICATOR_AUTONOMY)
+                                        button.fill(readable(
+                                            COLOR_INDICATOR_AUTONOMY,
+                                            col_ui.visuals(),
+                                        ))
                                     } else {
                                         button
                                     }
@@ -321,7 +328,7 @@ impl PaneUi for StatusPane {
                                             egui::pos2(r.max.x - 3.0, r.min.y + 3.0),
                                             egui::pos2(r.max.x - 3.0, r.min.y + 11.0),
                                         ],
-                                        COLOR_INDICATOR_ADVANCED,
+                                        readable(COLOR_INDICATOR_ADVANCED, col_ui.visuals()),
                                         Stroke::NONE,
                                     ));
                                 }

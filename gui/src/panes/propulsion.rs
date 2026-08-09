@@ -9,7 +9,7 @@ use mavspec::rust::dialects::common::messages::{BatteryStatus, Heartbeat, SysSta
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
 use rapid_dialect::rapid::enums::ValveId;
 
-use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING};
+use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING, instrument_visuals, readable};
 use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
 use crate::widgets::{BatteryIndicator, Plot, PlotLine};
@@ -172,6 +172,7 @@ impl PropulsionPane {
         };
 
         Frame::dark_canvas(ui.style()).show(ui, |ui| {
+            instrument_visuals(ui);
             ui.set_width(square.width());
             ui.set_height(square.height());
 
@@ -253,7 +254,7 @@ fn valve_bar(
         painter.rect_filled(
             fill_rect,
             rounding,
-            COLOR_INDICATOR_WARNING.gamma_multiply(0.8),
+            readable(COLOR_INDICATOR_WARNING, visuals).gamma_multiply(0.8),
         );
     }
 
@@ -261,7 +262,7 @@ fn valve_bar(
         let x = rect.left() + rect.width() * c;
         painter.line_segment(
             [pos2(x, rect.top() + 1.0), pos2(x, rect.bottom() - 1.0)],
-            Stroke::new(2.0_f32, Color32::WHITE),
+            Stroke::new(2.0_f32, visuals.strong_text_color()),
         );
     }
 
@@ -274,7 +275,7 @@ fn valve_bar(
             let x = rect.left() + rect.width() * t;
             painter.line_segment(
                 [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(2.0_f32, COLOR_INDICATOR_GOOD),
+                Stroke::new(2.0_f32, readable(COLOR_INDICATOR_GOOD, ui.visuals())),
             );
             if resp.drag_stopped() {
                 target = Some(t);
@@ -298,7 +299,7 @@ fn valve_bar(
     );
 
     let border = if blink && crate::colors::blink_on(time) {
-        Stroke::new(2.0_f32, COLOR_INDICATOR_WARNING)
+        Stroke::new(2.0_f32, readable(COLOR_INDICATOR_WARNING, visuals))
     } else {
         Stroke::new(1.0_f32, visuals.widgets.noninteractive.bg_stroke.color)
     };
@@ -342,7 +343,8 @@ fn valve_row(
 
     let open_active = matches!(commanded, Some(c) if c >= 1.0 - VALVE_LATCH_EPS);
     let open_btn = if open_active {
-        Button::selectable(true, RichText::new("OPEN")).fill(COLOR_INDICATOR_WARNING)
+        Button::selectable(true, RichText::new("OPEN"))
+            .fill(readable(COLOR_INDICATOR_WARNING, ui.visuals()))
     } else {
         Button::selectable(false, RichText::new("OPEN"))
     };
@@ -414,7 +416,7 @@ fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
     .collect()
 }
 
-fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
+fn pressure_lines(system_id: u8, visuals: &egui::Visuals) -> Vec<PlotLine> {
     [
         (0, "Pressurant", rocket::N2_COLOR),
         (1, "Oxidizer", rocket::N2O_COLOR),
@@ -435,7 +437,7 @@ fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
         field_name: "pressure1".to_owned(),
         alias: Some(alias.to_owned()),
         unit: Some("bar".to_owned()),
-        color: Some(color),
+        color: Some(readable(color, visuals)),
         // PRESSURE_VESSEL.pressure1 is in kPa; the diagram and rendering use bar.
         scale: Some(0.01),
         // Firmware reports an unavailable sensor as u16::MAX.
@@ -530,7 +532,7 @@ impl PaneUi for PropulsionPane {
                         );
                     });
 
-                    let p_lines = pressure_lines(system_id);
+                    let p_lines = pressure_lines(system_id, ui.visuals());
                     let pressure_plot = Plot::new(
                         &p_lines,
                         &behavior.source,

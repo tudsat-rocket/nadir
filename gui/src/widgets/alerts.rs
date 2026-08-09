@@ -9,7 +9,7 @@ use mavspec::rust::dialects::common::messages::{
     CommandAck, LinkNodeStatus, RadioStatus, SysStatus,
 };
 
-use crate::colors::{COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on};
+use crate::colors::{COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, readable};
 use crate::widgets::small_text;
 
 fn short_sensor_name(name: &str) -> String {
@@ -161,10 +161,13 @@ impl AlertLine<'_> {
 
 impl egui::Widget for AlertLine<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let color = match self.tier {
-            AlertTier::Critical => COLOR_INDICATOR_LIMITS,
-            AlertTier::Caution => COLOR_INDICATOR_WARNING,
-        };
+        let color = readable(
+            match self.tier {
+                AlertTier::Critical => COLOR_INDICATOR_LIMITS,
+                AlertTier::Caution => COLOR_INDICATOR_WARNING,
+            },
+            ui.visuals(),
+        );
         let tokens = self.tokens();
 
         let lit = blink_on(ui.input(|i| i.time));

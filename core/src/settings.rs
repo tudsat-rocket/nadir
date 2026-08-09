@@ -11,6 +11,7 @@ pub struct Settings {
     pub autoconnect_usb: bool,
     pub links: Vec<LinkId>,
     pub map: MapSettings,
+    pub theme: Theme,
 }
 
 impl Default for Settings {
@@ -19,8 +20,19 @@ impl Default for Settings {
             autoconnect_usb: true,
             links: Self::default_links(),
             map: MapSettings::default(),
+            theme: Theme::default(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    /// Follows the desktop or browser theme as it changes.
+    #[default]
+    System,
+    Dark,
+    Light,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -170,6 +182,20 @@ mod tests {
 
         assert!(text.contains("type = \"udp_server\""), "{text}");
         assert!(text.contains("addr = \"0.0.0.0:14550\""), "{text}");
+    }
+
+    #[test]
+    fn a_theme_is_a_lowercase_name() {
+        let settings = Settings {
+            theme: Theme::Light,
+            ..Settings::default()
+        };
+
+        let text = toml::to_string_pretty(&settings).unwrap();
+        assert!(text.contains("theme = \"light\""), "{text}");
+
+        let read: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(read.theme, Theme::Light);
     }
 
     #[test]

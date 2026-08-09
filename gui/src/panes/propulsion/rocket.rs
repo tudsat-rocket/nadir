@@ -10,7 +10,7 @@ use rapid_dialect::rapid::enums::{PressureVesselFlag, ValveId};
 use rapid_dialect::rapid::messages::{PressureVessel, Valve};
 
 use super::ValveInteractionMode;
-use crate::colors::{COLOR_INDICATOR_WARNING, blink_on};
+use crate::colors::{COLOR_INDICATOR_WARNING, blink_on, instrument_visuals};
 use crate::widgets::MeasurementIndicator;
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
@@ -992,6 +992,7 @@ fn draw_valve_mode_toggle(ui: &egui::Ui, square: Rect, mode: &mut ValveInteracti
         .pivot(Align2::LEFT_BOTTOM)
         .fixed_pos(square.left_bottom() + Vec2::new(6.0, -6.0))
         .show(ui.ctx(), |ui| {
+            instrument_visuals(ui);
             ui.spacing_mut().item_spacing.y = 2.0;
             for (m, label) in [
                 (ValveInteractionMode::Pulse, "PULSE"),

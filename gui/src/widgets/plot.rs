@@ -9,7 +9,7 @@ use egui_plot::{Corner, Legend, LineStyle, VLine};
 use core::mav::{ComponentId, SystemId};
 use core::{MessageInstance, format_message_label};
 
-use crate::colors::mode_color;
+use crate::colors::{mode_color, readable};
 
 /// State shared by all linked plots
 pub struct SharedPlotState {
@@ -174,6 +174,7 @@ impl egui::Widget for Plot<'_> {
             plot = plot.include_y(max);
         }
 
+        let visuals = ui.visuals().clone();
         let ir = plot.show(ui, move |plot_ui| {
             #[cfg(feature = "profiling")]
             puffin::profile_scope!("plot_data");
@@ -229,7 +230,7 @@ impl egui::Widget for Plot<'_> {
                 // Unnamed so the transitions stay out of the legend.
                 plot_ui.vline(
                     VLine::new("", (t - self.source.plot_origin).as_seconds_f64())
-                        .color(mode_color(mode))
+                        .color(readable(mode_color(mode), &visuals))
                         .style(LineStyle::Dashed { length: 4.0 }),
                 );
             }

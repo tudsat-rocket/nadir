@@ -55,6 +55,7 @@ impl App {
 
         // Only ever the defaults on wasm, where there is no file to read.
         let settings = core::Settings::load();
+        SettingsView::apply_theme(ctx, settings.theme);
 
         #[cfg(not(target_arch = "wasm32"))]
         let core = {
@@ -452,10 +453,18 @@ impl eframe::App for App {
             self.open_log(&path);
         }
 
-        // egui-notify paints toast backgrounds with the global noninteractive bg_fill; darken it
-        // just for the toast pass (nothing else paints after this) so notifications stand out.
+        // egui-notify paints toast backgrounds with the global noninteractive bg_fill; push it away
+        // from the panel just for the toast pass (nothing else paints after this) so notifications
+        // stand out. Which way is away depends on the theme: extreme_bg_color is the darkest color
+        // under one and the lightest under the other.
         let original_bg = ctx.style().visuals.widgets.noninteractive.bg_fill;
-        ctx.style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = s.visuals.extreme_bg_color);
+        ctx.style_mut(|s| {
+            s.visuals.widgets.noninteractive.bg_fill = if s.visuals.dark_mode {
+                s.visuals.extreme_bg_color
+            } else {
+                s.visuals.widgets.inactive.weak_bg_fill
+            };
+        });
         self.toasts.show(ctx);
         ctx.style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = original_bg);
     }

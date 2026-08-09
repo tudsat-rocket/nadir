@@ -12,6 +12,17 @@ pub const COLOR_INDICATOR_ADVANCED: Color32 = Color32::from_rgb(255, 179, 0);
 // Cyan mode names mark autonomous modes; blue stays reserved for "selected".
 pub const COLOR_INDICATOR_AUTONOMY: Color32 = Color32::from_rgb(0, 172, 193);
 
+// The palette is tuned against a dark canvas and washes out on a light one. Anything drawn inside
+// an instrument does not need this, since `instrument_visuals` keeps those subtrees dark. Apply a
+// `gamma_multiply` fade after it, never before: lerping toward opaque black puts the alpha back.
+pub fn readable(color: Color32, visuals: &egui::Visuals) -> Color32 {
+    if visuals.dark_mode {
+        color
+    } else {
+        color.lerp_to_gamma(Color32::BLACK, 0.35)
+    }
+}
+
 pub fn mode_color(custom_mode: u32) -> Color32 {
     const PALETTE: &[Color32] = &[
         Color32::from_rgb(127, 127, 127),
@@ -26,6 +37,14 @@ pub fn mode_color(custom_mode: u32) -> Color32 {
         Color32::from_rgb(23, 190, 207),
     ];
     PALETTE[custom_mode as usize % PALETTE.len()]
+}
+
+// Instruments keep the cockpit palette whatever the window theme is: their white ink, black valve
+// fills and sky/ground colors only read against a dark canvas. Call this inside the canvas, and
+// inside any `Area` drawn over it, since an area builds its `Ui` from the context and misses the
+// surrounding style.
+pub fn instrument_visuals(ui: &mut egui::Ui) {
+    ui.style_mut().visuals = egui::Visuals::dark();
 }
 
 // True during the "on" half of the standard ~1.2 Hz warning-blink cycle. `time`

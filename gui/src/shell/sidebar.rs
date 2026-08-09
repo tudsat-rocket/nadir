@@ -209,7 +209,7 @@ impl Sidebar {
 
                 ui.horizontal(|ui| {
                     if let Some(soc) = state_of_charge(&system) {
-                        let color = soc_color(f32::from(soc) / 100.0);
+                        let color = soc_color(f32::from(soc) / 100.0, ui.visuals());
                         ui.label(RichText::new(format!("🔋 {soc}%")).color(color));
                     } else {
                         ui.weak("🔋 --");
