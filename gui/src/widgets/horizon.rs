@@ -202,8 +202,13 @@ impl ArtificialHorizon {
 
                 let galley = painter.layout_job(job);
 
+                // `with_angle_and_anchor` only moves the pivot, leaving `pos` the unrotated
+                // placement corner, so subtract the anchor to place the label centre itself.
+                let anchor = Align2::CENTER_CENTER.pos_in_rect(&galley.rect).to_vec2();
+                let label = center + Vec2::new(r.sin(), -r.cos()) * (radius - anchor.y);
+
                 painter.add(Shape::Text(
-                    TextShape::new(tip, galley, Color32::TRANSPARENT)
+                    TextShape::new(label - anchor, galley, Color32::TRANSPARENT)
                         .with_angle_and_anchor(r, Align2::CENTER_CENTER),
                 ));
             } else {
@@ -214,10 +219,10 @@ impl ArtificialHorizon {
             }
         }
 
-        let indicator_pos = center - Vec2::new(0.0, radius - 30.0);
+        let indicator_pos = center - Vec2::new(0.0, radius - 32.0);
 
         painter.rect(
-            Rect::from_center_size(indicator_pos, Vec2::new(48.0, 25.0)),
+            Rect::from_center_size(indicator_pos, Vec2::new(56.0, 21.0)),
             CornerRadius::ZERO.at_least(1),
             Color32::BLACK,
             Stroke::new(0.5_f32, Color32::WHITE),
@@ -227,8 +232,11 @@ impl ArtificialHorizon {
         painter.text(
             indicator_pos,
             Align2::CENTER_CENTER,
-            format!("{:.0}", (heading.to_degrees().round() as i32 + 360) % 360),
-            FontId::monospace(16.0),
+            format!(
+                "{:.1}",
+                (((heading.to_degrees() * 10.0).round() as i32 + 3600) % 3600) as f32 / 10.0
+            ),
+            FontId::monospace(14.0),
             Color32::WHITE,
         );
     }
