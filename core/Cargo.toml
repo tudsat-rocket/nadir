@@ -26,8 +26,10 @@ rapid-dialect = { workspace = true }
 directories = { workspace = true }
 tokio = { workspace = true }
 maviola = { workspace = true }
-socketcan = { version = "3.5.0", features = [ "tokio" ] }
 tokio-serial = "5.4.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+socketcan = { version = "3.5.0", features = [ "tokio" ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # maviola cannot build for wasm (tokio net/fs + tokio-serial, unconditionally), so the wasm build

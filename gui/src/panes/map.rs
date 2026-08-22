@@ -139,36 +139,9 @@ impl MapPane {
         }
     }
 
+    // TODO: cache tiles under the ProjectDirs cache_dir off the browser, where `cache` is ignored
     fn http_options() -> HttpOptions {
-        // We don't cache anything on web assembly
-        #[cfg(target_arch = "wasm32")]
-        let cache_path: Option<std::path::PathBuf> = None;
-
-        // On Android, we just hardcode the path for now. If we wanted to do it properly, we'd
-        // have to request a path and pass it to our code via the JNI.
-        #[cfg(target_os = "android")]
-        let cache_path = Some(std::path::PathBuf::from(
-            "/data/user/0/space.tudsat.sam/cache",
-        ));
-
-        // On other platforms, we store map tiles on-disk
-        //#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-        //let cache_path = Some(
-        //    ProjectDirs::from("space", "tudsat", "rapid-control")
-        //        .unwrap()
-        //        .cache_dir()
-        //        .into(),
-        //);
-
-        // On other platforms we would cache to disk; see the commented-out block above. Until then
-        // this is the fallback, scoped so it no longer shadows the cases that are handled.
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-        let cache_path: Option<std::path::PathBuf> = None;
-
-        HttpOptions {
-            cache: cache_path,
-            ..Default::default()
-        }
+        HttpOptions::default()
     }
 }
 

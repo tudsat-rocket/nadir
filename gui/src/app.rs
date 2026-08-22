@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use core::mav::{Event, V2};
 use egui::{Color32, Key, Margin, Modifiers};
@@ -46,7 +44,7 @@ impl App {
     pub fn new(
         log_collector: egui_tracing::tracing::collector::EventCollector,
         ctx: &egui::Context,
-        #[cfg(not(target_arch = "wasm32"))] initial_logs: Vec<PathBuf>,
+        initial_logs: Vec<PathBuf>,
     ) -> Self {
         let (event_tx, event_rx) = std::sync::mpsc::channel::<Event<V2>>();
         #[cfg(target_arch = "wasm32")]
@@ -109,21 +107,29 @@ impl App {
         #[cfg(not(feature = "profiling"))]
         let profiler: Option<egui_tiles::TileId> = None;
 
-        let top_left_tabs = tiles.insert_tab_tile(vec![propulsion, params]);
-        let bottom_left_tabs = tiles.insert_tab_tile(vec![map, messages, commands, flight_log]);
+        // A phone fits one pane at a time, not a grid of four tab bars.
+        let root = if cfg!(target_os = "android") {
+            let tabs: Vec<_> = [
+                map, preflight, propulsion, state, sensors, navigation, mission, messages,
+                commands, params, plot, can, flight_log,
+            ]
+            .into_iter()
+            .chain(profiler)
+            .collect();
 
-        let top_right_tabs = tiles.insert_tab_tile(vec![state, preflight, navigation, mission]);
-        let bottom_right_tabs =
-            tiles.insert_tab_tile([sensors, plot, can].into_iter().chain(profiler).collect());
+            tiles.insert_tab_tile(tabs)
+        } else {
+            let top_left = vec![propulsion, params];
+            let top_right = vec![state, preflight, navigation, mission];
+            let bottom_left = vec![map, messages, commands, flight_log];
+            let bottom_right: Vec<_> = [sensors, plot, can].into_iter().chain(profiler).collect();
 
-        let bottom = tiles.insert_grid_tile(vec![
-            top_left_tabs,
-            top_right_tabs,
-            bottom_left_tabs,
-            bottom_right_tabs,
-        ]);
+            let cells = [top_left, top_right, bottom_left, bottom_right]
+                .map(|group| tiles.insert_tab_tile(group));
+            tiles.insert_grid_tile(cells.to_vec())
+        };
 
-        let tiles_tree = egui_tiles::Tree::new("my_tree", bottom, tiles);
+        let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
 
         #[allow(unused_mut)]
         let mut app = Self {
@@ -158,6 +164,9 @@ impl App {
             logs_shown: false,
         };
 
+        // A browser has no path to open; a log dropped there arrives as bytes instead.
+        #[cfg(target_arch = "wasm32")]
+        std::mem::drop(initial_logs);
         #[cfg(not(target_arch = "wasm32"))]
         for path in initial_logs {
             app.open_log(&path);
@@ -220,7 +229,7 @@ impl App {
 
     /// Asks for a telemetry log to open. Blocks on the native dialog, as the log downloader's save
     /// dialog does.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     fn pick_log(&mut self, _ctx: &egui::Context) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Telemetry log", &["tlog"])
@@ -228,6 +237,14 @@ impl App {
         {
             self.open_log(&path);
         }
+    }
+
+    /// Android has no file picker: `rfd` has no backend, and shared storage would mean the Storage
+    /// Access Framework over JNI. Logs recorded on the device are still listed.
+    #[cfg(target_os = "android")]
+    fn pick_log(&mut self, _ctx: &egui::Context) {
+        self.toasts
+            .warning("Opening a log file is not supported on Android.");
     }
 
     /// The same, for a browser: the picker is a promise, and the file arrives as bytes on the
@@ -333,7 +350,7 @@ impl eframe::App for App {
 
         if self.logs.values().any(|source| match &source.origin {
             core::Origin::Log(progress) => !progress.done(),
-            _ => false,
+            core::Origin::Live => false,
         }) {
             ctx.request_repaint();
         }

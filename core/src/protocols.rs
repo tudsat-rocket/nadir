@@ -8,7 +8,7 @@ use mavspec::rust::dialects::{Common, common::enums::MavResult};
 
 use crate::System;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "linux")]
 pub mod can;
 pub mod heartbeat;
 pub mod intervals;

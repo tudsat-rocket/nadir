@@ -22,7 +22,6 @@ mavspec = { workspace = true }
 rapid-dialect = { workspace = true }
 
 egui = { workspace = true }
-eframe = { workspace = true }
 egui_plot = { workspace = true }
 egui_extras = { workspace = true }
 egui_tiles = "0.13"
@@ -34,9 +33,19 @@ walkers = "0.46"
 puffin = { git = "https://github.com/EmbarkStudios/puffin", rev = "c5276b9", optional = true }
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", rev = "c5276b9", optional = true }
 nalgebra = "0.34.1"
-# One file picker for both targets: the wasm backend is an `<input type="file">` behind the same
-# `AsyncFileDialog`.
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+eframe = { workspace = true, default-features = true }
+# One file picker for desktop and web: the wasm backend is an `<input type="file">` behind the same
+# `AsyncFileDialog`. Android has no backend and does without a picker entirely.
 rfd = "0.17.2"
+
+# eframe rejects its default accesskit alongside `android-native-activity` at compile time.
+[target.'cfg(target_os = "android")'.dependencies]
+eframe = { workspace = true, features = ["wgpu", "android-native-activity", "default_fonts"] }
+# Not used from Rust: feature-unifies eframe's own wgpu onto the GL backend. Keep the major in step
+# with eframe's, or this silently stops applying.
+wgpu = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }

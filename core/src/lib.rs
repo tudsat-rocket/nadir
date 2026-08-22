@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "linux")]
 mod can_proxy;
 mod links;
 pub mod mav;
@@ -27,13 +27,13 @@ pub(crate) const OTHER_GROUND_STATION_SYSTEM_ID: u8 = 0xff;
 
 /// The pair of channels bridging MAVLink-tunnelled CAN to a local socketcan interface.
 ///
-/// Uninhabited off native, so `Option<CanProxy>` can only be `None` there.
-#[cfg(not(target_arch = "wasm32"))]
+/// Uninhabited off Linux, so `Option<CanProxy>` can only be `None` there.
+#[cfg(target_os = "linux")]
 pub type CanProxy = (
     tokio::sync::mpsc::Sender<socketcan::CanFrame>,
     tokio::sync::broadcast::Sender<socketcan::CanFrame>,
 );
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(target_os = "linux"))]
 pub type CanProxy = core::convert::Infallible;
 
 /// Native only: a wasm build has no links to own, and reaches its telemetry through a [`Source`]
@@ -46,9 +46,11 @@ mod core_impl {
 
     use tokio::sync::mpsc::Receiver;
 
+    #[cfg(target_os = "linux")]
+    use crate::can_proxy;
     use crate::mav::{Event, V2};
     use crate::source::Source;
-    use crate::{Link, LinkId, OTHER_GROUND_STATION_SYSTEM_ID, can_proxy, links};
+    use crate::{Link, LinkId, OTHER_GROUND_STATION_SYSTEM_ID, links};
 
     pub type EventCallback = Box<dyn Fn(&Event<V2>) + Send + Sync>;
 
@@ -98,26 +100,32 @@ mod core_impl {
         pub fn spawn(self) -> Core {
             let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-            // Clonable channel for sending CAN frames received via MAVLink to socketcan. Sender is
-            // cloned for every connected system
-            let (socketcan_tx_sender, socketcan_tx_receiver) =
-                tokio::sync::mpsc::channel::<socketcan::CanFrame>(32);
+            #[cfg(target_os = "linux")]
+            let (proxy, socketcan_tx_receiver, socketcan_rx_publisher) = {
+                let (tx_sender, tx_receiver) =
+                    tokio::sync::mpsc::channel::<socketcan::CanFrame>(32);
+                let (rx_publisher, _) = tokio::sync::broadcast::channel::<socketcan::CanFrame>(32);
 
-            // Broadcast channel for sending CAN frames received via socketcan to connected MAVLink
-            // systems. Each system can subscribe to this.
-            let (socketcan_rx_publisher, _) =
-                tokio::sync::broadcast::channel::<socketcan::CanFrame>(32);
+                (
+                    Some((tx_sender, rx_publisher.clone())),
+                    tx_receiver,
+                    rx_publisher,
+                )
+            };
+            #[cfg(not(target_os = "linux"))]
+            let proxy = None;
 
             let core = Core {
                 event_sender: tx,
                 links: Arc::new(Mutex::new(HashMap::new())),
-                live: Source::live(Some((socketcan_tx_sender, socketcan_rx_publisher.clone()))),
+                live: Source::live(proxy),
             };
 
             let c = core.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
 
+                #[cfg(target_os = "linux")]
                 rt.spawn(async move {
                     can_proxy::spawn_can_proxy(socketcan_tx_receiver, socketcan_rx_publisher);
                 });
@@ -150,7 +158,8 @@ mod core_impl {
                 self.add_link(id);
             }
 
-            if autoconnect_usb {
+            // `serialport` cannot enumerate on Android; a radio needs `UsbManager` over JNI.
+            if autoconnect_usb && !cfg!(target_os = "android") {
                 tokio::spawn(links::usb::autoconnect(self.clone()));
             }
 

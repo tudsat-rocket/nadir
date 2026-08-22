@@ -282,14 +282,12 @@ fn show_save_button(
     if ui.button("💾  Save").clicked() {
         let path = match &item.state.data_file {
             Some(p) => p.clone(),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", target_os = "android"))]
             None => {
-                // No filesystem to save into; a browser build would hand the bytes to a download
-                // instead, which is a different flow than picking a path up front.
-                tracing::warn!("Saving a flight log needs a native build");
+                tracing::warn!("Saving a flight log needs a desktop build");
                 return;
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
             None => {
                 let default_name = format!(
                     "{}_flightlog_{:04}.bin",

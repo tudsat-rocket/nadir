@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "android",
     "core",
     "gui",
     "db",
@@ -35,9 +36,16 @@ rapid-dialect = { git = "https://github.com/tudsat-rocket/rapid-dialect", featur
 egui = { version = "0.32" }
 egui-wgpu = { version = "0.32" }
 egui-winit = { version = "0.32" }
-eframe = { version = "0.32" }
+# Backends are selected per-target in `gui/Cargo.toml`.
+eframe = { version = "0.32", default-features = false }
+wgpu = { version = "25", default-features = false, features = ["gles"] }
 egui_plot = "0.33"
 egui_extras = { version = "0.32", features = ["image"] }
+
+# A dev-profile `.so` is half a gigabyte, and an unoptimised egui is not usable on a phone.
+[profile.android]
+inherits = "release"
+strip = "symbols"
 
 [workspace.lints.clippy]
 # Groups

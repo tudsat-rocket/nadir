@@ -1,0 +1,7 @@
+/build/
+/.gradle/
+/app/build/
+/app/src/main/jniLibs/
+/local.properties
+/target/
+*.apk

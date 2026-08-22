@@ -51,8 +51,8 @@ pub struct System {
 }
 
 impl System {
-    // `can_proxy` is uninhabited off native, where the bridge tasks below are compiled out.
-    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
+    // `can_proxy` is uninhabited off Linux, where the bridge tasks below are compiled out.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     pub fn new(
         system_id: SystemId,
         db: Db,
@@ -121,7 +121,7 @@ impl System {
             log_cmd_rx,
         )));
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_os = "linux")]
         if let Some((tx_sender, rx_publisher)) = can_proxy {
             std::mem::drop(tokio::spawn(crate::protocols::can::forward_to_socketcan(
                 message_sender.subscribe(),
