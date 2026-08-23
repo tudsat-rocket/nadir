@@ -6,6 +6,7 @@ use egui::{Align, Layout, RichText, TextStyle};
 use egui_extras::{Column, TableBuilder};
 
 use crate::panes::PaneUi;
+use crate::widgets::Readout;
 
 #[derive(Clone, PartialEq, Eq)]
 struct SelectedMessage {
@@ -140,7 +141,12 @@ impl MessagesPane {
                         });
                         row.col(|ui| {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.monospace(format!("{:.1}", entry.freq_hz));
+                                ui.add(Readout {
+                                    value: entry.freq_hz,
+                                    font: TextStyle::Monospace.resolve(ui.style()),
+                                    color: ui.visuals().text_color(),
+                                    ..Default::default()
+                                });
                             });
                         });
                     });

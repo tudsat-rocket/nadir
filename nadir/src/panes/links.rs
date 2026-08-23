@@ -8,6 +8,7 @@ use mavspec::rust::dialects::common::messages::{LinkNodeStatus, RadioStatus};
 use crate::{
     colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable},
     panes::PaneUi,
+    widgets::Readout,
 };
 
 /// The figures the compact summary shows in place of the link diagram.
@@ -31,6 +32,18 @@ impl LinksPane {
 
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {}
+    }
+
+    /// A rate, styled to match the `ui.monospace` labels it sits in a column with.
+    fn rate(ui: &egui::Ui, value: f32, decimals: usize, width_chars: usize) -> Readout {
+        Readout {
+            value,
+            decimals,
+            width_chars,
+            font: egui::TextStyle::Monospace.resolve(ui.style()),
+            color: ui.visuals().text_color(),
+            ..Default::default()
+        }
     }
 
     fn draw_peers(&mut self, ui: &mut egui::Ui, system: &System) {
@@ -172,9 +185,9 @@ impl LinksPane {
                 ] {
                     ui.weak(arrow);
                     self.draw_link_quality(ui, lq);
-                    ui.monospace(format!("{packets:>5.1}"));
+                    ui.add(Self::rate(ui, packets, 1, 5));
                     if with_data_rate {
-                        ui.monospace(format!("{:>5.2}", data / 1024.0));
+                        ui.add(Self::rate(ui, data / 1024.0, 2, 5));
                     }
                     ui.end_row();
                 }
@@ -362,7 +375,7 @@ impl PaneUi for LinksPane {
                 Rect::from_center_size(local_center + Vec2::new(0.0, off_packets * sign), s),
                 |ui: &mut egui::Ui| {
                     ui.horizontal(|ui| {
-                        ui.monospace(format!("{pkts:>5.1}"));
+                        ui.add(Self::rate(ui, pkts, 1, 5));
                         ui.weak("pkt/s ");
                     })
                     .response
@@ -376,7 +389,7 @@ impl PaneUi for LinksPane {
                     Rect::from_center_size(local_center + Vec2::new(0.0, off_data * sign), s),
                     |ui: &mut egui::Ui| {
                         ui.horizontal(|ui| {
-                            ui.monospace(format!("{:>5.2}", data / 1024.0));
+                            ui.add(Self::rate(ui, data / 1024.0, 2, 5));
                             ui.weak("KiB/s");
                         })
                         .response

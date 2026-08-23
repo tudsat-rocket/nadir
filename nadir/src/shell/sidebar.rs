@@ -8,7 +8,7 @@ use mavspec::rust::dialects::common::messages::Heartbeat;
 
 use crate::views::{LIVE, SourceId, View};
 use crate::widgets::{
-    ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, TEXT_SIZE, soc_color,
+    ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
     state_of_charge,
 };
 
@@ -210,7 +210,15 @@ impl Sidebar {
                 ui.horizontal(|ui| {
                     if let Some(soc) = state_of_charge(&system) {
                         let color = soc_color(f32::from(soc) / 100.0, ui.visuals());
-                        ui.label(RichText::new(format!("🔋 {soc}%")).color(color));
+                        ui.add(Readout {
+                            value: f32::from(soc),
+                            decimals: 0,
+                            prefix: "🔋 ",
+                            unit: Some("%"),
+                            font: egui::TextStyle::Monospace.resolve(ui.style()),
+                            color,
+                            ..Default::default()
+                        });
                     } else {
                         ui.weak("🔋 --");
                     }
@@ -228,7 +236,14 @@ impl Sidebar {
                                     .sum::<f32>()
                                     / 1024.0;
                                 ui.label("KiB/s");
-                                ui.monospace(format!("{total_data_rate:>5.2}"));
+                                ui.add(Readout {
+                                    value: total_data_rate,
+                                    decimals: 2,
+                                    width_chars: 5,
+                                    font: egui::TextStyle::Monospace.resolve(ui.style()),
+                                    color: ui.visuals().text_color(),
+                                    ..Default::default()
+                                });
                                 ui.weak("⏬");
                             }
                         })

@@ -6,6 +6,7 @@ use mavspec::rust::dialects::common::messages::{BatteryStatus, SysStatus};
 use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable,
 };
+use crate::widgets::Readout;
 
 /// The pack's state of charge in percent, from `BATTERY_STATUS` if the system sends it and
 /// `SYS_STATUS` otherwise. Both report `-1` for a vehicle that does not measure it.
@@ -41,6 +42,26 @@ pub struct BatteryIndicator {
     pub compact: bool,
 }
 
+impl BatteryIndicator {
+    /// One value row, monospace so the digits stack in a column.
+    fn row(
+        ui: &egui::Ui,
+        value: f32,
+        decimals: usize,
+        unit: &'static str,
+        color: Color32,
+    ) -> Readout {
+        Readout {
+            value,
+            decimals,
+            unit: Some(unit),
+            font: egui::TextStyle::Monospace.resolve(ui.style()),
+            color,
+            ..Default::default()
+        }
+    }
+}
+
 impl egui::Widget for BatteryIndicator {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let color = soc_color(self.soc, ui.visuals());
@@ -71,10 +92,10 @@ impl egui::Widget for BatteryIndicator {
                             ui.add_space(5.0);
                         }
 
-                        ui.colored_label(color, format!("{:>3.0}%", self.soc * 100.0));
+                        ui.add(Self::row(ui, self.soc * 100.0, 0, "%", color));
 
                         if let Some(u) = self.voltage {
-                            ui.colored_label(color, format!("{u:.1}V"));
+                            ui.add(Self::row(ui, u, 1, "V", color));
                         }
 
                         if let Some(i) = self.current {
@@ -87,14 +108,14 @@ impl egui::Widget for BatteryIndicator {
                                 ui.visuals().strong_text_color(),
                                 f32::min(i_log, 1.0),
                             );
-                            ui.colored_label(color, format!("{i:.1}A"));
+                            ui.add(Self::row(ui, i, 1, "A", color));
                         }
 
                         if !self.compact
                             && let Some(cap) = self.consumed
                         {
                             ui.add_space(5.0);
-                            ui.label(format!("{cap:.0}"));
+                            ui.monospace(format!("{cap:.0}"));
                             ui.weak("mAh");
                         }
                     });

@@ -12,6 +12,7 @@ use mavspec::rust::dialects::ardupilotmega::messages::AoaSsa;
 use mavspec::rust::dialects::common::messages::{Attitude, LocalPositionNed, VfrHud};
 
 use crate::panes::{PositionSource, VelocityMode};
+use crate::widgets::Readout;
 
 pub struct ArtificialHorizon {
     system: System,
@@ -430,7 +431,17 @@ impl ArtificialHorizon {
         let top = painter.clip_rect().top() + 2.0;
         for (side, rows) in [(-1.0_f32, &left), (1.0, &right)] {
             for (row, (label, value, color)) in rows.iter().enumerate() {
-                painter.text(
+                Readout {
+                    value: *value,
+                    signed: true,
+                    width_chars: 6,
+                    prefix: label,
+                    font: FontId::monospace(SIZE),
+                    color: *color,
+                    ..Default::default()
+                }
+                .paint(
+                    painter,
                     Pos2::new(
                         center.x + side * (0.8 * radius + 6.0),
                         top + row as f32 * (SIZE + 2.0),
@@ -440,9 +451,6 @@ impl ArtificialHorizon {
                     } else {
                         Align2::LEFT_TOP
                     },
-                    format!("{label}{value:+6.1}"),
-                    FontId::monospace(SIZE),
-                    *color,
                 );
             }
         }
@@ -542,16 +550,13 @@ impl ArtificialHorizon {
             egui::StrokeKind::Outside,
         );
 
-        painter.text(
-            indicator_pos,
-            Align2::CENTER_CENTER,
-            format!(
-                "{:.1}",
-                (((heading.to_degrees() * 10.0).round() as i32 + 3600) % 3600) as f32 / 10.0
-            ),
-            FontId::monospace(14.0),
-            Color32::WHITE,
-        );
+        let heading = (((heading.to_degrees() * 10.0).round() as i32 + 3600) % 3600) as f32 / 10.0;
+        Readout {
+            value: heading,
+            font: FontId::monospace(14.0),
+            ..Default::default()
+        }
+        .paint(painter, indicator_pos, Align2::CENTER_CENTER);
     }
 
     fn draw_side_dial(
@@ -647,23 +652,15 @@ impl ArtificialHorizon {
 
         let text_x = if side > 0.0 { -22.0 } else { 76.0 };
 
-        painter.text(
-            center_side + Vec2::new(text_x - 5.0, 0.0),
-            Align2::RIGHT_CENTER,
-            format!("{value:.0}."),
-            FontId::monospace(18.0),
-            Color32::WHITE,
-        );
-        painter.text(
+        Readout {
+            value,
+            font: FontId::monospace(18.0),
+            ..Default::default()
+        }
+        .paint(
+            painter,
             center_side + Vec2::new(text_x, 0.0),
             Align2::RIGHT_CENTER,
-            format!("{:.1}", value % 1.0)
-                .chars()
-                .last()
-                .iter()
-                .collect::<String>(),
-            FontId::monospace(18.0),
-            Color32::WHITE,
         );
     }
 

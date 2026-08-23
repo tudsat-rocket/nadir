@@ -12,7 +12,7 @@ use nadir_core::{Link, LinkId, Origin, Source, tlog};
 use eframe::egui;
 
 use crate::views::SourceId;
-use crate::widgets::column_header;
+use crate::widgets::{Readout, column_header};
 
 const RECENT_LIMIT: usize = 10;
 
@@ -85,7 +85,14 @@ impl Overview {
                 ui.weak("⏬");
                 ui.monospace(format!("{:>3.0}", stats.received_packet_rate()));
                 ui.label("pkt/s ");
-                ui.monospace(format!("{:>5.2}", stats.received_data_rate() / 1024.0));
+                ui.add(Readout {
+                    value: stats.received_data_rate() / 1024.0,
+                    decimals: 2,
+                    width_chars: 5,
+                    font: egui::TextStyle::Monospace.resolve(ui.style()),
+                    color: ui.visuals().text_color(),
+                    ..Default::default()
+                });
                 ui.label("KiB/s");
             });
         }
@@ -114,16 +121,31 @@ impl Overview {
                 .system_id
                 .map_or_else(|| "--".to_owned(), |id| format!("0x{id:02x}"));
 
-            let label = format!(
-                "{}  {system_id}  {:>6.2} MiB",
-                log.recorded_at.format("%Y-%m-%d %H:%M:%S"),
-                log.bytes as f64 / (1024.0 * 1024.0),
+            let prefix = format!(
+                "{}  {system_id}  ",
+                log.recorded_at.format("%Y-%m-%d %H:%M:%S")
             );
 
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
-                ui.monospace(label)
-                    .on_hover_text(log.path.display().to_string());
+                // The size is its own widget, so the row butts its parts together rather than
+                // taking the horizontal spacing between them.
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.monospace(prefix);
+                    ui.add(Readout {
+                        value: log.bytes as f32 / (1024.0 * 1024.0),
+                        decimals: 2,
+                        width_chars: 6,
+                        font: egui::TextStyle::Monospace.resolve(ui.style()),
+                        color: ui.visuals().text_color(),
+                        ..Default::default()
+                    });
+                    // Full size, matching the "KiB/s" on the link rows above.
+                    ui.monospace(" MiB");
+                })
+                .response
+                .on_hover_text(log.path.display().to_string());
 
                 if ui
                     .add_enabled(!open.contains(&&log.path), egui::Button::new("Open"))

@@ -12,7 +12,7 @@ use rapid_dialect::rapid::enums::ValveId;
 use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING, instrument_visuals, readable};
 use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
-use crate::widgets::{BatteryIndicator, Plot, PlotLine};
+use crate::widgets::{BatteryIndicator, Plot, PlotLine, Readout};
 
 mod arducopter;
 mod arduplane;
@@ -286,17 +286,29 @@ fn valve_bar(
         }
     }
 
-    let label = match state {
-        Some(s) => format!("{:.0}%", s * 100.0),
-        None => "--".to_owned(),
-    };
-    painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        label,
-        FontId::proportional(11.0),
-        visuals.text_color(),
-    );
+    let font = FontId::monospace(11.0);
+    match state {
+        Some(s) => {
+            Readout {
+                value: s * 100.0,
+                decimals: 0,
+                unit: Some("%"),
+                font,
+                color: visuals.text_color(),
+                ..Default::default()
+            }
+            .paint(&painter, rect.center(), Align2::CENTER_CENTER);
+        }
+        None => {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "--",
+                font,
+                visuals.text_color(),
+            );
+        }
+    }
 
     let border = if blink && crate::colors::blink_on(time) {
         Stroke::new(2.0_f32, readable(COLOR_INDICATOR_WARNING, visuals))

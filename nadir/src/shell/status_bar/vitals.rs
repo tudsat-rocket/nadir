@@ -1,7 +1,7 @@
 use nadir_core::System;
 
 use eframe::egui;
-use egui::{Align, Color32, Layout, RichText, Vec2};
+use egui::{Align, Color32, FontId, Layout, RichText, Vec2};
 use mavspec::rust::dialects::common::messages::{
     BatteryStatus, GpsRawInt, Heartbeat, LocalPositionNed, SysStatus,
 };
@@ -10,7 +10,7 @@ use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable,
 };
 use crate::widgets::{
-    AutopilotLogo, TEXT_SIZE, column_header, link_quality, small_text, soc_color,
+    AutopilotLogo, Readout, TEXT_SIZE, column_header, link_quality, small_text, soc_color,
 };
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
@@ -24,6 +24,35 @@ fn current_color(ui: &egui::Ui, amps: f32) -> Color32 {
     ui.visuals()
         .weak_text_color()
         .lerp_to_gamma(ui.visuals().strong_text_color(), f32::min(ramp, 1.0))
+}
+
+/// One piece of a value cell. The rows mix prose ("9 sat", the "--" placeholder) with numbers that
+/// want the readout's tucked decimals and small units, so they cannot all be one string.
+enum Segment {
+    Text(String, Color32),
+    Value(Readout),
+}
+
+impl Segment {
+    fn value(value: f32, decimals: usize, unit: Option<&'static str>, color: Color32) -> Self {
+        Self::Value(Readout {
+            value,
+            decimals,
+            unit,
+            font: FontId::monospace(TEXT_SIZE),
+            color,
+            ..Default::default()
+        })
+    }
+
+    fn show(self, ui: &mut egui::Ui) {
+        match self {
+            Self::Text(text, color) => small_text(ui, &text, color),
+            Self::Value(readout) => {
+                ui.add(readout);
+            }
+        }
+    }
 }
 
 /// Right-hand columns of the status bar: the consumables and RF numbers a pilot watches
@@ -99,39 +128,36 @@ impl Vitals<'_> {
         // it can carry the battery widget's brightness ramp instead.
         let battery_cell = {
             let soc = battery.filter(|soc| *soc >= 0);
-            let mut charge = Vec::new();
-            if let Some(soc) = soc {
-                charge.push(format!("{soc}%"));
-            }
-            if let Some(u) = voltage {
-                charge.push(format!("{u:.1}V"));
-            }
+            // A pack reporting only volts stays neutral, with nothing to color it by.
+            let charge_color = soc.map_or(normal, |soc| {
+                soc_color(f32::from(soc) / 100.0, ui.visuals())
+            });
 
             let mut cell = Vec::new();
-            if !charge.is_empty() {
-                // A pack reporting only volts stays neutral, with nothing to color it by.
-                let color = soc.map_or(normal, |soc| {
-                    soc_color(f32::from(soc) / 100.0, ui.visuals())
-                });
-                cell.push((charge.join(", "), color));
+            if let Some(soc) = soc {
+                cell.push(Segment::value(f32::from(soc), 0, Some("%"), charge_color));
+            }
+            if let Some(u) = voltage {
+                if !cell.is_empty() {
+                    cell.push(Segment::Text(", ".into(), charge_color));
+                }
+                cell.push(Segment::value(u, 1, Some("V"), charge_color));
             }
             if let Some(i) = current {
+                let color = current_color(ui, i);
+                if !cell.is_empty() {
+                    cell.push(Segment::Text(", ".into(), color));
+                }
                 // Sub-amp draws are the norm on an avionics bus, where "0.0A" would hide the
                 // reading.
-                let text = if i.abs() < 1.0 {
-                    format!("{:.0}mA", i * 1000.0)
+                cell.push(if i.abs() < 1.0 {
+                    Segment::value(i * 1000.0, 0, Some("mA"), color)
                 } else {
-                    format!("{i:.1}A")
-                };
-                let text = if cell.is_empty() {
-                    text
-                } else {
-                    format!(", {text}")
-                };
-                cell.push((text, current_color(ui, i)));
+                    Segment::value(i, 1, Some("A"), color)
+                });
             }
             if cell.is_empty() {
-                cell.push(("--".into(), nodata));
+                cell.push(Segment::Text("--".into(), nodata));
             }
             cell
         };
@@ -139,37 +165,48 @@ impl Vitals<'_> {
         let gps = system.last_message::<GpsRawInt>().ok();
         let gps_cell = match gps {
             Some(g) if g.satellites_visible != u8::MAX => {
-                let hdop = (g.eph != u16::MAX).then(|| f32::from(g.eph) / 100.0);
-                let text = match hdop {
-                    Some(h) => format!("{} sat {h:.1}", g.satellites_visible),
-                    None => format!("{} sat", g.satellites_visible),
-                };
                 let color = if g.satellites_visible >= 6 {
                     good
                 } else {
                     warning
                 };
-                (text, color)
+                let mut cell = vec![Segment::Text(
+                    format!("{} sat ", g.satellites_visible),
+                    color,
+                )];
+                if g.eph != u16::MAX {
+                    cell.push(Segment::value(f32::from(g.eph) / 100.0, 1, None, color));
+                }
+                cell
             }
-            _ => ("--".into(), nodata),
+            _ => vec![Segment::Text("--".into(), nodata)],
         };
 
         // Both directions get their own row: on narrow windows the Links pane is dropped from the
         // status bar entirely, and these two numbers are all that is left of it.
         let (downlink, uplink) = link_quality(system);
         let link_cell = |lq: Option<f32>| match lq {
-            Some(lq) if lq > 0.9 => (format!("{:.0}%", 100.0 * lq), good),
-            Some(lq) if lq > 0.5 => (format!("{:.0}%", 100.0 * lq), warning),
-            Some(lq) => (format!("{:.0}%", 100.0 * lq), limits),
-            None => ("--".into(), nodata),
+            Some(lq) => {
+                let color = if lq > 0.9 {
+                    good
+                } else if lq > 0.5 {
+                    warning
+                } else {
+                    limits
+                };
+                vec![Segment::value(100.0 * lq, 0, Some("%"), color)]
+            }
+            None => vec![Segment::Text("--".into(), nodata)],
         };
 
         let uptime_cell = match system.last_message::<LocalPositionNed>() {
-            Ok(lp) => (
-                format!("{:.1}s", f64::from(lp.time_boot_ms) / 1000.0),
+            Ok(lp) => vec![Segment::value(
+                lp.time_boot_ms as f32 / 1000.0,
+                1,
+                Some("s"),
                 normal,
-            ),
-            Err(_) => ("--".into(), nodata),
+            )],
+            Err(_) => vec![Segment::Text("--".into(), nodata)],
         };
 
         // Same presentation as the preflight pane's status checks: a striped two-column grid, weak
@@ -181,12 +218,12 @@ impl Vitals<'_> {
             .min_col_width(0.0)
             .show(ui, |ui| {
                 for (label, segments) in [
-                    ("🕑 Uptime", vec![uptime_cell]),
+                    ("🕑 Uptime", uptime_cell),
                     ("🔋 Battery", battery_cell),
-                    ("💾 Flash", vec![("--".into(), nodata)]),
-                    ("📡 GPS", vec![gps_cell]),
-                    ("📶 Downlink", vec![link_cell(downlink)]),
-                    ("📶 Uplink", vec![link_cell(uplink)]),
+                    ("💾 Flash", vec![Segment::Text("--".into(), nodata)]),
+                    ("📡 GPS", gps_cell),
+                    ("📶 Downlink", link_cell(downlink)),
+                    ("📶 Uplink", link_cell(uplink)),
                 ] {
                     // Extend, not Truncate: inside a grid cell a truncating label shrinks to the
                     // column width it is itself defining, which collapses to an ellipsis.
@@ -200,8 +237,8 @@ impl Vitals<'_> {
                     ui.horizontal(|ui| {
                         // Segments carry their own separators, so they butt up against each other.
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        for (value, color) in &segments {
-                            small_text(ui, value, *color);
+                        for segment in segments {
+                            segment.show(ui);
                         }
                         ui.add_space(ui.available_width().max(0.0));
                     });
