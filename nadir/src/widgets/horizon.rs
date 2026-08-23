@@ -23,6 +23,9 @@ const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
 const N: usize = 64;
 // How far in front of the ball the camera sits, in ball radii. Lower is more perspective.
 const CAMERA: f32 = 3.0;
+// Half the roll range the dial around the top of the ball covers, in degrees.
+const ROLL_LIMIT: i32 = 45;
+const ROLL_STEP: usize = 15;
 
 impl ArtificialHorizon {
     pub fn new(system: &System, source: PositionSource, velocity_mode: VelocityMode) -> Self {
@@ -38,11 +41,11 @@ impl ArtificialHorizon {
         puffin::profile_function!();
 
         let original_rect = painter.clip_rect();
-        let ball_clip_rect = Rect::from_center_size(
-            painter.clip_rect().center(),
-            Vec2::new(1.6 * radius, 1.6 * radius),
-        );
-        painter.set_clip_rect(ball_clip_rect);
+        // The top edge carries the roll dial, so only the sides and the bottom are clipped back.
+        painter.set_clip_rect(Rect::from_x_y_ranges(
+            center.x - 0.8 * radius..=center.x + 0.8 * radius,
+            original_rect.top()..=center.y + 0.8 * radius,
+        ));
 
         let rotation = nalgebra::Rotation3::new(nalgebra::Vector3::x() * pitch);
         let pole = rotation * nalgebra::Vector3::z();
@@ -314,6 +317,70 @@ impl ArtificialHorizon {
                 }));
         }
         painter.add(mesh);
+    }
+
+    /// The dial around the top edge of the ball. The ball itself does not roll, so the pointer is
+    /// what moves, banking with the aircraft symbol.
+    fn draw_roll_dial(&self, painter: &egui::Painter, roll: f32, center: Pos2, radius: f32) {
+        const BORDER: f32 = 2.0;
+        const TICK: f32 = 4.0;
+        const POINTER: f32 = 6.5;
+
+        let limit = (ROLL_LIMIT as f32).to_radians();
+        let at = |angle: f32, out: f32| center + Vec2::new(angle.sin(), -angle.cos()) * out;
+
+        let arc: Vec<_> = (0..=N)
+            .map(|i| at(limit * (2.0 * i as f32 / N as f32 - 1.0), radius))
+            .collect();
+        painter.add(Shape::Path(PathShape::line(
+            arc,
+            Stroke::new(BORDER, Color32::WHITE),
+        )));
+
+        // Everything below hangs off the outside of the border, which leaves the ball itself clear
+        // but has only the sliver above it to fit into.
+        let outside = radius + BORDER * 0.5;
+
+        for tick in (-ROLL_LIMIT..=ROLL_LIMIT).step_by(ROLL_STEP) {
+            let major = tick == 0 || tick.abs() == ROLL_LIMIT;
+            let angle = (tick as f32).to_radians();
+            painter.line(
+                vec![
+                    at(angle, outside),
+                    at(angle, outside + if major { TICK } else { TICK * 0.6 }),
+                ],
+                Stroke::new(if major { 1.5_f32 } else { 1.0 }, Color32::WHITE),
+            );
+        }
+
+        let clamped = roll.clamp(-limit, limit);
+        let out = Vec2::new(clamped.sin(), -clamped.cos());
+        let along = Vec2::new(clamped.cos(), clamped.sin());
+        let apex = center + out * (outside + TICK + 1.5);
+        painter.add(Shape::convex_polygon(
+            vec![
+                apex,
+                apex + out * POINTER + along * POINTER * 0.6,
+                apex + out * POINTER - along * POINTER * 0.6,
+            ],
+            Color32::WHITE,
+            Stroke::NONE,
+        ));
+
+        // Past the end of the dial the pointer stops, so a second arrow has to carry the direction.
+        if roll.abs() > limit {
+            let side = roll.signum();
+            let base = apex + out * (POINTER * 0.5) + along * side * (POINTER * 0.6 + 3.0);
+            painter.add(Shape::convex_polygon(
+                vec![
+                    base + along * side * 5.0,
+                    base + out * 3.0,
+                    base - out * 3.0,
+                ],
+                Color32::WHITE,
+                Stroke::NONE,
+            ));
+        }
     }
 
     fn draw_roll_indicator(
@@ -601,12 +668,12 @@ impl egui::Widget for ArtificialHorizon {
         painter.rect_filled(
             Rect::from_two_pos(rect.left_top(), rect.right_center()),
             CornerRadius::ZERO,
-            COLOR_SKY.gamma_multiply(0.9),
+            COLOR_SKY.gamma_multiply(0.5),
         );
         painter.rect_filled(
             Rect::from_two_pos(rect.left_bottom(), rect.right_center()),
             CornerRadius::ZERO,
-            COLOR_GROUND.gamma_multiply(0.9),
+            COLOR_GROUND.gamma_multiply(0.5),
         );
         painter.line(
             vec![rect.left_center(), rect.right_center()],
@@ -615,6 +682,7 @@ impl egui::Widget for ArtificialHorizon {
 
         // draw our horizon and roll indicators
         self.draw_ball(&mut painter, pitch, center, radius);
+        self.draw_roll_dial(&painter, roll, center, radius);
         self.draw_roll_indicator(&mut painter, roll, center, radius);
 
         // draw some darkened backgrounds on the sides for our velocity and altitude dials
