@@ -6,7 +6,7 @@ default:
     @just --list
 
 # --all-targets so test and bench targets get type-checked too, --workspace because
-# default-members is ["gui"] and a bare cargo invocation only sees that crate.
+# default-members is ["nadir"] and a bare cargo invocation only sees that crate.
 
 check:
     cargo check --workspace --all-features --all-targets
@@ -17,16 +17,16 @@ clippy:
 test:
     cargo test --workspace --all-features
 
-# The web build: only gui and its dependencies, since macros is a host proc-macro crate
+# The web build: only nadir and its dependencies, since nadir-macros is a host proc-macro crate
 wasm:
-    cargo build -p gui --target wasm32-unknown-unknown
+    cargo build -p nadir --target wasm32-unknown-unknown
 
 # The Android app, as a sideloadable debug APK. Needs cargo-ndk, an SDK and an NDK
 android:
     ANDROID_HOME="{{android_sdk}}" cargo ndk {{ prepend("-t ", android_abis) }} \
-        -o android/app/src/main/jniLibs build -p android --profile android
-    cd android && ANDROID_HOME="{{android_sdk}}" ./gradlew assembleDebug
-    adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+        -o nadir-android/app/src/main/jniLibs build -p nadir-android --profile android
+    cd nadir-android && ANDROID_HOME="{{android_sdk}}" ./gradlew assembleDebug
+    adb install -r nadir-android/app/build/outputs/apk/debug/app-debug.apk
 
 fmt:
     cargo fmt --all

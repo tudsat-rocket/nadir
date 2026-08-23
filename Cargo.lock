@@ -148,16 +148,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "android"
-version = "0.1.0"
-dependencies = [
- "android_log-sys",
- "gui",
- "libc",
- "tracing",
-]
-
-[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -848,30 +838,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "db",
- "directories",
- "mavio",
- "maviola",
- "mavspec",
- "rapid-dialect",
- "serde",
- "socketcan",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "tokio-serial",
- "toml",
- "tracing",
- "wasm-bindgen-futures",
- "wasmtimer",
- "web-time",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -993,18 +959,6 @@ name = "data-url"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
-
-[[package]]
-name = "db"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "macros",
- "mavinspect",
- "mavspec",
- "rapid-dialect",
- "thiserror 2.0.20",
-]
 
 [[package]]
 name = "deranged"
@@ -2000,43 +1954,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gui"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "console_error_panic_hook",
- "convert_case",
- "core",
- "eframe",
- "egui",
- "egui-notify",
- "egui-wgpu",
- "egui-winit",
- "egui_extras",
- "egui_plot",
- "egui_tiles",
- "egui_tracing",
- "log",
- "mavio",
- "maviola",
- "mavspec",
- "nalgebra",
- "puffin",
- "puffin_egui",
- "rapid-dialect",
- "rfd",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "walkers",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "web-time",
- "wgpu",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2718,19 +2635,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "macros"
-version = "0.1.0"
-dependencies = [
- "convert_case",
- "mavinspect",
- "mavspec",
- "quote",
- "rapid-dialect",
- "syn 2.0.119",
- "tracing",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3032,6 +2936,102 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "nadir"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "console_error_panic_hook",
+ "convert_case",
+ "eframe",
+ "egui",
+ "egui-notify",
+ "egui-wgpu",
+ "egui-winit",
+ "egui_extras",
+ "egui_plot",
+ "egui_tiles",
+ "egui_tracing",
+ "log",
+ "mavio",
+ "maviola",
+ "mavspec",
+ "nadir-core",
+ "nalgebra",
+ "puffin",
+ "puffin_egui",
+ "rapid-dialect",
+ "rfd",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "walkers",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+ "wgpu",
+]
+
+[[package]]
+name = "nadir-android"
+version = "0.1.0"
+dependencies = [
+ "android_log-sys",
+ "libc",
+ "nadir",
+ "tracing",
+]
+
+[[package]]
+name = "nadir-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "directories",
+ "mavio",
+ "maviola",
+ "mavspec",
+ "nadir-store",
+ "rapid-dialect",
+ "serde",
+ "socketcan",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-serial",
+ "toml",
+ "tracing",
+ "wasm-bindgen-futures",
+ "wasmtimer",
+ "web-time",
+]
+
+[[package]]
+name = "nadir-macros"
+version = "0.1.0"
+dependencies = [
+ "convert_case",
+ "mavinspect",
+ "mavspec",
+ "quote",
+ "rapid-dialect",
+ "syn 2.0.119",
+ "tracing",
+]
+
+[[package]]
+name = "nadir-store"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mavinspect",
+ "mavspec",
+ "nadir-macros",
+ "rapid-dialect",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
