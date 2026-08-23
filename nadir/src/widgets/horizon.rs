@@ -8,6 +8,7 @@ use egui::{
     Align, Align2, Color32, CornerRadius, FontFamily, FontId, Pos2, Rect, Sense, Shape, Stroke,
     TextFormat, TextureId, Vec2,
 };
+use mavspec::rust::dialects::ardupilotmega::messages::AoaSsa;
 use mavspec::rust::dialects::common::messages::{Attitude, LocalPositionNed, VfrHud};
 
 use crate::panes::{PositionSource, VelocityMode};
@@ -20,6 +21,7 @@ pub struct ArtificialHorizon {
 
 const COLOR_GROUND: Color32 = Color32::from_rgb(0x7d, 0x52, 0x33);
 const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
+const COLOR_FLIGHT_PATH: Color32 = Color32::from_rgb(0x2e, 0xa0, 0x4e);
 const N: usize = 64;
 // How far in front of the ball the camera sits, in ball radii. Lower is more perspective.
 const CAMERA: f32 = 3.0;
@@ -36,7 +38,14 @@ impl ArtificialHorizon {
         }
     }
 
-    fn draw_ball(&self, painter: &mut egui::Painter, pitch: f32, center: Pos2, radius: f32) {
+    fn draw_ball(
+        &self,
+        painter: &mut egui::Painter,
+        pitch: f32,
+        aoa_ssa: Option<&AoaSsa>,
+        center: Pos2,
+        radius: f32,
+    ) {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
@@ -192,6 +201,20 @@ impl ArtificialHorizon {
                     );
                 }
             }
+        }
+
+        // The flight path lies off the nose by alpha down and beta right, which puts it on the
+        // same scale as the pitch ladder it is read against.
+        if let Some(aoa_ssa) = aoa_ssa {
+            let a = aoa_ssa.aoa.to_radians();
+            let b = aoa_ssa.ssa.to_radians();
+            let direction = nalgebra::Vector3::new(b.sin(), b.cos() * a.cos(), b.cos() * a.sin());
+            painter.circle(
+                Self::project(direction, center, radius),
+                2.5,
+                COLOR_FLIGHT_PATH,
+                Stroke::new(1.0_f32, Color32::BLACK),
+            );
         }
 
         // restore our original clip rect
@@ -380,6 +403,48 @@ impl ArtificialHorizon {
                 Color32::WHITE,
                 Stroke::NONE,
             ));
+        }
+    }
+
+    /// Exact attitude in degrees, in the corners the dial leaves free either side of it.
+    fn draw_readouts(
+        &self,
+        painter: &egui::Painter,
+        pitch: f32,
+        roll: f32,
+        aoa_ssa: Option<&AoaSsa>,
+        center: Pos2,
+        radius: f32,
+    ) {
+        const SIZE: f32 = 10.0;
+
+        let mut left = vec![("p", pitch.to_degrees(), Color32::WHITE)];
+        let mut right = vec![("r", roll.to_degrees(), Color32::WHITE)];
+
+        // Angle of attack and sideslip go by alpha and beta, and only ArduPlane sends them.
+        if let Some(aoa_ssa) = aoa_ssa {
+            left.push(("\u{3b1}", aoa_ssa.aoa, COLOR_FLIGHT_PATH));
+            right.push(("\u{3b2}", aoa_ssa.ssa, COLOR_FLIGHT_PATH));
+        }
+
+        let top = painter.clip_rect().top() + 2.0;
+        for (side, rows) in [(-1.0_f32, &left), (1.0, &right)] {
+            for (row, (label, value, color)) in rows.iter().enumerate() {
+                painter.text(
+                    Pos2::new(
+                        center.x + side * (0.8 * radius + 6.0),
+                        top + row as f32 * (SIZE + 2.0),
+                    ),
+                    if side < 0.0 {
+                        Align2::RIGHT_TOP
+                    } else {
+                        Align2::LEFT_TOP
+                    },
+                    format!("{label}{value:+6.1}"),
+                    FontId::monospace(SIZE),
+                    *color,
+                );
+            }
         }
     }
 
@@ -652,6 +717,7 @@ impl egui::Widget for ArtificialHorizon {
         let pitch = attitude.as_ref().map_or(0.0, |a| a.pitch);
         let roll = attitude.as_ref().map_or(0.0, |a| a.roll);
         let yaw = attitude.as_ref().map_or(0.0, |a| a.yaw);
+        let aoa_ssa = self.system.last_message::<AoaSsa>().ok();
 
         let local_position = self.system.last_message::<LocalPositionNed>().ok();
         let vfr_hud = self.system.last_message::<VfrHud>().ok();
@@ -681,8 +747,9 @@ impl egui::Widget for ArtificialHorizon {
         );
 
         // draw our horizon and roll indicators
-        self.draw_ball(&mut painter, pitch, center, radius);
+        self.draw_ball(&mut painter, pitch, aoa_ssa.as_ref(), center, radius);
         self.draw_roll_dial(&painter, roll, center, radius);
+        self.draw_readouts(&painter, pitch, roll, aoa_ssa.as_ref(), center, radius);
         self.draw_roll_indicator(&mut painter, roll, center, radius);
 
         // draw some darkened backgrounds on the sides for our velocity and altitude dials
