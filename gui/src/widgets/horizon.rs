@@ -1,12 +1,12 @@
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, TAU};
 
 use core::System;
 
-use egui::epaint::{PathShape, TextShape};
+use egui::epaint::{Mesh, PathShape, TextShape, Vertex};
 use egui::text::LayoutJob;
 use egui::{
     Align, Align2, Color32, CornerRadius, FontFamily, FontId, Pos2, Rect, Sense, Shape, Stroke,
-    TextFormat, Vec2,
+    TextFormat, TextureId, Vec2,
 };
 use mavspec::rust::dialects::common::messages::{Attitude, LocalPositionNed, VfrHud};
 
@@ -20,7 +20,9 @@ pub struct ArtificialHorizon {
 
 const COLOR_GROUND: Color32 = Color32::from_rgb(0x7d, 0x52, 0x33);
 const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
-const N: usize = 16;
+const N: usize = 64;
+// How far in front of the ball the camera sits, in ball radii. Lower is more perspective.
+const CAMERA: f32 = 3.0;
 
 impl ArtificialHorizon {
     pub fn new(system: &System, source: PositionSource, velocity_mode: VelocityMode) -> Self {
@@ -42,90 +44,148 @@ impl ArtificialHorizon {
         );
         painter.set_clip_rect(ball_clip_rect);
 
-        // Our ball will almost always have a convex and a concave half. We want convex polygons,
-        // so render the concave part first as a circle.
+        let rotation = nalgebra::Rotation3::new(nalgebra::Vector3::x() * pitch);
+        let pole = rotation * nalgebra::Vector3::z();
+        let ahead_is_sky = pole.y < 0.0;
+
+        // The horizon cuts the visible cap in two, and only the half around the point facing us is
+        // convex, so that is the one we lay on top as a polygon. With the horizon out of view there
+        // is nothing to lay on top and the whole ball is one colour.
+        let horizon = Self::visible_ring(&rotation, 0.0);
+        let ahead = if ahead_is_sky {
+            COLOR_SKY
+        } else {
+            COLOR_GROUND
+        };
+        let behind = if ahead_is_sky {
+            COLOR_GROUND
+        } else {
+            COLOR_SKY
+        };
         painter.circle_filled(
             center,
             radius,
-            if pitch > 0.0 { COLOR_GROUND } else { COLOR_SKY },
+            if horizon.len() >= 2 { behind } else { ahead },
         );
 
-        painter.add(Shape::Path(PathShape::convex_polygon(
-            (0..N)
-                .map(|i| {
-                    let a = PI * (i as f32) / (N as f32);
-                    center + Vec2::new(a.cos(), a.sin() * -pitch.signum()) * radius
-                })
-                .chain((0..N).map(|i| {
-                    let a = PI - PI * (i as f32) / (N as f32);
-                    center + Vec2::new(a.cos(), a.sin() * pitch.sin()) * radius
-                }))
-                .collect(),
-            if pitch < 0.0 { COLOR_GROUND } else { COLOR_SKY },
-            Stroke::NONE,
-        )));
+        if let [first, .., last] = horizon.as_slice() {
+            let limb_radius = (1.0 - 1.0 / (CAMERA * CAMERA)).sqrt();
+            let angle_of = |v: &nalgebra::Vector3<f32>| v.z.atan2(v.x);
 
-        // project our pitch ticks into 2d and paint them
-        for pitch_tick in (-90i32..=90).step_by(5) {
+            // Close the horizon along whichever way round the limb stays on our side of it.
+            let sweep = {
+                let delta = (angle_of(first) - angle_of(last)).rem_euclid(TAU);
+                let middle = angle_of(last) + delta / 2.0;
+                let on_limb = nalgebra::Vector3::new(
+                    middle.cos() * limb_radius,
+                    1.0 / CAMERA,
+                    middle.sin() * limb_radius,
+                );
+                if (on_limb.dot(&pole) < 0.0) == ahead_is_sky {
+                    delta
+                } else {
+                    delta - TAU
+                }
+            };
+
+            // The samples stop one step short of the limb, so nudge the ends out to meet it.
+            let to_limb = |v: &nalgebra::Vector3<f32>| {
+                center + (Self::project(*v, center, radius) - center).normalized() * radius
+            };
+
+            let steps = (sweep.abs() / TAU * N as f32).ceil().max(1.0);
+            let mut region = vec![to_limb(first)];
+            region.extend(horizon.iter().map(|v| Self::project(*v, center, radius)));
+            region.push(to_limb(last));
+            region.extend((1..steps as usize).map(|i| {
+                let a = angle_of(last) + sweep * (i as f32) / steps;
+                center + Vec2::new(a.cos(), a.sin()) * radius
+            }));
+
+            painter.add(Shape::convex_polygon(region, ahead, Stroke::NONE));
+        }
+
+        // Between the full lines, a short strip either side of the meridian facing us. Its length
+        // on screen is fixed, so the angle it spans has to come from the scale where it sits.
+        for pitch_tick in (-85i32..90).step_by(10) {
             let r = (pitch_tick as f32).to_radians();
-
-            let points3d = (0..N).map(|i| {
-                let a = PI * (i as f32) / (N as f32);
-                nalgebra::Vector3::new(a.cos() * r.cos(), a.sin() * r.cos(), -r.sin())
-            });
-
-            let rotation = nalgebra::Rotation3::new(nalgebra::Vector3::x() * pitch);
-            let transformed = points3d.map(|p| rotation * p);
-
-            let projected: Vec<_> = transformed
-                .filter_map(|v| {
-                    (v.y > 0.0
-                        && (pitch_tick == 0
-                            || (v.x.abs() < 0.4
-                                && (pitch_tick.abs() % 20 != 10 || v.x.abs() < 0.1)
-                                && (pitch_tick.abs() % 10 != 5 || v.x.abs() < 0.05))))
-                        .then_some(center + Vec2::new(v.x, v.z) * radius)
-                })
-                .collect();
-
-            if let Some(pos) = projected.first()
-                && pitch_tick.abs() == 90
-            {
-                painter.circle_filled(*pos, 1.0, Color32::WHITE);
+            let front = rotation * nalgebra::Vector3::new(0.0, r.cos(), -r.sin());
+            if front.y * CAMERA <= 1.0 {
+                continue;
             }
 
-            painter.add(Shape::Path(PathShape::line(
-                projected.clone(),
-                Stroke::new(
-                    if pitch_tick == 0 {
-                        2.0_f32
-                    } else if pitch_tick % 20 == 10 || pitch_tick % 10 == 5 {
-                        0.5_f32
-                    } else {
-                        1.0_f32
-                    },
-                    Color32::WHITE,
-                ),
-            )));
+            let scale = (CAMERA * CAMERA - 1.0).sqrt() / (CAMERA - front.y);
+            let half = (0.06 / (scale * r.cos())).min(FRAC_PI_2);
 
-            if pitch_tick % 20 == 0 && pitch_tick != 0 && !projected.is_empty() {
-                for center in [projected[0], projected[projected.len() - 1]] {
-                    painter.rect_filled(
-                        Rect::from_center_size(center, Vec2::new(30.0, 20.0)),
-                        CornerRadius::ZERO,
-                        if pitch_tick > 0 {
-                            COLOR_SKY
-                        } else {
-                            COLOR_GROUND
-                        },
-                    );
-                    painter.text(
-                        center,
-                        Align2::CENTER_CENTER,
+            let strip: Vec<_> = (0..=4)
+                .map(|i| {
+                    let a = FRAC_PI_2 + half * (i as f32 / 2.0 - 1.0);
+                    rotation
+                        * nalgebra::Vector3::new(a.cos() * r.cos(), a.sin() * r.cos(), -r.sin())
+                })
+                .filter(|v| v.y * CAMERA > 1.0)
+                .map(|v| Self::project(v, center, radius))
+                .collect();
+
+            painter.add(Shape::Path(PathShape::line(
+                strip,
+                Stroke::new(0.5_f32, Color32::WHITE),
+            )));
+        }
+
+        for pitch_tick in (-90i32..=90).step_by(10) {
+            let r = (pitch_tick as f32).to_radians();
+
+            let visible = Self::visible_ring(&rotation, r);
+            let projected: Vec<_> = visible
+                .iter()
+                .map(|v| Self::project(*v, center, radius))
+                .collect();
+
+            if pitch_tick.abs() == 90 {
+                if let Some(pos) = projected.first() {
+                    painter.circle_filled(*pos, 1.0, Color32::WHITE);
+                }
+                continue;
+            }
+
+            let stroke = Stroke::new(
+                match pitch_tick {
+                    0 => 2.0_f32,
+                    tick if tick % 20 == 0 => 1.0,
+                    _ => 0.5,
+                },
+                Color32::WHITE,
+            );
+
+            painter.add(Shape::Path(if visible.len() == N {
+                PathShape::closed_line(projected, stroke)
+            } else {
+                PathShape::line(projected, stroke)
+            }));
+
+            if pitch_tick % 20 == 0 && (20..=60).contains(&pitch_tick.abs()) {
+                let plate = if pitch_tick > 0 {
+                    COLOR_SKY
+                } else {
+                    COLOR_GROUND
+                };
+
+                for side in [-1.0_f32, 1.0] {
+                    // A fixed longitude either side of the meridian facing us, so each label keeps
+                    // its own spot on the ball whatever the ball is doing.
+                    let a = FRAC_PI_2 - side * 30.0_f32.to_radians();
+                    let anchor = rotation
+                        * nalgebra::Vector3::new(a.cos() * r.cos(), a.sin() * r.cos(), -r.sin());
+
+                    Self::draw_surface_label(
+                        painter,
                         format!("{pitch_tick}"),
-                        FontId::monospace(10.0),
-                        //Color32::BLACK,
-                        Color32::WHITE,
+                        anchor,
+                        pole,
+                        plate,
+                        center,
+                        radius,
                     );
                 }
             }
@@ -133,6 +193,127 @@ impl ArtificialHorizon {
 
         // restore our original clip rect
         painter.set_clip_rect(original_rect);
+    }
+
+    /// The run of the latitude circle at `latitude` radians that faces the camera, ordered so that
+    /// it is contiguous.
+    fn visible_ring(
+        rotation: &nalgebra::Rotation3<f32>,
+        latitude: f32,
+    ) -> Vec<nalgebra::Vector3<f32>> {
+        let ring: Vec<_> = (0..N)
+            .map(|i| {
+                let a = TAU * (i as f32) / (N as f32);
+                rotation
+                    * nalgebra::Vector3::new(
+                        a.cos() * latitude.cos(),
+                        a.sin() * latitude.cos(),
+                        -latitude.sin(),
+                    )
+            })
+            .collect();
+
+        // Starting at the point furthest from the camera keeps the facing ones in one run instead
+        // of wrapping the end of the vector.
+        let back = ring
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| a.y.total_cmp(&b.y))
+            .map_or(0, |(i, _)| i);
+
+        ring.iter()
+            .cycle()
+            .skip(back)
+            .take(N)
+            .filter(|v| v.y * CAMERA > 1.0)
+            .copied()
+            .collect()
+    }
+
+    /// Projects a point on the unit ball, putting its limb exactly on `radius`.
+    fn project(v: nalgebra::Vector3<f32>, center: Pos2, radius: f32) -> Pos2 {
+        let scale = radius * (CAMERA * CAMERA - 1.0).sqrt() / (CAMERA - v.y);
+        center + Vec2::new(v.x, v.z) * scale
+    }
+
+    /// Draws `text` as if it were painted onto the ball's surface at `anchor`, a unit vector in
+    /// view space (camera on +y, screen axes +x right and +z down). `pole` is the ball's axis.
+    fn draw_surface_label(
+        painter: &egui::Painter,
+        text: String,
+        anchor: nalgebra::Vector3<f32>,
+        pole: nalgebra::Vector3<f32>,
+        plate: Color32,
+        center: Pos2,
+        radius: f32,
+    ) {
+        const PLATE_STEPS: usize = 3;
+
+        // How much the glyphs end up squashed: the surface turned away from us, against the
+        // perspective scale that being closer than the limb buys back. Negative behind the limb.
+        // Squashed much past this, bilinear minification smears them, and wgpu has no mipmaps.
+        let facing = (CAMERA * anchor.y - 1.0) / (1.0 + CAMERA * (CAMERA - 2.0 * anchor.y)).sqrt();
+        if facing * (CAMERA * CAMERA - 1.0).sqrt() / (CAMERA - anchor.y) < 0.4 {
+            return;
+        }
+
+        // Orthonormal and aligned with the latitude line through `anchor`, so the text lands on
+        // the sphere without shear and stays parallel to the pitch line it belongs to.
+        let mut right = anchor.cross(&pole).normalize();
+        let mut down = right.cross(&anchor);
+
+        // Past the ball's axis that tangent points the other way, which would set the label
+        // upside down; half a turn keeps it reading left to right.
+        if right.x < 0.0 {
+            right = -right;
+            down = -down;
+        }
+
+        let galley = painter.layout_no_wrap(text, FontId::monospace(10.0), Color32::WHITE);
+        let origin = galley.rect.center().to_vec2();
+        let project = |local: Pos2| {
+            let offset = local - origin;
+            let p = (anchor + (right * offset.x + down * offset.y) / radius).normalize();
+            Self::project(p, center, radius)
+        };
+
+        // The plate keeps the pitch lines from crossing the glyphs. Its edges bow with the surface,
+        // so they need more than the four corners.
+        let plate_rect = galley.rect.expand2(Vec2::new(5.0, 2.0));
+        let corners = [
+            plate_rect.left_top(),
+            plate_rect.right_top(),
+            plate_rect.right_bottom(),
+            plate_rect.left_bottom(),
+            plate_rect.left_top(),
+        ];
+        let mut outline = Vec::with_capacity(4 * PLATE_STEPS);
+        for edge in corners.windows(2) {
+            for step in 0..PLATE_STEPS {
+                outline.push(project(
+                    edge[0].lerp(edge[1], step as f32 / PLATE_STEPS as f32),
+                ));
+            }
+        }
+        painter.add(Shape::convex_polygon(outline, plate, Stroke::NONE));
+
+        let [tex_width, tex_height] = painter.fonts(egui::epaint::Fonts::font_image_size);
+        let uv_scale = Vec2::new(1.0 / tex_width as f32, 1.0 / tex_height as f32);
+
+        let mut mesh = Mesh::with_texture(TextureId::default());
+        for row in &galley.rows {
+            let base = mesh.vertices.len() as u32;
+            mesh.indices
+                .extend(row.visuals.mesh.indices.iter().map(|i| i + base));
+            mesh.vertices
+                .extend(row.visuals.mesh.vertices.iter().map(|v| Vertex {
+                    pos: project(row.pos + v.pos.to_vec2()),
+                    // Galley UVs are in texels; a `TextShape` would have normalized them for us.
+                    uv: (v.uv.to_vec2() * uv_scale).to_pos2(),
+                    color: v.color,
+                }));
+        }
+        painter.add(mesh);
     }
 
     fn draw_roll_indicator(
