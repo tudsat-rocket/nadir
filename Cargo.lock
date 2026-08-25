@@ -2934,7 +2934,7 @@ dependencies = [
  "mavspec",
  "quote",
  "rapid-dialect",
- "syn 2.0.119",
+ "syn 3.0.3",
  "tracing",
 ]
 
