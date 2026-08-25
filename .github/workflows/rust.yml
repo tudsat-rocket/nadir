@@ -6,7 +6,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings" # treat warnings as errors
 
-# The toolchain (channel 1.97.1) is pinned in rust-toolchain.toml and auto-installed by rustup on
+# The toolchain (channel 1.98.0) is pinned in rust-toolchain.toml and auto-installed by rustup on
 # the first cargo invocation.
 
 jobs:
