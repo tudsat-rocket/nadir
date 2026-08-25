@@ -16,8 +16,8 @@ mavinspect = { workspace = true }
 rapid-dialect = { workspace = true }
 convert_case = { workspace = true }
 
-quote = "1.0.42"
-syn = "2.0.111"
+quote = "1.0.47"
+syn = "2.0.119"
 
 [lints]
 workspace = true
