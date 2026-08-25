@@ -34,6 +34,10 @@ fmt:
 fmt-check:
     cargo fmt --all --check
 
+# Advisories against Cargo.lock. Documented exceptions live in `.cargo/audit.toml`
+audit:
+    cargo audit
+
 # Everything CI runs
 suite:
     @just check
@@ -41,3 +45,4 @@ suite:
     @just wasm
     @just fmt-check
     @just clippy
+    @just audit

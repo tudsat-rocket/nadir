@@ -1,0 +1,26 @@
+[advisories]
+# Every entry here is reached only through a dependency we do not control. Re-check them whenever
+# mavinspect, walkers or winit move, and drop the ones that stop applying.
+ignore = [
+    # quick-xml 0.37 via mavinspect, which parses the vendored MAVLink dialect XML at build time.
+    # Both are denial of service on adversarial input, and the input is files in our own tree.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+
+    # serde_yml/libyml, same build-time path through mavinspect.
+    "RUSTSEC-2025-0067",
+    "RUSTSEC-2025-0068",
+
+    # atomic-polyfill via postcard -> heapless, under mavspec and rapid-dialect.
+    "RUSTSEC-2023-0089",
+
+    # bincode 1.x via puffin and via walkers' HTTP tile cache.
+    "RUSTSEC-2025-0141",
+
+    # memmap2 0.5 via walkers -> http-cache-reqwest -> cacache.
+    "RUSTSEC-2026-0186",
+
+    # ttf-parser via sctk-adwaita, winit's Wayland decorations. egui itself stopped pulling it in
+    # 0.34, when the font backend moved to Skrifa.
+    "RUSTSEC-2026-0192",
+]
