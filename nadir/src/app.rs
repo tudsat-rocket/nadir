@@ -345,9 +345,19 @@ impl eframe::App for App {
             self.open_log(&path);
         }
 
+        // Same channel as the file picker, since the read can only be awaited off-frame.
         #[cfg(target_arch = "wasm32")]
-        for (name, bytes) in dropped_logs(&ctx) {
-            self.open_log_bytes(&name, bytes);
+        for file in dropped_logs(&ctx) {
+            let picked_tx = self.picked_tx.clone();
+            let ctx = ctx.clone();
+
+            wasm_bindgen_futures::spawn_local(async move {
+                let name = file.path().to_string_lossy().into_owned();
+                if let Ok(bytes) = file.bytes_async().await {
+                    let _ = picked_tx.send((name, bytes));
+                    ctx.request_repaint();
+                }
+            });
         }
 
         if self.logs.values().any(|source| match &source.origin {
@@ -375,7 +385,7 @@ impl eframe::App for App {
                 .resizable(true)
                 .size_range(20.0..=1000.0)
                 .default_size(200.0)
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     ui.set_height(ui.available_height());
                     ui.add_space(5.0);
                     ui.add(egui_tracing::ui::Logs::new(self.log_collector.clone()));
@@ -449,7 +459,7 @@ impl eframe::App for App {
                 fill: ctx.global_style().visuals.window_fill(),
                 ..Default::default()
             })
-            .show_inside(ui, |ui| match self.active_view {
+            .show(ui, |ui| match self.active_view {
                 View::Overview => {
                     #[cfg(not(target_arch = "wasm32"))]
                     let links = self.core.links();
@@ -497,7 +507,7 @@ fn dropped_logs(ctx: &egui::Context) -> Vec<PathBuf> {
             .raw
             .dropped_files
             .iter()
-            .filter_map(|file| file.path.clone())
+            .map(|file| file.path().to_path_buf())
             .filter(|path| {
                 path.extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("tlog"))
@@ -506,21 +516,21 @@ fn dropped_logs(ctx: &egui::Context) -> Vec<PathBuf> {
     })
 }
 
-/// The same, in a browser, which hands over the contents instead: `path` is the windowing backend's
-/// to fill in and stays empty here.
+/// The same, in a browser, where `path` is only the file name and the contents have to be read
+/// asynchronously, so the handles are returned and read by the caller.
 #[cfg(target_arch = "wasm32")]
-fn dropped_logs(ctx: &egui::Context) -> Vec<(String, std::sync::Arc<[u8]>)> {
+fn dropped_logs(ctx: &egui::Context) -> Vec<std::sync::Arc<dyn egui::DroppedFile + Send + Sync>> {
     ctx.input(|input| {
         input
             .raw
             .dropped_files
             .iter()
             .filter(|file| {
-                Path::new(&file.name)
+                file.path()
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("tlog"))
             })
-            .filter_map(|file| Some((file.name.clone(), file.bytes.clone()?)))
+            .cloned()
             .collect()
     })
 }

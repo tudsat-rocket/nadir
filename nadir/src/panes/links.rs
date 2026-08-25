@@ -228,7 +228,7 @@ impl PaneUi for LinksPane {
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::new())
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.separator();
                 if compact {
                     self.draw_peers_compact(ui, &system);

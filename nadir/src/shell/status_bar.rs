@@ -55,7 +55,7 @@ impl StatusBar {
         egui::Panel::top("status_bar")
             .exact_size(HEIGHT)
             .frame(egui::Frame::new().fill(ui.ctx().global_style().visuals.window_fill()))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let rect = ui.max_rect();
 
                 // The mode panel is anchored to the true center of the bar so its buttons keep their

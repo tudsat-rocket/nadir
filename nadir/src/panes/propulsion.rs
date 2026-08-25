@@ -499,7 +499,7 @@ impl PaneUi for PropulsionPane {
                         .resizable(false)
                         .show_separator_line(false)
                         .frame(egui::Frame::new())
-                        .show_inside(ui, |ui| {
+                        .show(ui, |ui| {
                             ui.separator();
                             ui.add_space(5.0);
                             ui.weak("🚰 Valves");
@@ -527,7 +527,7 @@ impl PaneUi for PropulsionPane {
                     .show_separator_line(false)
                     .frame(egui::Frame::new())
                     .exact_size(valve_states_h)
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         let vs_lines = valve_state_lines(system_id);
                         let valve_states_plot = Plot::new(
                             &vs_lines,

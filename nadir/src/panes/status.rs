@@ -71,7 +71,7 @@ impl PaneUi for StatusPane {
                     .fill(ui.visuals().extreme_bg_color)
                     .inner_margin(Margin::symmetric(7, 5)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = row_gap;
                 let size = Vec2::new(90.0, button_h);
 

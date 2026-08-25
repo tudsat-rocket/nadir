@@ -185,7 +185,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             prune_empty_tabs: true,
             prune_single_child_containers: true,
             prune_single_child_tabs: true,
-            //..SimplificationOptions::OFF
+            ..Default::default()
         }
     }
 

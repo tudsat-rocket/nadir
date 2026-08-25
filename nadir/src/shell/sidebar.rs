@@ -53,7 +53,7 @@ impl Sidebar {
         egui::Panel::left("sidepanel")
             .resizable(false)
             .exact_size(if collapsed { COLLAPSED_WIDTH } else { WIDTH })
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_width(ui.available_width());
 
                 // No header while the live systems are the only thing here.

@@ -33,14 +33,14 @@ maviola = { version = "0.3.0", features = ["async", "dlct-standard", "dlct-commo
 rapid-dialect = { git = "https://github.com/tudsat-rocket/rapid-dialect", features = ["definitions"] }
 #rapid-dialect = { path = "../rapid-dialect", features = ["definitions"] }
 
-egui = { version = "0.34" }
-egui-wgpu = { version = "0.34" }
-egui-winit = { version = "0.34" }
+egui = { version = "0.36" }
+egui-wgpu = { version = "0.36" }
+egui-winit = { version = "0.36" }
 # Backends are selected per-target in `gui/Cargo.toml`.
-eframe = { version = "0.34", default-features = false }
-wgpu = { version = "29", default-features = false, features = ["gles"] }
-egui_plot = "0.35"
-egui_extras = { version = "0.34", features = ["image"] }
+eframe = { version = "0.36", default-features = false }
+wgpu = { version = "30", default-features = false, features = ["gles"] }
+egui_plot = "0.37"
+egui_extras = { version = "0.36", features = ["image"] }
 
 # A dev-profile `.so` is half a gigabyte, and an unoptimised egui is not usable on a phone.
 [profile.android]
