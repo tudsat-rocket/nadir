@@ -324,7 +324,10 @@ impl ArtificialHorizon {
         }
         painter.add(Shape::convex_polygon(outline, plate, Stroke::NONE));
 
-        let [tex_width, tex_height] = painter.fonts(egui::epaint::Fonts::font_image_size);
+        // Not a redundant closure: `FontsView` is lifetime-parameterized, so the method as a
+        // function item is not general enough for the `for<'a>` bound `fonts` wants.
+        #[allow(clippy::redundant_closure_for_method_calls)]
+        let [tex_width, tex_height] = painter.fonts(|fonts| fonts.font_image_size());
         let uv_scale = Vec2::new(1.0 / tex_width as f32, 1.0 / tex_height as f32);
 
         let mut mesh = Mesh::with_texture(TextureId::default());

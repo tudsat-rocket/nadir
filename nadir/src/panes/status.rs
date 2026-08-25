@@ -190,7 +190,7 @@ impl PaneUi for StatusPane {
                 .iter()
                 .map(|label| {
                     // Newlines survive layout_no_wrap; size().x is the widest line.
-                    let w = ui.ctx().fonts(|fonts| {
+                    let w = ui.ctx().fonts_mut(|fonts| {
                         fonts
                             .layout_no_wrap(
                                 label.clone(),
@@ -243,7 +243,7 @@ impl PaneUi for StatusPane {
                                     mode_info.properties.contains(MavModeProperty::ADVANCED);
                                 let inner_w = col_ui.available_width()
                                     - col_ui.spacing().button_padding.x * 2.0;
-                                let text_w = col_ui.ctx().fonts(|fonts| {
+                                let text_w = col_ui.ctx().fonts_mut(|fonts| {
                                     fonts
                                         .layout_no_wrap(
                                             name.clone(),
@@ -285,7 +285,7 @@ impl PaneUi for StatusPane {
                                     },
                                 );
                                 job.halign = egui::Align::Center;
-                                let galley = col_ui.fonts(|fonts| fonts.layout_job(job));
+                                let galley = col_ui.fonts_mut(|fonts| fonts.layout_job(job));
 
                                 let border = Stroke::new(
                                     1.0_f32,

@@ -43,7 +43,7 @@ impl MeasurementIndicator {
     fn value_width(&self, ctx: &Context, value: Option<f32>) -> f32 {
         match value {
             Some(value) => self.readout(value).size(ctx).x,
-            None => ctx.fonts(|f| {
+            None => ctx.fonts_mut(|f| {
                 f.layout_no_wrap(NO_VALUE.to_owned(), Self::value_font(), self.color)
                     .size()
                     .x
@@ -54,7 +54,7 @@ impl MeasurementIndicator {
     pub fn intrinsic_size(&self, ctx: &Context) -> Vec2 {
         let pad = ctx.style().spacing.button_padding;
 
-        let (value_row_h, unit_row_h) = ctx.fonts(|f| {
+        let (value_row_h, unit_row_h) = ctx.fonts_mut(|f| {
             (
                 f.row_height(&Self::value_font()),
                 f.row_height(&Self::unit_font()),
@@ -68,7 +68,7 @@ impl MeasurementIndicator {
             .iter()
             .map(|v| self.value_width(ctx, *v))
             .fold(0.0_f32, f32::max);
-        let unit_w = ctx.fonts(|f| {
+        let unit_w = ctx.fonts_mut(|f| {
             f.layout_no_wrap(self.unit.to_owned(), Self::unit_font(), self.color)
                 .size()
                 .x
@@ -89,7 +89,7 @@ impl egui::Widget for MeasurementIndicator {
         let style = ui.style().clone();
         let (value_row_h, unit_row_h) = ui
             .ctx()
-            .fonts(|f| (f.row_height(&value_font), f.row_height(&unit_font)));
+            .fonts_mut(|f| (f.row_height(&value_font), f.row_height(&unit_font)));
         let border = if self.blink && blink_on(ui.input(|i| i.time)) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(60));

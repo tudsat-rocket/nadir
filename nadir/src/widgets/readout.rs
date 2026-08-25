@@ -87,7 +87,7 @@ impl Readout {
         let tail = format!("{decimals}{}", self.unit.unwrap_or_default());
         let small = FontId::new(self.font.size * SMALL_SCALE, self.font.family.clone());
 
-        let (head, tail) = ctx.fonts(|f| {
+        let (head, tail) = ctx.fonts_mut(|f| {
             (
                 f.layout_no_wrap(head, self.font.clone(), self.color),
                 f.layout_no_wrap(tail, small, self.color),
