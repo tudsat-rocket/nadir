@@ -10,10 +10,8 @@ use egui::{Color32, Frame, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use mavspec::rust::dialects::common::messages::{
     GlobalPositionInt, Heartbeat, HomePosition, PositionTargetGlobalInt,
 };
-use walkers::{
-    HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector,
-    extras::{LabeledSymbol, LabeledSymbolStyle, Places, Symbol},
-};
+use walkers::{HttpOptions, HttpTiles, MapMemory, Plugin, Position, Projector};
+use walkers_extras::{LabeledSymbol, LabeledSymbolStyle, Places, Symbol};
 
 use crate::{
     colors::mode_color,

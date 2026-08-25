@@ -368,7 +368,7 @@ pub fn draw_hybrid(
         blink: false,
     }
     .intrinsic_size(ui.ctx());
-    let pad = ui.ctx().style().spacing.button_padding;
+    let pad = ui.ctx().global_style().spacing.button_padding;
     let size = egui::vec2(intrinsic.x - 2.0 * pad.x + 6.0, intrinsic.y);
     ui.place(
         Rect::from_center_size(tank_rect.center(), size),

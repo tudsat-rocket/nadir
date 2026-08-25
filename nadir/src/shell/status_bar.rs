@@ -51,11 +51,11 @@ impl StatusBar {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, system: &System, behavior: &mut TreeBehavior<'_>) {
-        egui::TopBottomPanel::top("status_bar")
-            .exact_height(HEIGHT)
-            .frame(egui::Frame::new().fill(ctx.style().visuals.window_fill()))
-            .show(ctx, |ui| {
+    pub fn show(&mut self, ui: &mut egui::Ui, system: &System, behavior: &mut TreeBehavior<'_>) {
+        egui::Panel::top("status_bar")
+            .exact_size(HEIGHT)
+            .frame(egui::Frame::new().fill(ui.ctx().global_style().visuals.window_fill()))
+            .show_inside(ui, |ui| {
                 let rect = ui.max_rect();
 
                 // The mode panel is anchored to the true center of the bar so its buttons keep their

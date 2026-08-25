@@ -283,7 +283,9 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         #[cfg(feature = "profiling")]
         puffin::GlobalProfiler::lock().new_frame();
 
@@ -339,12 +341,12 @@ impl eframe::App for App {
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        for path in dropped_logs(ctx) {
+        for path in dropped_logs(&ctx) {
             self.open_log(&path);
         }
 
         #[cfg(target_arch = "wasm32")]
-        for (name, bytes) in dropped_logs(ctx) {
+        for (name, bytes) in dropped_logs(&ctx) {
             self.open_log_bytes(&name, bytes);
         }
 
@@ -356,24 +358,24 @@ impl eframe::App for App {
         }
 
         let action = self.sidebar.show(
-            ctx,
+            ui,
             &self.live,
             &self.logs,
             &mut self.active_view,
             &mut self.logs_shown,
         );
         match action {
-            Some(SidebarAction::OpenLog) => self.pick_log(ctx),
+            Some(SidebarAction::OpenLog) => self.pick_log(&ctx),
             Some(SidebarAction::CloseLog(id)) => self.close_log(id),
             None => {}
         }
 
         if self.logs_shown {
-            egui::TopBottomPanel::bottom("bottombar")
+            egui::Panel::bottom("bottombar")
                 .resizable(true)
-                .height_range(20.0..=1000.0)
-                .default_height(200.0)
-                .show(ctx, |ui| {
+                .size_range(20.0..=1000.0)
+                .default_size(200.0)
+                .show_inside(ui, |ui| {
                     ui.set_height(ui.available_height());
                     ui.add_space(5.0);
                     ui.add(egui_tracing::ui::Logs::new(self.log_collector.clone()));
@@ -405,7 +407,7 @@ impl eframe::App for App {
         if let View::System { system_id, .. } = self.active_view
             && let Some(system) = active_source.and_then(|source| source.system(system_id))
         {
-            self.status_bar.show(ctx, &system, &mut behavior);
+            self.status_bar.show(ui, &system, &mut behavior);
         }
 
         ctx.input(|input| {
@@ -444,10 +446,10 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::Frame {
                 inner_margin: Margin::ZERO,
-                fill: ctx.style().visuals.window_fill(),
+                fill: ctx.global_style().visuals.window_fill(),
                 ..Default::default()
             })
-            .show(ctx, |ui| match self.active_view {
+            .show_inside(ui, |ui| match self.active_view {
                 View::Overview => {
                     #[cfg(not(target_arch = "wasm32"))]
                     let links = self.core.links();
@@ -474,16 +476,16 @@ impl eframe::App for App {
         // from the panel just for the toast pass (nothing else paints after this) so notifications
         // stand out. Which way is away depends on the theme: extreme_bg_color is the darkest color
         // under one and the lightest under the other.
-        let original_bg = ctx.style().visuals.widgets.noninteractive.bg_fill;
-        ctx.style_mut(|s| {
+        let original_bg = ctx.global_style().visuals.widgets.noninteractive.bg_fill;
+        ctx.global_style_mut(|s| {
             s.visuals.widgets.noninteractive.bg_fill = if s.visuals.dark_mode {
                 s.visuals.extreme_bg_color
             } else {
                 s.visuals.widgets.inactive.weak_bg_fill
             };
         });
-        self.toasts.show(ctx);
-        ctx.style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = original_bg);
+        self.toasts.show(&ctx);
+        ctx.global_style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = original_bg);
     }
 }
 

@@ -63,9 +63,9 @@ impl PaneUi for StatusPane {
         // beside ARM, amber cautions beside DISARM. The mode grid (which shows the current mode via
         // its highlighted button) sits below so the mode buttons don't ride the window edge.
         let row_gap = 4.0;
-        egui::TopBottomPanel::top(egui::Id::new("status_arm_caution_strip"))
+        egui::Panel::top(egui::Id::new("status_arm_caution_strip"))
             .resizable(false)
-            .exact_height(2.0 * button_h + row_gap + 10.0)
+            .exact_size(2.0 * button_h + row_gap + 10.0)
             .frame(
                 Frame::new()
                     .fill(ui.visuals().extreme_bg_color)

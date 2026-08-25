@@ -41,7 +41,7 @@ impl Sidebar {
 
     pub fn show(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         live: &Source,
         logs: &BTreeMap<SourceId, Source>,
         active_view: &mut View,
@@ -50,10 +50,10 @@ impl Sidebar {
         let collapsed = self.collapsed;
         let mut action = None;
 
-        egui::SidePanel::left("sidepanel")
+        egui::Panel::left("sidepanel")
             .resizable(false)
-            .exact_width(if collapsed { COLLAPSED_WIDTH } else { WIDTH })
-            .show(ctx, |ui| {
+            .exact_size(if collapsed { COLLAPSED_WIDTH } else { WIDTH })
+            .show_inside(ui, |ui| {
                 ui.set_width(ui.available_width());
 
                 // No header while the live systems are the only thing here.

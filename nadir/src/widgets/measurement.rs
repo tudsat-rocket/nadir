@@ -52,7 +52,7 @@ impl MeasurementIndicator {
     }
 
     pub fn intrinsic_size(&self, ctx: &Context) -> Vec2 {
-        let pad = ctx.style().spacing.button_padding;
+        let pad = ctx.global_style().spacing.button_padding;
 
         let (value_row_h, unit_row_h) = ctx.fonts_mut(|f| {
             (

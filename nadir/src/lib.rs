@@ -122,7 +122,7 @@ pub fn run_android(app: AndroidApp) -> Result<(), eframe::Error> {
                 ..Default::default()
             }
         }),
-        ..Default::default()
+        ..eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle()
     };
 
     let options = eframe::NativeOptions {

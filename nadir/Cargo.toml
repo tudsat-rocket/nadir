@@ -20,14 +20,15 @@ rapid-dialect = { workspace = true }
 egui = { workspace = true }
 egui_plot = { workspace = true }
 egui_extras = { workspace = true }
-egui_tiles = "0.14"
-egui-notify = "0.21"
-egui_tracing = { git = "https://github.com/KoffeinFlummi/egui_tracing", branch = "egui0.33" }
-walkers = "0.47"
+egui_tiles = "0.15"
+egui-notify = "0.22"
+egui_tracing = "0.3"
+walkers = "0.55"
+walkers_extras = "0.55"
 
 # profiling feature
-puffin = { version = "0.20", optional = true }
-puffin_egui = { version = "0.30", optional = true }
+puffin = { git = "https://github.com/EmbarkStudios/puffin", rev = "7e08a53", optional = true }
+puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", rev = "7e08a53", optional = true }
 nalgebra = "0.35.0"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

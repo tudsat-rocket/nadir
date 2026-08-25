@@ -224,7 +224,7 @@ impl PaneUi for LinksPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
         let compact = ui.available_width() < Self::FULL_MIN_WIDTH;
 
-        egui::TopBottomPanel::bottom(egui::Id::new("links_channels_panel"))
+        egui::Panel::bottom(egui::Id::new("links_channels_panel"))
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::new())

@@ -495,41 +495,38 @@ impl PaneUi for PropulsionPane {
                 self.draw_frame(ui, &system, square, blink);
 
                 ui.vertical(|ui| {
-                    egui::TopBottomPanel::bottom(egui::Id::new((
-                        "propulsion_valves_panel",
-                        system_id,
-                    )))
-                    .resizable(false)
-                    .show_separator_line(false)
-                    .frame(egui::Frame::new())
-                    .show_inside(ui, |ui| {
-                        ui.separator();
-                        ui.add_space(5.0);
-                        ui.weak("🚰 Valves");
-                        ui.add_space(5.0);
+                    egui::Panel::bottom(egui::Id::new(("propulsion_valves_panel", system_id)))
+                        .resizable(false)
+                        .show_separator_line(false)
+                        .frame(egui::Frame::new())
+                        .show_inside(ui, |ui| {
+                            ui.separator();
+                            ui.add_space(5.0);
+                            ui.weak("🚰 Valves");
+                            ui.add_space(5.0);
 
-                        let button_size = Vec2::new(80.0, ui.spacing().interact_size.y);
+                            let button_size = Vec2::new(80.0, ui.spacing().interact_size.y);
 
-                        egui::Grid::new("propulsion_valves")
-                            .striped(true)
-                            .show(ui, |ui| {
-                                for (i, (pulse, blink)) in
-                                    self.pulse_secs.iter_mut().zip(blink).enumerate()
-                                {
-                                    valve_row(ui, &system, i, pulse, blink, button_size);
-                                }
-                            });
-                    });
+                            egui::Grid::new("propulsion_valves")
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    for (i, (pulse, blink)) in
+                                        self.pulse_secs.iter_mut().zip(blink).enumerate()
+                                    {
+                                        valve_row(ui, &system, i, pulse, blink, button_size);
+                                    }
+                                });
+                        });
 
                     let valve_states_h = ui.available_height() / 3.5;
-                    egui::TopBottomPanel::bottom(egui::Id::new((
+                    egui::Panel::bottom(egui::Id::new((
                         "propulsion_valve_states_panel",
                         system_id,
                     )))
                     .resizable(false)
                     .show_separator_line(false)
                     .frame(egui::Frame::new())
-                    .exact_height(valve_states_h)
+                    .exact_size(valve_states_h)
                     .show_inside(ui, |ui| {
                         let vs_lines = valve_state_lines(system_id);
                         let valve_states_plot = Plot::new(
