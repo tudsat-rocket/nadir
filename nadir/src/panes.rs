@@ -32,6 +32,8 @@ pub use params::ParamsPane;
 pub use plot::PlotPane;
 pub use preflight::PreflightPane;
 pub use propulsion::PropulsionPane;
+#[cfg(test)]
+pub(crate) use propulsion::fluid_colors as propulsion_fluid_colors;
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
@@ -164,9 +166,15 @@ impl std::fmt::Display for Pane {
 
 impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn tab_bar_color(&self, visuals: &egui::Visuals) -> egui::Color32 {
-        visuals
-            .extreme_bg_color
-            .lerp_to_gamma(visuals.faint_bg_color, 0.25)
+        if crate::colors::high_contrast() {
+            // The inset surfaces there sit close to the panel so the indicator palette keeps its
+            // headroom over them; the tab bar is the one place that needs a visible step instead.
+            visuals.widgets.hovered.weak_bg_fill
+        } else {
+            visuals
+                .extreme_bg_color
+                .lerp_to_gamma(visuals.faint_bg_color, 0.25)
+        }
     }
 
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {

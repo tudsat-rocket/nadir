@@ -1,15 +1,18 @@
 use nadir_core::{MessageInstance, System};
 
 use egui::{
-    Align2, Button, Color32, CornerRadius, DragValue, FontId, Frame, Image, Pos2, Rect, RichText,
-    Sense, Stroke, StrokeKind, Vec2, pos2,
+    Align2, Button, Color32, CornerRadius, DragValue, FontId, Image, Pos2, Rect, RichText, Sense,
+    Stroke, StrokeKind, Vec2, pos2,
 };
 use mavspec::rust::dialects::common::enums::MavType;
 use mavspec::rust::dialects::common::messages::{BatteryStatus, Heartbeat, SysStatus};
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
 use rapid_dialect::rapid::enums::ValveId;
 
-use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING, instrument_visuals, readable};
+use crate::colors::{
+    COLOR_INDICATOR_GOOD, COLOR_INDICATOR_WARNING, high_contrast, readable, schematic_frame,
+    schematic_ink, text_on,
+};
 use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
 use crate::widgets::{BatteryIndicator, Plot, PlotLine, Readout};
@@ -68,6 +71,12 @@ const VALVES: [(ValveId, &str, ValveKind); VALVE_COUNT] = [
         ValveKind::Solenoid,
     ),
 ];
+
+/// Re-exported for the contrast tests in [`crate::colors`], which cannot reach into `rocket`.
+#[cfg(test)]
+pub(crate) fn fluid_colors() -> [(&'static str, Color32); 7] {
+    rocket::fluid_colors()
+}
 
 fn valve_index(id: ValveId) -> usize {
     VALVES.iter().position(|(v, _, _)| *v == id).unwrap_or(0)
@@ -171,8 +180,7 @@ impl PropulsionPane {
             return;
         };
 
-        Frame::dark_canvas(ui.style()).show(ui, |ui| {
-            instrument_visuals(ui);
+        schematic_frame(ui.style()).show(ui, |ui| {
             ui.set_width(square.width());
             ui.set_height(square.height());
 
@@ -199,14 +207,19 @@ impl PropulsionPane {
                     self.draw_battery(ui, system, square.center());
                 }
                 (MavAutopilot::Ardupilotmega, MavType::FixedWing) => {
-                    let outline =
-                        egui::include_image!("../../assets/vehicles/plane_twin_vtail_dark.svg");
+                    // Two copies of the same drawing, one stroked white and one black; tinting
+                    // cannot turn one into the other, since a tint only multiplies.
+                    let outline = if ui.visuals().dark_mode {
+                        egui::include_image!("../../assets/vehicles/plane_twin_vtail_dark.svg")
+                    } else {
+                        egui::include_image!("../../assets/vehicles/plane_twin_vtail_light.svg")
+                    };
                     ui.place(
                         square.shrink(n * 0.05),
                         Image::new(outline)
                             .maintain_aspect_ratio(true)
                             .max_width(n)
-                            .tint(Color32::WHITE.gamma_multiply(0.5)),
+                            .tint(schematic_ink(ui.visuals()).gamma_multiply(0.5)),
                     );
 
                     arduplane::draw_servos(ui, system, square);
@@ -343,7 +356,8 @@ fn valve_row(
 
     let close_active = matches!(commanded, Some(c) if c <= VALVE_LATCH_EPS);
     let close_text = if close_active { "CLOSED" } else { "CLOSE" };
-    let close_btn = Button::selectable(close_active, RichText::new(close_text));
+    let close_btn = Button::selectable(close_active, RichText::new(close_text))
+        .frame_when_inactive(close_active || high_contrast());
     if ui.add_sized(button_size, close_btn).clicked() {
         system.do_set_valve(id, 0.0);
     }
@@ -354,14 +368,14 @@ fn valve_row(
     }
 
     let open_active = matches!(commanded, Some(c) if c >= 1.0 - VALVE_LATCH_EPS);
+    let open_fill = readable(COLOR_INDICATOR_WARNING, ui.visuals());
     let open_btn = if open_active {
-        Button::selectable(true, RichText::new("OPEN"))
-            .fill(readable(COLOR_INDICATOR_WARNING, ui.visuals()))
+        Button::selectable(true, RichText::new("OPEN")).fill(open_fill)
     } else {
-        Button::selectable(false, RichText::new("OPEN"))
+        Button::selectable(false, RichText::new("OPEN")).frame_when_inactive(high_contrast())
     };
     if open_active {
-        ui.style_mut().visuals.override_text_color = Some(Color32::BLACK);
+        ui.style_mut().visuals.override_text_color = Some(text_on(open_fill));
     }
     if ui.add_sized(button_size, open_btn).clicked() {
         system.do_set_valve(id, 1.0);
@@ -428,7 +442,10 @@ fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
     .collect()
 }
 
-fn pressure_lines(system_id: u8, visuals: &egui::Visuals) -> Vec<PlotLine> {
+/// The vessel pressures, one line per tank in that tank's schematic colour. The colours are left
+/// as declared: `Plot` runs every line through `readable`, so darkening them here as well would
+/// apply the light-canvas correction twice.
+fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
     [
         (0, "Pressurant", rocket::N2_COLOR),
         (1, "Oxidizer", rocket::N2O_COLOR),
@@ -449,7 +466,7 @@ fn pressure_lines(system_id: u8, visuals: &egui::Visuals) -> Vec<PlotLine> {
         field_name: "pressure1".to_owned(),
         alias: Some(alias.to_owned()),
         unit: Some("bar".to_owned()),
-        color: Some(readable(color, visuals)),
+        color: Some(color),
         // PRESSURE_VESSEL.pressure1 is in kPa; the diagram and rendering use bar.
         scale: Some(0.01),
         // Firmware reports an unavailable sensor as u16::MAX.
@@ -541,7 +558,7 @@ impl PaneUi for PropulsionPane {
                         );
                     });
 
-                    let p_lines = pressure_lines(system_id, ui.visuals());
+                    let p_lines = pressure_lines(system_id);
                     let pressure_plot = Plot::new(
                         &p_lines,
                         &behavior.source,

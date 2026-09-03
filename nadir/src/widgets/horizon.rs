@@ -11,6 +11,7 @@ use egui::{
 use mavspec::rust::dialects::ardupilotmega::messages::AoaSsa;
 use mavspec::rust::dialects::common::messages::{Attitude, LocalPositionNed, VfrHud};
 
+use crate::colors::high_contrast;
 use crate::panes::{PositionSource, VelocityMode};
 use crate::widgets::Readout;
 
@@ -22,6 +23,9 @@ pub struct ArtificialHorizon {
 
 const COLOR_GROUND: Color32 = Color32::from_rgb(0x7d, 0x52, 0x33);
 const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
+/// The pitch ladder is white 10px text, which the ordinary sky only carries at 3.27:1. The ground
+/// is already dark enough (6.7:1); only the sky has to give.
+const COLOR_SKY_HIGH_CONTRAST: Color32 = Color32::from_rgb(0x44, 0x6e, 0x94);
 const COLOR_FLIGHT_PATH: Color32 = Color32::from_rgb(0x2e, 0xa0, 0x4e);
 const N: usize = 64;
 // How far in front of the ball the camera sits, in ball radii. Lower is more perspective.
@@ -29,6 +33,14 @@ const CAMERA: f32 = 3.0;
 // Half the roll range the dial around the top of the ball covers, in degrees.
 const ROLL_LIMIT: i32 = 45;
 const ROLL_STEP: usize = 15;
+
+fn sky() -> Color32 {
+    if high_contrast() {
+        COLOR_SKY_HIGH_CONTRAST
+    } else {
+        COLOR_SKY
+    }
+}
 
 impl ArtificialHorizon {
     pub fn new(system: &System, source: PositionSource, velocity_mode: VelocityMode) -> Self {
@@ -65,16 +77,8 @@ impl ArtificialHorizon {
         // convex, so that is the one we lay on top as a polygon. With the horizon out of view there
         // is nothing to lay on top and the whole ball is one colour.
         let horizon = Self::visible_ring(&rotation, 0.0);
-        let ahead = if ahead_is_sky {
-            COLOR_SKY
-        } else {
-            COLOR_GROUND
-        };
-        let behind = if ahead_is_sky {
-            COLOR_GROUND
-        } else {
-            COLOR_SKY
-        };
+        let ahead = if ahead_is_sky { sky() } else { COLOR_GROUND };
+        let behind = if ahead_is_sky { COLOR_GROUND } else { sky() };
         painter.circle_filled(
             center,
             radius,
@@ -178,11 +182,7 @@ impl ArtificialHorizon {
             }));
 
             if pitch_tick % 20 == 0 && (20..=60).contains(&pitch_tick.abs()) {
-                let plate = if pitch_tick > 0 {
-                    COLOR_SKY
-                } else {
-                    COLOR_GROUND
-                };
+                let plate = if pitch_tick > 0 { sky() } else { COLOR_GROUND };
 
                 for side in [-1.0_f32, 1.0] {
                     // A fixed longitude either side of the meridian facing us, so each label keeps

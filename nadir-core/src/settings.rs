@@ -33,6 +33,10 @@ pub enum Theme {
     System,
     Dark,
     Light,
+    /// The light theme, retuned so every colour the UI paints clears WCAG 2.2 level AA against the
+    /// surface behind it, and so every control has a visible border and focus ring. See
+    /// `docs/accessibility-review.md`.
+    HighContrast,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -196,6 +200,21 @@ mod tests {
 
         let read: Settings = toml::from_str(&text).unwrap();
         assert_eq!(read.theme, Theme::Light);
+    }
+
+    /// Multi-word theme names are `snake_case` in the file, not `HighContrast`.
+    #[test]
+    fn high_contrast_round_trips_as_snake_case() {
+        let settings = Settings {
+            theme: Theme::HighContrast,
+            ..Settings::default()
+        };
+
+        let text = toml::to_string_pretty(&settings).unwrap();
+        assert!(text.contains("theme = \"high_contrast\""), "{text}");
+
+        let read: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(read.theme, Theme::HighContrast);
     }
 
     #[test]

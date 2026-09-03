@@ -6,6 +6,7 @@ use eframe::egui;
 use egui::{Align, Layout, RichText};
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
+use crate::colors::high_contrast;
 use crate::views::{LIVE, SourceId, View};
 use crate::widgets::{
     ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
@@ -80,7 +81,14 @@ impl Sidebar {
 
                             ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
                                 ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                                    if ui.small_button("✖").on_hover_text("Close log").clicked() {
+                                    // `small_button` is deliberately under the SC 2.5.8 target
+                                    // size; the high-contrast theme trades the density for it.
+                                    let close = if high_contrast() {
+                                        ui.button("✖")
+                                    } else {
+                                        ui.small_button("✖")
+                                    };
+                                    if close.on_hover_text("Close log").clicked() {
                                         action = Some(SidebarAction::CloseLog(*id));
                                     }
                                 })

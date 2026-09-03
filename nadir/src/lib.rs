@@ -9,6 +9,7 @@ mod app;
 mod colors;
 mod panes;
 mod shell;
+mod theme;
 mod views;
 mod widgets;
 

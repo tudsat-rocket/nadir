@@ -3,6 +3,7 @@ use nadir_core::{ParamProgress, System};
 use egui::{Grid, Margin, Rect, Stroke, Vec2};
 use mavspec::rust::dialects::common::messages::ServoOutputRaw;
 
+use crate::colors::{schematic_frame, schematic_line};
 use crate::widgets::Dial;
 
 pub fn draw_rotors(ui: &mut egui::Ui, system: &System, square: Rect) {
@@ -64,11 +65,11 @@ pub fn draw_rotors(ui: &mut egui::Ui, system: &System, square: Rect) {
         let normal = Vec2::new(vector.y, -vector.x).normalized();
         ui.painter().line(
             vec![square.center() + normal * 5.0, pos + normal * 5.0],
-            Stroke::new(1.0_f32, ui.visuals().weak_text_color()),
+            Stroke::new(1.0_f32, schematic_line(ui.visuals())),
         );
         ui.painter().line(
             vec![square.center() - normal * 5.0, pos - normal * 5.0],
-            Stroke::new(1.0_f32, ui.visuals().weak_text_color()),
+            Stroke::new(1.0_f32, schematic_line(ui.visuals())),
         );
 
         let all_servos = [
@@ -79,7 +80,7 @@ pub fn draw_rotors(ui: &mut egui::Ui, system: &System, square: Rect) {
         ];
 
         ui.place(rect, |ui: &mut egui::Ui| {
-            egui::Frame::dark_canvas(ui.style())
+            schematic_frame(ui.style())
                 .inner_margin(Margin::same(5))
                 .show(ui, |ui| {
                     ui.vertical_centered_justified(|ui| {

@@ -490,6 +490,10 @@ impl eframe::App for App {
         ctx.global_style_mut(|s| {
             s.visuals.widgets.noninteractive.bg_fill = if s.visuals.dark_mode {
                 s.visuals.extreme_bg_color
+            } else if crate::colors::high_contrast() {
+                // Every surface in that theme is white, so the usual "one step away from the
+                // panel" lands back on the panel. Borrow its darkest defined fill instead.
+                s.visuals.widgets.active.weak_bg_fill
             } else {
                 s.visuals.widgets.inactive.weak_bg_fill
             };

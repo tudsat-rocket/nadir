@@ -12,6 +12,7 @@ use nadir_core::{
     FlightLogUiState, GlobLogDownloadState, LogDlCommand, LogItem, PartialLogCompleteness,
 };
 
+use crate::colors::readable;
 use crate::panes::PaneUi;
 
 /// For downloading and saving flight logs from vehicle.
@@ -63,25 +64,26 @@ impl PaneUi for LogsPane {
                     ui.spinner();
                     ui.label(
                         RichText::new(format!("Fetching… ({n})"))
-                            .color(Color32::from_rgb(56, 138, 221)),
+                            .color(readable(Color32::from_rgb(56, 138, 221), ui.visuals())),
                     );
                 }
                 GlobLogDownloadState::Idle(None) if !self.state.items.is_empty() => {
                     ui.label(
                         RichText::new(format!("✔  {} log(s)", self.state.items.len()))
-                            .color(Color32::from_rgb(60, 180, 100)),
+                            .color(readable(Color32::from_rgb(60, 180, 100), ui.visuals())),
                     );
                 }
                 GlobLogDownloadState::Idle(Some(err)) => {
                     ui.label(
-                        RichText::new(format!("✖  {err}")).color(Color32::from_rgb(210, 70, 60)),
+                        RichText::new(format!("✖  {err}"))
+                            .color(readable(Color32::from_rgb(210, 70, 60), ui.visuals())),
                     );
                 }
                 GlobLogDownloadState::Downloading(id) => {
                     ui.spinner();
                     ui.label(
                         RichText::new(format!("Downloading log_{id:04}…"))
-                            .color(Color32::from_rgb(56, 138, 221)),
+                            .color(readable(Color32::from_rgb(56, 138, 221), ui.visuals())),
                     );
                 }
                 GlobLogDownloadState::Idle(_) => (),
@@ -268,7 +270,7 @@ fn show_log_row(
     if let Some(err) = &item.meta.latest_error_msg {
         ui.label(
             RichText::new(format!("⚠  {err}"))
-                .color(Color32::from_rgb(200, 150, 30))
+                .color(readable(Color32::from_rgb(200, 150, 30), ui.visuals()))
                 .size(11.0),
         );
     }

@@ -9,7 +9,10 @@ use mavspec::rust::dialects::common::messages::{
     CommandAck, LinkNodeStatus, RadioStatus, SysStatus,
 };
 
-use crate::colors::{COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, readable};
+use crate::colors::{
+    COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, high_contrast, readable,
+    text_on,
+};
 use crate::widgets::small_text;
 
 fn short_sensor_name(name: &str) -> String {
@@ -171,13 +174,31 @@ impl egui::Widget for AlertLine<'_> {
         let tokens = self.tokens();
 
         let lit = blink_on(ui.input(|i| i.time));
-        let gel = |c: Color32| if lit { c } else { c.gamma_multiply(0.35) };
+
+        // The default themes blink by fading the text out, which takes a critical alarm down to
+        // 1.4:1 for half of every cycle. The high-contrast theme inverts the token instead: the
+        // geometry never moves and both halves of the blink stay well over AA. See
+        // `docs/accessibility-review.md` §3.4.
+        let (fill, ink) = if high_contrast() {
+            if lit {
+                (color, text_on(color))
+            } else {
+                (Color32::TRANSPARENT, color)
+            }
+        } else if lit {
+            (Color32::TRANSPARENT, color)
+        } else {
+            (Color32::TRANSPARENT, dim(color, 0.35))
+        };
 
         let response = ui
             .horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 14.0;
                 for token in &tokens {
-                    small_text(ui, token, gel(color));
+                    egui::Frame::new()
+                        .fill(fill)
+                        .inner_margin(egui::Margin::symmetric(3, 0))
+                        .show(ui, |ui| small_text(ui, token, ink));
                 }
             })
             .response;
