@@ -21,7 +21,8 @@ pub struct ArtificialHorizon {
 }
 
 const COLOR_GROUND: Color32 = Color32::from_rgb(0x7d, 0x52, 0x33);
-const COLOR_SKY: Color32 = Color32::from_rgb(0x5b, 0x93, 0xc5);
+// Darker than a sky would be: the pitch ladder is white text drawn straight onto it.
+const COLOR_SKY: Color32 = Color32::from_rgb(0x44, 0x6e, 0x94);
 const COLOR_FLIGHT_PATH: Color32 = Color32::from_rgb(0x2e, 0xa0, 0x4e);
 const N: usize = 64;
 // How far in front of the ball the camera sits, in ball radii. Lower is more perspective.

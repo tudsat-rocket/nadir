@@ -1,10 +1,11 @@
 use nadir_core::System;
 
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Sense, Vec2};
+use egui::{Align, Color32, CornerRadius, Layout, Sense, Vec2};
 use mavspec::rust::dialects::common::messages::{BatteryStatus, SysStatus};
 
 use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable,
+    schematic_frame,
 };
 use crate::widgets::Readout;
 
@@ -64,10 +65,11 @@ impl BatteryIndicator {
 
 impl egui::Widget for BatteryIndicator {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        // Only ever drawn inside the propulsion schematic, so it follows that canvas.
         let color = soc_color(self.soc, ui.visuals());
 
         let s = ui.available_size();
-        Frame::dark_canvas(ui.style())
+        schematic_frame(ui.style())
             .show(ui, |ui| {
                 ui.set_width(s.x);
                 ui.set_height(s.y);

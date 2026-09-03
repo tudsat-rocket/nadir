@@ -244,7 +244,7 @@ impl egui::Widget for Plot<'_> {
 
                 let mut l = egui_plot::Line::new(name, plot_data).width(1.0_f32);
                 if let Some(color) = line.color {
-                    l = l.color(color);
+                    l = l.color(readable(color, &visuals));
                 }
 
                 plot_ui.line(l);

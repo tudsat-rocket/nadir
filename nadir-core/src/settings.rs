@@ -35,6 +35,8 @@ pub enum Theme {
     System,
     Dark,
     Light,
+    /// The light theme, retuned against WCAG 2.2 level AA.
+    HighContrast,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -198,6 +200,20 @@ mod tests {
 
         let read: Settings = toml::from_str(&text).unwrap();
         assert_eq!(read.theme, Theme::Light);
+    }
+
+    #[test]
+    fn high_contrast_round_trips_as_snake_case() {
+        let settings = Settings {
+            theme: Theme::HighContrast,
+            ..Settings::default()
+        };
+
+        let text = toml::to_string_pretty(&settings).unwrap();
+        assert!(text.contains("theme = \"high_contrast\""), "{text}");
+
+        let read: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(read.theme, Theme::HighContrast);
     }
 
     #[test]

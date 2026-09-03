@@ -104,11 +104,7 @@ impl SettingsView {
 
     /// Also called at startup, before there is a view to edit the theme in.
     pub fn apply_theme(ctx: &egui::Context, theme: Theme) {
-        ctx.set_theme(match theme {
-            Theme::System => egui::ThemePreference::System,
-            Theme::Dark => egui::ThemePreference::Dark,
-            Theme::Light => egui::ThemePreference::Light,
-        });
+        crate::theme::apply(ctx, theme);
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -227,12 +223,19 @@ impl SettingsView {
             ui.add_space(5.0);
             ui.label("Theme");
 
-            for (theme, label) in [
-                (Theme::System, "System"),
-                (Theme::Dark, "Dark"),
-                (Theme::Light, "Light"),
-            ] {
-                if ui.selectable_value(&mut self.theme, theme, label).clicked() {
+            for theme in crate::theme::ALL {
+                let response =
+                    ui.selectable_value(&mut self.theme, theme, crate::theme::label(theme));
+                let response = if theme == Theme::HighContrast {
+                    response.on_hover_text(
+                        "The light theme, retuned so every colour clears WCAG 2.2 level AA, \
+                         with visible borders and focus rings.",
+                    )
+                } else {
+                    response
+                };
+
+                if response.clicked() {
                     Self::apply_theme(ui.ctx(), theme);
                 }
             }
