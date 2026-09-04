@@ -7,7 +7,7 @@ use mavspec::rust::dialects::common::messages::{
 };
 
 use crate::colors::{
-    COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable,
+    COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, dim, readable,
 };
 use crate::widgets::{
     AutopilotLogo, Readout, TEXT_SIZE, column_header, link_quality, small_text, soc_color,
@@ -79,7 +79,7 @@ impl Vitals<'_> {
     fn consumables_column(&self, ui: &mut egui::Ui) {
         let system = self.system;
         let weak = ui.visuals().weak_text_color();
-        let nodata = weak.gamma_multiply(0.5);
+        let nodata = dim(weak, 0.5);
         let normal = ui.visuals().text_color();
         let good = readable(COLOR_INDICATOR_GOOD, ui.visuals());
         let warning = readable(COLOR_INDICATOR_WARNING, ui.visuals());

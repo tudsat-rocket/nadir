@@ -1,8 +1,8 @@
 use std::f32::consts::PI;
 
-use egui::{Align2, Color32, FontId, Sense, Stroke, Vec2};
+use egui::{Align2, FontId, Sense, Stroke, Vec2};
 
-use crate::colors::COLOR_INDICATOR_GOOD;
+use crate::colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, readable, schematic_ink};
 
 pub struct Dial {
     pub value: f32,
@@ -17,6 +17,13 @@ const N: usize = 32;
 
 impl egui::Widget for Dial {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        // The dial is only ever drawn on the propulsion schematic, so it takes that canvas: white
+        // needles and ink on the dark one, black on a light one.
+        let visuals = ui.visuals().clone();
+        let ink = schematic_ink(&visuals);
+        let limits = readable(COLOR_INDICATOR_LIMITS, &visuals);
+        let good = readable(COLOR_INDICATOR_GOOD, &visuals);
+
         let minside = f32::min(ui.available_width() / 2.0, ui.available_height());
 
         let (response, painter) =
@@ -33,28 +40,24 @@ impl egui::Widget for Dial {
             .map(|i| min * PI * (i as f32) / (N as f32))
             .map(|r| dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius)
             .collect();
-        painter.line(points, Stroke::new(1.5_f32, Color32::RED));
+        painter.line(points, Stroke::new(1.5_f32, limits));
 
         let points = (0..=N)
             .map(|i| min * PI + (max - min) * PI * (i as f32) / (N as f32))
             .map(|r| dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius)
             .collect();
-        painter.line(points, Stroke::new(1.5_f32, Color32::WHITE));
+        painter.line(points, Stroke::new(1.5_f32, ink));
 
         let points = (0..=N)
             .map(|i| max * PI + (1.0 - max) * PI * (i as f32) / (N as f32))
             .map(|r| dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius)
             .collect();
-        painter.line(points, Stroke::new(1.5_f32, Color32::RED));
+        painter.line(points, Stroke::new(1.5_f32, limits));
 
         for i in 0..=10 {
             let f = (i as f32) / 10.0;
             let r = PI * f;
-            let color = if f <= min || f >= max {
-                Color32::RED
-            } else {
-                Color32::WHITE
-            };
+            let color = if f <= min || f >= max { limits } else { ink };
 
             painter.line(
                 vec![
@@ -72,7 +75,7 @@ impl egui::Widget for Dial {
                 dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 0.8,
                 dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 1.3,
             ],
-            Stroke::new(2.5_f32, COLOR_INDICATOR_GOOD),
+            Stroke::new(2.5_f32, good),
         );
 
         if let Some(trim) = self.trim {
@@ -83,7 +86,7 @@ impl egui::Widget for Dial {
                     dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius,
                     dial_center + Vec2::new(-r.cos(), -r.sin()) * dial_radius * 0.7,
                 ],
-                Stroke::new(2.0_f32, Color32::WHITE),
+                Stroke::new(2.0_f32, ink),
             );
         }
 
@@ -92,7 +95,7 @@ impl egui::Widget for Dial {
             Align2::CENTER_CENTER,
             format!("{:.0}", self.value),
             FontId::monospace(dial_radius * 0.4),
-            Color32::WHITE,
+            ink,
         );
 
         painter.text(
@@ -100,7 +103,7 @@ impl egui::Widget for Dial {
             Align2::CENTER_CENTER,
             "µs",
             FontId::monospace(dial_radius * 0.3),
-            Color32::WHITE,
+            ink,
         );
 
         response

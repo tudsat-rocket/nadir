@@ -10,7 +10,10 @@ use rapid_dialect::rapid::enums::{PressureVesselFlag, ValveId};
 use rapid_dialect::rapid::messages::{PressureVessel, Valve};
 
 use super::ValveInteractionMode;
-use crate::colors::{COLOR_INDICATOR_WARNING, blink_on, instrument_visuals};
+use crate::colors::{
+    COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_ink, schematic_line,
+    schematic_void, schematic_wash,
+};
 use crate::widgets::MeasurementIndicator;
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
@@ -23,13 +26,26 @@ const MIN_FILLED_HATCH_WIDTH: f32 = 2.0;
 // Floor on a hatch line's width, in the same units. A stroke below a pixel is drawn by scaling its
 // opacity, so this is where the line stops fading rather than where it stops thinning.
 const MIN_HATCH_WIDTH: f32 = 0.35;
+// A valve's bow-tie is `half` long along its axis and this much of `half` across it. The instance
+// labels sit off the glyph's real edge rather than its bounding half, so they need the same number.
+const VALVE_GLYPH_BASE_RATIO: f32 = 0.65;
+// Gap between a valve glyph or a vessel outline and its instance tag.
+const LABEL_GAP: f32 = 3.0;
+
 const N2_MAX_PRESSURE_BAR: f32 = 300.0;
 const N2O_MAX_PRESSURE_BAR: f32 = 100.0;
 const CC_MAX_PRESSURE_BAR: f32 = 70.0;
 
 // Opacity applied to a ground-support tank's valves and plumbing when the tank
 // isn't reporting, muting controls that currently can't do anything.
-const GSE_MUTED_OPACITY: f32 = 0.3;
+//
+// Muting costs more contrast on a light canvas than a dark one, because fading ink toward white
+// gives up luminance faster than fading it toward black gains it: 0.3 of black on white is 2.1:1,
+// where 0.3 of white on black is 2.5:1, and the thin strokes make the gap look wider than that.
+// A higher factor on light keeps "muted" reading the same in both.
+fn gse_muted_opacity(visuals: &egui::Visuals) -> f32 {
+    if visuals.dark_mode { 0.3 } else { 0.45 }
+}
 
 pub(super) const N2_COLOR: Color32 = Color32::from_rgb(0x54, 0xc3, 0x54);
 pub(super) const N2O_COLOR: Color32 = Color32::from_rgb(0x4e, 0xa8, 0xe8);
@@ -41,6 +57,20 @@ pub(super) const NODE_COLOR: Color32 = Color32::from_rgb(0x3f, 0xb8, 0xa4);
 // external volumes read as related-but-distinct in the schematic and plots.
 pub(super) const EXT_N2_COLOR: Color32 = Color32::from_rgb(0x3c, 0x8c, 0x3c);
 pub(super) const EXT_N2O_COLOR: Color32 = Color32::from_rgb(0x38, 0x79, 0xa7);
+
+/// Every fluid the schematic colour-codes, for the contrast tests in [`crate::colors`].
+#[cfg(test)]
+pub(super) fn fluid_colors() -> [(&'static str, Color32); 7] {
+    [
+        ("pressurant", N2_COLOR),
+        ("oxidizer", N2O_COLOR),
+        ("fuel", FUEL_COLOR),
+        ("combustion chamber", CC_COLOR),
+        ("regulated pressurant", NODE_COLOR),
+        ("external pressurant", EXT_N2_COLOR),
+        ("external oxidizer", EXT_N2O_COLOR),
+    ]
+}
 
 // A valve's reported position (`state`) alongside the vehicle-reported intended
 // position (`commanded`). Both are 0.0 (closed) ..= 1.0 (open); the firmware sends
@@ -92,6 +122,9 @@ fn is_external(v: Option<&PressureVessel>) -> bool {
     v.is_some_and(|v| v.flags.contains(PressureVesselFlag::EXTERNAL))
 }
 
+// N2 and N2O are the fluids' actual names, and the file already spells its readings `n2_pressure_bar`
+// / `n2o_pressure1_bar`; renaming the colours apart from them would cost more than the lint saves.
+#[allow(clippy::similar_names)]
 pub fn draw_hybrid(
     ui: &mut egui::Ui,
     system: &System,
@@ -100,6 +133,17 @@ pub fn draw_hybrid(
     pulse_secs: [f32; super::VALVE_COUNT],
     blink: [bool; super::VALVE_COUNT],
 ) {
+    // The fluid colours are declared against the dark canvas; `readable` carries them onto a
+    // light one. Bound once here rather than at each of the ~15 uses below.
+    let visuals = ui.visuals().clone();
+    let n2_color = readable(N2_COLOR, &visuals);
+    let n2o_color = readable(N2O_COLOR, &visuals);
+    let fuel_color = readable(FUEL_COLOR, &visuals);
+    let cc_color = readable(CC_COLOR, &visuals);
+    let node_color = readable(NODE_COLOR, &visuals);
+    let ext_n2_color = readable(EXT_N2_COLOR, &visuals);
+    let ext_n2o_color = readable(EXT_N2O_COLOR, &visuals);
+
     // Keep the mismatch blink animating even when no telemetry frame arrives.
     if blink.iter().any(|&b| b) {
         ui.ctx()
@@ -220,25 +264,25 @@ pub fn draw_hybrid(
     for (cy, color, values, warn) in [
         (
             top_tank_rect.center().y,
-            N2_COLOR,
+            n2_color,
             vec![n2_pressure_bar],
             vessel_warn(pressurant.as_ref()),
         ),
         (
             junction_cy,
-            NODE_COLOR,
+            node_color,
             vec![reg_pressure1_bar, reg_pressure2_bar],
             vessel_warn(regulated.as_ref()),
         ),
         (
             tank_rect.center().y,
-            N2O_COLOR,
+            n2o_color,
             vec![n2o_pressure1_bar, n2o_pressure2_bar],
             vessel_warn(oxidizer.as_ref()),
         ),
         (
             cc_cy,
-            CC_COLOR,
+            cc_color,
             vec![cc_pressure_bar],
             vessel_warn(chamber.as_ref()),
         ),
@@ -262,7 +306,7 @@ pub fn draw_hybrid(
     let indicator = MeasurementIndicator {
         values: vec![n2o_temp1, n2o_temp2],
         unit: "\u{00b0}C",
-        color: Color32::WHITE,
+        color: schematic_ink(&visuals),
         decimals: Some(0),
         // No temperature limit in the message yet; flag missing readings instead.
         blink: n2o_temp1.is_none() || n2o_temp2.is_none(),
@@ -283,7 +327,7 @@ pub fn draw_hybrid(
     let indicator = MeasurementIndicator {
         values: vec![battery_temp],
         unit: "\u{00b0}C",
-        color: Color32::WHITE,
+        color: schematic_ink(&visuals),
         decimals: Some(0),
         blink: false,
     };
@@ -293,9 +337,9 @@ pub fn draw_hybrid(
         indicator,
     );
 
-    let stroke_col = ui.visuals().weak_text_color();
+    let stroke_col = schematic_line(&visuals);
     let stroke = Stroke::new(1.5_f32, stroke_col);
-    let fill = ui.visuals().extreme_bg_color;
+    let fill = schematic_void(&visuals);
     let painter = ui.painter().clone();
     let hatch_stride = (0.012 * n).max(4.0);
 
@@ -303,22 +347,30 @@ pub fn draw_hybrid(
     // the pressure/temperature unit styling, so a reading can be cross-referenced
     // against the raw MAVLink logs (PressureVessel instance / ValveId).
     let label_font = egui::FontId::monospace(11.0);
-    let label_color = ui.visuals().weak_text_color();
+    let label_color = schematic_line(&visuals);
+    // Above the vessel's left shoulder, not inside it: a capsule's widest point is `bulkhead_h`
+    // below the top of its bounding rect, so anything drawn in that corner lands on the curve of
+    // the bulkhead. Right-aligned, so it stays clear of whatever the riser puts directly above -
+    // on the narrow ground-support tanks the vent valve is only a gap away.
     let draw_tank_label = |rect: Rect, id: i64| {
-        painter.text(
-            rect.left_top() + Vec2::new(2.0, 1.0),
-            Align2::LEFT_TOP,
-            format!("#{id}"),
-            label_font.clone(),
-            label_color,
-        );
+        let galley = painter.layout_no_wrap(format!("#{id}"), label_font.clone(), label_color);
+        // Right-aligned to the shoulder so it clears whatever the riser puts directly above the
+        // vessel, but clamped into the schematic: the ground-support tanks sit about five pixels
+        // from the left edge, which is not enough to hang a tag off.
+        let x = (rect.left() + LABEL_GAP - galley.size().x).max(strip.left() + LABEL_GAP);
+        let y = rect.top() - LABEL_GAP - galley.size().y;
+        painter.galley(pos2(x, y), galley, label_color);
     };
     let draw_valve_label =
         |center: Pos2, half: f32, horizontal: bool, id: ValveId, color: Color32| {
+            // Off the glyph's own edge. Measuring from `half` instead left the tag nearly three
+            // times further out than intended, close enough to whatever sits above to look like
+            // it belonged to that instead.
+            let edge = half * VALVE_GLYPH_BASE_RATIO + LABEL_GAP;
             let (pos, anchor) = if horizontal {
-                (pos2(center.x, center.y - half - 3.0), Align2::CENTER_BOTTOM)
+                (pos2(center.x, center.y - edge), Align2::CENTER_BOTTOM)
             } else {
-                (pos2(center.x + half + 4.0, center.y), Align2::LEFT_CENTER)
+                (pos2(center.x + edge, center.y), Align2::LEFT_CENTER)
             };
             painter.text(
                 pos,
@@ -334,7 +386,7 @@ pub fn draw_hybrid(
     draw_hatching(
         &painter,
         &capsule_polygon(top_tank_rect, bulkhead_h),
-        N2_COLOR,
+        n2_color,
         pressure_coverage(n2_pressure_bar.unwrap_or(0.0), N2_MAX_PRESSURE_BAR),
         hatch_stride,
         None,
@@ -348,7 +400,7 @@ pub fn draw_hybrid(
         bulkhead_h,
         tank_fill_level,
         pressure_coverage(n2o_pressure1_bar.unwrap_or(0.0), N2O_MAX_PRESSURE_BAR),
-        N2O_COLOR,
+        n2o_color,
         stroke,
         hatch_stride,
     );
@@ -356,14 +408,14 @@ pub fn draw_hybrid(
     let tank_fill_indicator = MeasurementIndicator {
         values: vec![tank_fill_level.map(|l| l * 100.0)],
         unit: "%",
-        color: Color32::WHITE,
+        color: schematic_ink(&visuals),
         decimals: Some(0),
         blink: tank_fill_level.is_none(),
     };
     let intrinsic = MeasurementIndicator {
         values: vec![Some(99.0)],
         unit: "%",
-        color: Color32::WHITE,
+        color: schematic_ink(&visuals),
         decimals: Some(0),
         blink: false,
     }
@@ -375,10 +427,10 @@ pub fn draw_hybrid(
         tank_fill_indicator,
     );
     let time = ui.input(|i| i.time);
-    let valve_fill_closed = Color32::BLACK;
-    let valve_fill_open = COLOR_INDICATOR_WARNING;
-    let valve_stroke_closed = Stroke::new(1.5_f32, Color32::WHITE);
-    let valve_stroke_open = Stroke::new(1.5_f32, COLOR_INDICATOR_WARNING);
+    let valve_fill_closed = schematic_void(&visuals);
+    let valve_fill_open = readable(COLOR_INDICATOR_WARNING, &visuals);
+    let valve_stroke_closed = Stroke::new(1.5_f32, schematic_ink(&visuals));
+    let valve_stroke_open = Stroke::new(1.5_f32, valve_fill_open);
     // Solid fill/stroke reflect the reported state; the intended (commanded)
     // position is drawn separately as hatching, and a mismatch blinks a box.
     let style_for = |id: ValveId| -> (Stroke, Color32) {
@@ -455,7 +507,7 @@ pub fn draw_hybrid(
         ],
         stroke,
     );
-    painter.circle_filled(pos2(center_x, junction_cy), junction_r, NODE_COLOR);
+    painter.circle_filled(pos2(center_x, junction_cy), junction_r, node_color);
     painter.text(
         pos2(center_x - junction_r - 3.0, junction_cy),
         Align2::RIGHT_CENTER,
@@ -701,7 +753,7 @@ pub fn draw_hybrid(
     draw_hatching(
         &painter,
         &capsule_polygon(ext_press_rect, ext_bulkhead_h),
-        EXT_N2_COLOR,
+        ext_n2_color,
         pressure_coverage(ext_pressurant_bar.unwrap_or(0.0), N2_MAX_PRESSURE_BAR),
         hatch_stride,
         None,
@@ -715,7 +767,7 @@ pub fn draw_hybrid(
         ext_bulkhead_h,
         ext_oxidizer_level,
         pressure_coverage(ext_oxidizer_bar.unwrap_or(0.0), N2O_MAX_PRESSURE_BAR),
-        EXT_N2O_COLOR,
+        ext_n2o_color,
         stroke,
         hatch_stride,
     );
@@ -723,13 +775,13 @@ pub fn draw_hybrid(
     for (rect, color, pressure, warn) in [
         (
             ext_press_rect,
-            EXT_N2_COLOR,
+            ext_n2_color,
             ext_pressurant_bar,
             vessel_warn(ext_pressurant.as_ref()),
         ),
         (
             ext_ox_rect,
-            EXT_N2O_COLOR,
+            ext_n2o_color,
             ext_oxidizer_bar,
             vessel_warn(ext_oxidizer.as_ref()),
         ),
@@ -765,18 +817,19 @@ pub fn draw_hybrid(
     ] {
         // When the ground tank isn't reporting, mute its valves and plumbing: dim
         // them and drop the commanded/mismatch cues since they can't do anything.
+        let muted = gse_muted_opacity(&visuals);
         let pipe_stroke = if available {
             stroke
         } else {
-            Stroke::new(stroke.width, stroke.color.gamma_multiply(GSE_MUTED_OPACITY))
+            Stroke::new(stroke.width, dim(stroke.color, muted))
         };
         let valve_visual = |id: ValveId, s: Stroke, c: Color32| {
             if available {
                 (c, s, cmd(id), blink[super::valve_index(id)])
             } else {
                 (
-                    c.gamma_multiply(GSE_MUTED_OPACITY),
-                    Stroke::new(s.width, s.color.gamma_multiply(GSE_MUTED_OPACITY)),
+                    dim(c, muted),
+                    Stroke::new(s.width, dim(s.color, muted)),
                     None,
                     false,
                 )
@@ -821,7 +874,7 @@ pub fn draw_hybrid(
             if available {
                 label_color
             } else {
-                label_color.gamma_multiply(GSE_MUTED_OPACITY)
+                dim(label_color, muted)
             },
         );
         painter.line(
@@ -881,7 +934,7 @@ pub fn draw_hybrid(
             if available {
                 label_color
             } else {
-                label_color.gamma_multiply(GSE_MUTED_OPACITY)
+                dim(label_color, muted)
             },
         );
         painter.line(
@@ -969,13 +1022,13 @@ pub fn draw_hybrid(
     draw_hatching(
         &painter,
         &cc_polygon,
-        CC_COLOR,
+        cc_color,
         pressure_coverage(cc_pressure_bar.unwrap_or(0.0), CC_MAX_PRESSURE_BAR),
         hatch_stride,
         None,
     );
 
-    draw_fuel_grain(&painter, cc_interior, fuel_port_half, stroke, FUEL_COLOR);
+    draw_fuel_grain(&painter, cc_interior, fuel_port_half, stroke, fuel_color);
 
     painter.add(Shape::Path(PathShape::closed_line(chamber_path, stroke)));
     draw_tank_label(cc_interior, 2);
@@ -992,7 +1045,9 @@ fn draw_valve_mode_toggle(ui: &egui::Ui, square: Rect, mode: &mut ValveInteracti
         .pivot(Align2::LEFT_BOTTOM)
         .fixed_pos(square.left_bottom() + Vec2::new(6.0, -6.0))
         .show(ui.ctx(), |ui| {
-            instrument_visuals(ui);
+            // An `Area` builds its `Ui` from the context, so it already carries the window theme -
+            // which is what the schematic underneath it is drawn in too.
+            let visuals = ui.visuals().clone();
             ui.spacing_mut().item_spacing.y = 2.0;
             for (m, label) in [
                 (ValveInteractionMode::Pulse, "PULSE"),
@@ -1000,9 +1055,9 @@ fn draw_valve_mode_toggle(ui: &egui::Ui, square: Rect, mode: &mut ValveInteracti
             ] {
                 let selected = *mode == m;
                 let stroke = if selected {
-                    Stroke::new(1.0_f32, Color32::WHITE)
+                    Stroke::new(1.0_f32, schematic_ink(&visuals))
                 } else {
-                    Stroke::new(0.5_f32, Color32::from_gray(120))
+                    Stroke::new(0.5_f32, schematic_line(&visuals))
                 };
                 let button = Button::new(RichText::new(label).size(12.0))
                     .fill(Color32::TRANSPARENT)
@@ -1453,7 +1508,7 @@ fn draw_pressure_regulator(painter: &egui::Painter, center: Pos2, half: f32, str
 // The two bowtie triangles of a valve glyph. Horizontal valves point left/right,
 // vertical ones up/down.
 fn valve_glyph_polygons(center: Pos2, half: f32, horizontal: bool) -> [Vec<Pos2>; 2] {
-    let base_half = half * 0.65;
+    let base_half = half * VALVE_GLYPH_BASE_RATIO;
     if horizontal {
         [
             vec![
@@ -1570,11 +1625,12 @@ fn interact_valve(
     }
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        let visuals = ui.visuals();
         painter.rect(
             rect.expand(2.0),
             CornerRadius::same(2),
-            Color32::from_white_alpha(15),
-            Stroke::new(1.0_f32, Color32::from_white_alpha(60)),
+            schematic_wash(visuals, 15),
+            Stroke::new(1.0_f32, schematic_wash(visuals, 60)),
             StrokeKind::Middle,
         );
     }

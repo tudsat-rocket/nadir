@@ -3,6 +3,7 @@ use nadir_core::{ParamProgress, System};
 use egui::{Grid, Margin, Rect, Vec2};
 use mavspec::rust::dialects::common::messages::ServoOutputRaw;
 
+use crate::colors::schematic_frame;
 use crate::widgets::Dial;
 
 #[allow(clippy::similar_names)]
@@ -63,7 +64,7 @@ pub fn draw_servos(ui: &mut egui::Ui, system: &System, square: Rect) {
     ];
 
     ui.place(motor1_rect, |ui: &mut egui::Ui| {
-        egui::Frame::dark_canvas(ui.style())
+        schematic_frame(ui.style())
             .inner_margin(Margin::same(5))
             .show(ui, |ui| {
                 ui.add(Dial {
@@ -97,7 +98,7 @@ pub fn draw_servos(ui: &mut egui::Ui, system: &System, square: Rect) {
         (3, rudder_r_rect, "Rudder"),
     ] {
         ui.place(rect, |ui: &mut egui::Ui| {
-            egui::Frame::dark_canvas(ui.style())
+            schematic_frame(ui.style())
                 .inner_margin(Margin::same(5))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());

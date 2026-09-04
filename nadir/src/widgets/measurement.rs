@@ -1,6 +1,8 @@
 use egui::{Align2, Color32, Context, CornerRadius, FontId, Sense, Stroke, StrokeKind, Vec2, pos2};
 
-use crate::colors::{COLOR_INDICATOR_WARNING, blink_on};
+use crate::colors::{
+    COLOR_INDICATOR_WARNING, blink_on, readable, schematic_box_stroke, schematic_line,
+};
 use crate::widgets::Readout;
 
 /// Stands in for a reading the vehicle is not sending.
@@ -93,9 +95,9 @@ impl egui::Widget for MeasurementIndicator {
         let border = if self.blink && blink_on(ui.input(|i| i.time)) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(60));
-            Stroke::new(2.0_f32, COLOR_INDICATOR_WARNING)
+            Stroke::new(2.0_f32, readable(COLOR_INDICATOR_WARNING, &style.visuals))
         } else {
-            style.visuals.window_stroke()
+            schematic_box_stroke(&style.visuals)
         };
         let painter = ui.painter();
 
@@ -134,7 +136,7 @@ impl egui::Widget for MeasurementIndicator {
             Align2::CENTER_TOP,
             self.unit,
             unit_font,
-            style.visuals.weak_text_color(),
+            schematic_line(&style.visuals),
         );
 
         response

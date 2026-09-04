@@ -7,8 +7,8 @@ use eframe::egui;
 use egui::{Button, Color32, Frame, Margin, RichText, Stroke, Vec2};
 
 use crate::colors::{
-    COLOR_INDICATOR_ADVANCED, COLOR_INDICATOR_AUTONOMY, COLOR_INDICATOR_WARNING, mode_color,
-    readable,
+    COLOR_INDICATOR_ADVANCED, COLOR_INDICATOR_AUTONOMY, COLOR_INDICATOR_WARNING, high_contrast,
+    mode_border, readable, text_on,
 };
 use crate::panes::PaneUi;
 use crate::widgets::{AlertLine, AlertTier};
@@ -51,8 +51,9 @@ impl PaneUi for StatusPane {
             return;
         };
 
-        let s = 14.0;
-        let button_h = s + 8.0;
+        let s = 14.0_f32;
+        // WCAG 2.2 SC 2.5.8 asks for 24px; the high-contrast theme raises `interact_size` to it.
+        let button_h = (s + 8.0).max(ui.spacing().interact_size.y);
         let armed = base_mode.contains(MavModeFlag::SAFETY_ARMED);
 
         ui.add_space(4.0);
@@ -76,14 +77,17 @@ impl PaneUi for StatusPane {
                 let size = Vec2::new(90.0, button_h);
 
                 ui.horizontal(|ui| {
+                    let armed_fill = readable(COLOR_INDICATOR_WARNING, ui.visuals());
                     let arm_button = if armed {
-                        Button::selectable(true, RichText::new("ARMED").size(s))
-                            .fill(readable(COLOR_INDICATOR_WARNING, ui.visuals()))
+                        Button::selectable(true, RichText::new("ARMED").size(s)).fill(armed_fill)
                     } else {
+                        // `Button::selectable` drops the frame while unselected, which leaves the
+                        // control with no boundary at all. Not something to do to an arm button.
                         Button::selectable(false, RichText::new("ARM").size(s))
+                            .frame_when_inactive(high_contrast())
                     };
                     if armed {
-                        ui.style_mut().visuals.override_text_color = Some(Color32::BLACK);
+                        ui.style_mut().visuals.override_text_color = Some(text_on(armed_fill));
                     }
                     if ui.add_sized(size, arm_button).clicked() {
                         system.do_arm(true, false);
@@ -101,6 +105,7 @@ impl PaneUi for StatusPane {
                 ui.horizontal(|ui| {
                     let disarm_button = if armed {
                         Button::selectable(false, RichText::new("DISARM").size(s))
+                            .frame_when_inactive(high_contrast())
                     } else {
                         Button::selectable(true, RichText::new("DISARMED").size(s))
                     };
@@ -156,7 +161,7 @@ impl PaneUi for StatusPane {
             let side_pad = 8;
             let avail_h = ui.available_height() - outer_pad;
             let row_h_raw = (avail_h - (rows.saturating_sub(1) as f32) * spacing) / rows as f32;
-            let row_h = row_h_raw.max(18.0);
+            let row_h = row_h_raw.max(ui.spacing().interact_size.y);
 
             let labels: Vec<String> = modes
                 .iter()
@@ -261,8 +266,10 @@ impl PaneUi for StatusPane {
                                 // Cyan marks autonomous modes: as text color when unselected, as
                                 // the fill when selected - so the color of the selected button
                                 // answers "is the vehicle acting autonomously right now".
+                                let auto_fill =
+                                    readable(COLOR_INDICATOR_AUTONOMY, col_ui.visuals());
                                 let text_color = match (selected, auto_mode) {
-                                    (true, true) => Color32::BLACK,
+                                    (true, true) => text_on(auto_fill),
                                     (true, false) => col_ui.visuals().selection.stroke.color,
                                     (false, true) => {
                                         readable(COLOR_INDICATOR_AUTONOMY, col_ui.visuals())
@@ -289,17 +296,13 @@ impl PaneUi for StatusPane {
 
                                 let border = Stroke::new(
                                     1.0_f32,
-                                    readable(mode_color(mode_info.custom_mode), col_ui.visuals())
-                                        .gamma_multiply(0.7),
+                                    mode_border(mode_info.custom_mode, col_ui.visuals()),
                                 );
 
                                 let button = if selected {
                                     let button = Button::new("").selected(true).stroke(border);
                                     if auto_mode {
-                                        button.fill(readable(
-                                            COLOR_INDICATOR_AUTONOMY,
-                                            col_ui.visuals(),
-                                        ))
+                                        button.fill(auto_fill)
                                     } else {
                                         button
                                     }
@@ -311,6 +314,29 @@ impl PaneUi for StatusPane {
                                 let mut resp = col_ui
                                     .add_sized(size, button)
                                     .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                                // `Button::stroke` documents that it overrides the on-hover
+                                // effects, and egui draws the focus ring as part of those - so
+                                // setting a mode-colour border silently costs these buttons every
+                                // hover and keyboard-focus cue (WCAG 2.2 SC 2.4.7 / 2.4.11). Paint
+                                // them back over the top.
+                                if resp.has_focus() || resp.hovered() {
+                                    let widget = if resp.has_focus() {
+                                        col_ui.visuals().widgets.active
+                                    } else {
+                                        col_ui.visuals().widgets.hovered
+                                    };
+                                    col_ui.painter().rect_stroke(
+                                        resp.rect,
+                                        widget.corner_radius,
+                                        Stroke::new(
+                                            widget.bg_stroke.width.max(2.0),
+                                            widget.bg_stroke.color,
+                                        ),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                }
+
                                 let galley_pos = egui::Pos2::new(
                                     resp.rect.center().x,
                                     resp.rect.center().y - galley.size().y / 2.0,

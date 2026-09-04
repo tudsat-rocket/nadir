@@ -244,7 +244,9 @@ impl egui::Widget for Plot<'_> {
 
                 let mut l = egui_plot::Line::new(name, plot_data).width(1.0_f32);
                 if let Some(color) = line.color {
-                    l = l.color(color);
+                    // Line colours are declared once, tuned against the dark canvas; `readable`
+                    // is what carries them onto a light one.
+                    l = l.color(readable(color, &visuals));
                 }
 
                 plot_ui.line(l);
