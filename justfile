@@ -22,10 +22,13 @@ wasm:
     cargo build -p nadir --target wasm32-unknown-unknown
 
 # The Android app, as a sideloadable debug APK. Needs cargo-ndk, an SDK and an NDK
-android *args:
+apk *args:
     ANDROID_HOME="{{android_sdk}}" cargo ndk -t {{ replace(android_abis, " ", " -t ") }} \
         -o nadir-android/app/src/main/jniLibs build -p nadir-android --profile android {{args}}
     cd nadir-android && ANDROID_HOME="{{android_sdk}}" ./gradlew assembleDebug
+
+# Build the APK and sideload it onto the connected device
+android *args: (apk args)
     adb install -r nadir-android/app/build/outputs/apk/debug/app-debug.apk
 
 fmt:
