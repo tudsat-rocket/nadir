@@ -5,6 +5,8 @@ pub use eframe;
 use eframe::egui;
 use egui::FontFamily;
 
+shadow_rs::shadow!(build);
+
 mod app;
 mod colors;
 mod panes;

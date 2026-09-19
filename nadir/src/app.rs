@@ -153,7 +153,7 @@ impl App {
             picked_tx,
             #[cfg(target_arch = "wasm32")]
             picked_rx,
-            sidebar: Sidebar::new(),
+            sidebar: Sidebar::new(ctx),
             status_bar: StatusBar::new(ctx),
             overview: Overview::new(),
             settings: SettingsView::new(&settings),

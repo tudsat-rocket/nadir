@@ -11,6 +11,8 @@ use crate::widgets::{
     ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
     state_of_charge,
 };
+mod version;
+use version::Version;
 
 const WIDTH: f32 = 300.0;
 /// Collapsed, the bar keeps just enough width for one icon per row.
@@ -24,14 +26,17 @@ pub enum SidebarAction {
 
 /// Left strip listing the known systems and the global navigation: which view is active, whether the
 /// log panel is shown, and the collapse toggle.
-#[derive(Default)]
 pub struct Sidebar {
     collapsed: bool,
+    version: Version,
 }
 
 impl Sidebar {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(ctx: &egui::Context) -> Self {
+        Self {
+            collapsed: false,
+            version: Version::check(ctx),
+        }
     }
 
     /// Collapses the bar, e.g. once a system connects and the tile tree needs the width.
@@ -106,6 +111,7 @@ impl Sidebar {
                     {
                         self.collapsed = !collapsed;
                     }
+                    self.version.ui(ui, collapsed);
                     ui.separator();
 
                     #[cfg(feature = "profiling")]
