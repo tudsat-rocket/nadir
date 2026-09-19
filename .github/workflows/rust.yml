@@ -1,6 +1,13 @@
 name: Rust CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,22 +17,6 @@ env:
 # the first cargo invocation.
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-check-
-      - run: sudo apt-get update && sudo apt-get install -y just
-      - run: just check
-
   test:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +52,6 @@ jobs:
 
   fmt:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - run: sudo apt-get update && sudo apt-get install -y just
@@ -69,7 +59,6 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -92,9 +81,14 @@ jobs:
         with:
           path: |
             ~/.cargo/bin/cargo-audit
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
-          key: ${{ runner.os }}-cargo-audit-bin
+          key: ${{ runner.os }}-cargo-audit-${{ hashFiles('rust-toolchain.toml') }}
       - run: sudo apt-get update && sudo apt-get install -y just
+      # Warnings from cargo-audit's own dependencies are not this repo's problem.
       - run: cargo install cargo-audit --locked
+        env:
+          RUSTFLAGS: ""
       - run: just audit

@@ -40,7 +40,6 @@ audit:
 
 # Everything CI runs
 suite:
-    @just check
     @just test
     @just wasm
     @just fmt-check
