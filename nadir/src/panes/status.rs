@@ -10,7 +10,7 @@ use crate::colors::{
     COLOR_INDICATOR_ADVANCED, COLOR_INDICATOR_AUTONOMY, COLOR_INDICATOR_WARNING, mode_color,
     readable,
 };
-use crate::panes::PaneUi;
+use crate::panes::{MUTED_HINT, PaneUi};
 use crate::widgets::{AlertLine, AlertTier};
 
 pub struct StatusPane {}
@@ -54,6 +54,7 @@ impl PaneUi for StatusPane {
         let s = 14.0;
         let button_h = s + 8.0;
         let armed = base_mode.contains(MavModeFlag::SAFETY_ARMED);
+        let can_command = !system.muted();
 
         ui.add_space(4.0);
 
@@ -85,7 +86,12 @@ impl PaneUi for StatusPane {
                     if armed {
                         ui.style_mut().visuals.override_text_color = Some(Color32::BLACK);
                     }
-                    if ui.add_sized(size, arm_button).clicked() {
+                    if ui
+                        .add_enabled_ui(can_command, |ui| ui.add_sized(size, arm_button))
+                        .inner
+                        .on_disabled_hover_text(MUTED_HINT)
+                        .clicked()
+                    {
                         system.do_arm(true, false);
                     }
                     ui.style_mut().visuals.override_text_color = None;
@@ -104,7 +110,12 @@ impl PaneUi for StatusPane {
                     } else {
                         Button::selectable(true, RichText::new("DISARMED").size(s))
                     };
-                    if ui.add_sized(size, disarm_button).clicked() {
+                    if ui
+                        .add_enabled_ui(can_command, |ui| ui.add_sized(size, disarm_button))
+                        .inner
+                        .on_disabled_hover_text(MUTED_HINT)
+                        .clicked()
+                    {
                         system.do_arm(false, false);
                     }
                     ui.add_space(5.0);
@@ -219,6 +230,9 @@ impl PaneUi for StatusPane {
             Frame::new()
                 .inner_margin(Margin::symmetric(side_pad, 0))
                 .show(ui, |ui| {
+                    if !can_command {
+                        ui.disable();
+                    }
                     ui.spacing_mut().item_spacing.x = spacing;
 
                     for r in 0..rows {

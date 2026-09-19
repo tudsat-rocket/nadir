@@ -8,7 +8,7 @@ use egui::{Button, DragValue, TextEdit, Vec2};
 use egui_extras::{Column, TableBuilder};
 use mavspec::rust::dialects::common::messages::CanFrame;
 
-use crate::panes::PaneUi;
+use crate::panes::{MUTED_HINT, PaneUi};
 
 const ROW_HEIGHT: f32 = 20.0;
 
@@ -105,9 +105,15 @@ impl CanProbePane {
     }
 
     fn controls_ui(&mut self, ui: &mut egui::Ui, system: &System) {
+        let can_command = !system.muted();
+
         ui.horizontal(|ui| {
             let enabled = self.can_forwarding_enabled;
-            ui.checkbox(&mut self.can_forwarding_enabled, "Enable CAN Forwarding");
+            ui.add_enabled_ui(can_command, |ui| {
+                ui.checkbox(&mut self.can_forwarding_enabled, "Enable CAN Forwarding")
+            })
+            .inner
+            .on_disabled_hover_text(MUTED_HINT);
             if enabled != self.can_forwarding_enabled {
                 system.request_can_forwarding(self.can_forwarding_enabled);
             }
@@ -130,7 +136,11 @@ impl CanProbePane {
             self.hex_to_send = self.hex_to_send.to_lowercase();
 
             if ui
-                .add_sized(Vec2::new(button_w, h), Button::new("Send ➡"))
+                .add_enabled_ui(can_command, |ui| {
+                    ui.add_sized(Vec2::new(button_w, h), Button::new("Send ➡"))
+                })
+                .inner
+                .on_disabled_hover_text(MUTED_HINT)
                 .clicked()
             {
                 self.send(system);

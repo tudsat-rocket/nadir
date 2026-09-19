@@ -507,6 +507,10 @@ impl PaneUi for PropulsionPane {
 
                             let button_size = Vec2::new(80.0, ui.spacing().interact_size.y);
 
+                            if system.muted() {
+                                ui.disable();
+                            }
+
                             egui::Grid::new("propulsion_valves")
                                 .striped(true)
                                 .show(ui, |ui| {

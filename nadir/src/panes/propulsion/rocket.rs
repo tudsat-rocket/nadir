@@ -1548,6 +1548,10 @@ fn interact_valve(
     mode: ValveInteractionMode,
     pulse_duration: f32,
 ) {
+    if system.muted() {
+        return;
+    }
+
     let size = if horizontal {
         egui::vec2(half * 2.0, half * 1.6)
     } else {

@@ -194,6 +194,10 @@ fn format_frame(frame: MavFrame) -> String {
 
 impl PaneUi for CommandsPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        if system.muted() {
+            ui.disable();
+        }
+
         let now = system.now();
         for style in [TextStyle::Button, TextStyle::Body, TextStyle::Monospace] {
             ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;

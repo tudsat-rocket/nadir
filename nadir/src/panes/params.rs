@@ -6,7 +6,7 @@ use egui::{
 
 use nadir_core::{ParamProgress, ParamVal, System};
 
-use crate::panes::PaneUi;
+use crate::panes::{MUTED_HINT, PaneUi};
 
 pub struct ParamsPane {
     pub search: String,
@@ -137,7 +137,11 @@ impl PaneUi for ParamsPane {
                                                 }
 
                                                 if ui
-                                                    .add_sized(size, Button::new("💾 Save"))
+                                                    .add_enabled_ui(!system.muted(), |ui| {
+                                                        ui.add_sized(size, Button::new("💾 Save"))
+                                                    })
+                                                    .inner
+                                                    .on_disabled_hover_text(MUTED_HINT)
                                                     .clicked()
                                                 {
                                                     system.set_param(param_id, param.value);

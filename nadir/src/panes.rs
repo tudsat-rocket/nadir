@@ -39,6 +39,8 @@ pub use status::StatusPane;
 use crate::views::View;
 use crate::widgets::SharedPlotState;
 
+pub const MUTED_HINT: &str = "This system is muted";
+
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum PositionSource {
     #[default]

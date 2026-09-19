@@ -93,6 +93,15 @@ impl Vitals<'_> {
                     .monospace()
                     .size(TEXT_SIZE),
             );
+            if system.muted() {
+                ui.label(
+                    RichText::new("⛔ MUTED")
+                        .monospace()
+                        .size(TEXT_SIZE)
+                        .color(limits),
+                )
+                .on_hover_text("Nothing is transmitted to this system; unmute it in the sidebar.");
+            }
             if let Ok(hb) = system.last_message::<Heartbeat>() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_sized(Vec2::new(60.0, 12.0), AutopilotLogo(hb.autopilot, hb.type_));

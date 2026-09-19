@@ -12,7 +12,7 @@ use nadir_core::{
     FlightLogUiState, GlobLogDownloadState, LogDlCommand, LogItem, PartialLogCompleteness,
 };
 
-use crate::panes::PaneUi;
+use crate::panes::{MUTED_HINT, PaneUi};
 
 /// For downloading and saving flight logs from vehicle.
 pub struct LogsPane {
@@ -32,6 +32,8 @@ impl LogsPane {
 
 impl PaneUi for LogsPane {
     fn system_ui(&mut self, ui: &mut egui::Ui, system: System) {
+        let muted = system.muted();
+
         if let Some(new_state) = system.logs.try_lock().ok().map(|g| g.clone()) {
             self.state = new_state;
         }
@@ -88,11 +90,13 @@ impl PaneUi for LogsPane {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(is_idle, |ui| {
+                ui.add_enabled_ui(is_idle && !muted, |ui| {
                     if ui.button("↺  Refresh list").clicked() {
                         send(&system.log_cmd_tx, LogDlCommand::FetchLogs);
                     }
-                });
+                })
+                .response
+                .on_disabled_hover_text(MUTED_HINT);
             });
         });
 
@@ -130,6 +134,7 @@ impl PaneUi for LogsPane {
                         is_downloading,
                         this_is_downloading,
                         log_completeness.unwrap_or(&PartialLogCompleteness::default()),
+                        muted,
                     );
                     ui.separator();
                 }
@@ -146,6 +151,7 @@ fn show_log_row(
     any_downloading: bool,
     this_is_downloading: bool,
     log_completenes: &PartialLogCompleteness,
+    muted: bool,
 ) {
     // let state = &item.state;
 
@@ -216,7 +222,7 @@ fn show_log_row(
         });
     } else if not_started {
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(!any_downloading, |ui| {
+            ui.add_enabled_ui(!any_downloading && !muted, |ui| {
                 if ui.button("⬇  Download").clicked() {
                     send(cmd_tx, LogDlCommand::DownloadLog(item.meta.mav_log_id));
                 }
@@ -239,7 +245,7 @@ fn show_log_row(
         });
 
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(!any_downloading, |ui| {
+            ui.add_enabled_ui(!any_downloading && !muted, |ui| {
                 if ui.button("▶  Resume").clicked() {
                     send(cmd_tx, LogDlCommand::DownloadLog(item.meta.mav_log_id));
                 }

@@ -60,6 +60,7 @@ impl walkers::Plugin for NavigationPlugin {
     ) {
         if let Some(screen_pos) = response.interact_pointer_pos()
             && response.secondary_clicked()
+            && !self.system.muted()
         {
             let world_pos = projector.unproject(egui::Vec2::new(screen_pos.x, screen_pos.y));
 
