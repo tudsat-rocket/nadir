@@ -107,17 +107,16 @@ impl App {
         #[cfg(not(feature = "profiling"))]
         let profiler: Option<egui_tiles::TileId> = None;
 
-        // A phone fits one pane at a time, not a grid of four tab bars.
+        // A tablet fits two panes side by side, not a grid of four tab bars.
         let root = if cfg!(target_os = "android") {
-            let tabs: Vec<_> = [
-                map, preflight, propulsion, state, sensors, navigation, mission, messages,
-                commands, params, plot, can, flight_log,
-            ]
-            .into_iter()
-            .chain(profiler)
-            .collect();
+            let left = vec![map, preflight, propulsion, navigation, mission, flight_log];
+            let right: Vec<_> = [state, sensors, plot, messages, commands, params, can]
+                .into_iter()
+                .chain(profiler)
+                .collect();
 
-            tiles.insert_tab_tile(tabs)
+            let cells = [left, right].map(|group| tiles.insert_tab_tile(group));
+            tiles.insert_horizontal_tile(cells.to_vec())
         } else {
             let top_left = vec![propulsion, params];
             let top_right = vec![state, preflight, navigation, mission];

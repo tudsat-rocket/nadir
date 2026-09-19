@@ -9,7 +9,11 @@ use vitals::Vitals;
 
 /// The bar is fixed furniture: its height is a design constant, and the horizon flexes with the
 /// leftover width between hard aspect limits so it never degenerates into a sliver or a panorama.
-const HEIGHT: f32 = 160.0;
+const HEIGHT: f32 = if cfg!(target_os = "android") {
+    190.0
+} else {
+    160.0
+};
 const HORIZON_MIN_ASPECT: f32 = 1.5;
 const HORIZON_MAX_ASPECT: f32 = 2.6;
 /// Below this the horizon is too small to read an attitude off, so the zone goes to the links.

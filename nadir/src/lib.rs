@@ -137,5 +137,5 @@ pub fn run_android(app: AndroidApp) -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
-    run(options, Vec::new(), Some(0.8))
+    run(options, Vec::new(), Some(1.0))
 }
