@@ -83,6 +83,7 @@ impl From<&LinkId> for LinkDraft {
 pub struct SettingsView {
     links: Vec<LinkDraft>,
     autoconnect_usb: bool,
+    mute_uplink_by_default: bool,
     mapbox_access_token: String,
     theme: Theme,
     /// What came of the last save, kept on screen until the next one.
@@ -94,6 +95,7 @@ impl SettingsView {
         Self {
             links: settings.links.iter().map(LinkDraft::from).collect(),
             autoconnect_usb: settings.autoconnect_usb,
+            mute_uplink_by_default: settings.mute_uplink_by_default,
             mapbox_access_token: settings.map.mapbox_access_token.clone().unwrap_or_default(),
             theme: settings.theme,
             status: None,
@@ -195,6 +197,11 @@ impl SettingsView {
             );
         });
 
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.checkbox(&mut self.mute_uplink_by_default, "Mute uplink by default");
+        });
+
         built
     }
 
@@ -268,6 +275,7 @@ impl SettingsView {
         let settings = Settings {
             autoconnect_usb: self.autoconnect_usb,
             links,
+            mute_uplink_by_default: self.mute_uplink_by_default,
             map: nadir_core::settings::MapSettings {
                 mapbox_access_token: (!self.mapbox_access_token.is_empty())
                     .then_some(self.mapbox_access_token.clone()),

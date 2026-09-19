@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use nadir_core::{Origin, Source};
 
 use eframe::egui;
-use egui::{Align, Layout, RichText};
+use egui::{Align, Button, Color32, Layout, RichText};
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
+use crate::colors::{COLOR_INDICATOR_LIMITS, readable};
 use crate::views::{LIVE, SourceId, View};
 use crate::widgets::{
     ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
@@ -136,6 +137,22 @@ impl Sidebar {
 
                     ui.separator();
 
+                    let muted = live.mute_new_systems()
+                        && live
+                            .known_system_ids()
+                            .iter()
+                            .filter_map(|id| live.system(*id))
+                            .all(|system| system.muted());
+
+                    if mute_toggle(ui, muted, if collapsed { "⛔" } else { "⛔ Mute Uplink" })
+                        .on_hover_text("Transmit nothing to any system, incl. future ones")
+                        .clicked()
+                    {
+                        live.set_muted(!muted);
+                    }
+
+                    ui.separator();
+
                     ui.selectable_value(
                         active_view,
                         View::Settings,
@@ -233,8 +250,15 @@ impl Sidebar {
                         ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
                             ui.selectable_value(active_view, view, "Select ➡");
 
-                            // A recording has no channels, and so no rate to show.
                             if !recorded {
+                                let muted = system.muted();
+                                if mute_toggle(ui, muted, "⛔")
+                                    .on_hover_text("Transmit nothing to this system")
+                                    .clicked()
+                                {
+                                    system.set_muted(!muted);
+                                }
+
                                 let total_data_rate = system
                                     .channels()
                                     .iter_mut()
@@ -264,4 +288,17 @@ impl Sidebar {
             }
         }
     }
+}
+
+fn mute_toggle(ui: &mut egui::Ui, muted: bool, label: &str) -> egui::Response {
+    let mut button = Button::selectable(muted, label);
+    if muted {
+        button = button.fill(readable(COLOR_INDICATOR_LIMITS, ui.visuals()));
+        ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
+    }
+
+    let response = ui.add(button);
+    ui.style_mut().visuals.override_text_color = None;
+
+    response
 }

@@ -176,8 +176,12 @@ pub async fn download_params(
 ) {
     // Wait for the first AUTOPILOT_VERSION message. We need the device capabilities to check for
     // the flags which tell us how the parameter values are encoded.
+    // Also waits out a mute: unlike mode discovery, the gather below runs once and latches its
+    // failure, so a muted start would leave the system without parameters for the whole session.
     let encoding = loop {
-        if let Some(encoding) = system.parameter_encoding() {
+        if !system.muted()
+            && let Some(encoding) = system.parameter_encoding()
+        {
             break encoding;
         }
 

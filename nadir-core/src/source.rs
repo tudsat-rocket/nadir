@@ -118,19 +118,21 @@ pub struct Source {
     /// does not shift the data under the cursor.
     pub plot_origin: DateTime<Utc>,
     pub origin: Origin,
+    mute_new_systems: Arc<AtomicBool>,
     can_proxy: Option<crate::CanProxy>,
 }
 
 impl Source {
     /// The source the links feed.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn live(can_proxy: Option<crate::CanProxy>) -> Self {
+    pub(crate) fn live(mute_uplink: bool, can_proxy: Option<crate::CanProxy>) -> Self {
         Self {
             db: Db::init(),
             tlog: Some(tlog::Writer::spawn()),
             systems: Arc::new(Mutex::new(HashMap::new())),
             plot_origin: Utc::now(),
             origin: Origin::Live,
+            mute_new_systems: Arc::new(AtomicBool::new(mute_uplink)),
             can_proxy,
         }
     }
@@ -145,6 +147,7 @@ impl Source {
             systems: Arc::new(Mutex::new(HashMap::new())),
             plot_origin: Utc::now(),
             origin: Origin::Live,
+            mute_new_systems: Arc::new(AtomicBool::new(false)),
             can_proxy: None,
         }
     }
@@ -228,6 +231,7 @@ impl Source {
             systems: Arc::new(Mutex::new(HashMap::new())),
             plot_origin: first,
             origin: Origin::Log(Arc::clone(&progress)),
+            mute_new_systems: Arc::new(AtomicBool::new(false)),
             can_proxy: None,
         };
 
@@ -254,6 +258,18 @@ impl Source {
         system_ids.sort_unstable();
         system_ids.dedup();
         system_ids
+    }
+
+    pub fn mute_new_systems(&self) -> bool {
+        self.mute_new_systems.load(Ordering::Relaxed)
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        self.mute_new_systems.store(muted, Ordering::Relaxed);
+
+        for system in self.systems.lock().unwrap().values() {
+            system.set_muted(muted);
+        }
     }
 
     pub fn system(&self, id: SystemId) -> Option<System> {
@@ -329,6 +345,7 @@ impl Source {
                     self.tlog.clone(),
                     self.origin.clone(),
                     callback.cloned(),
+                    self.mute_new_systems(),
                     self.can_proxy.clone(),
                 )
             })),

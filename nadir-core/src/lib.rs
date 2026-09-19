@@ -68,6 +68,7 @@ mod core_impl {
     pub struct CoreBuilder {
         pub links: Vec<LinkId>,
         pub autoconnect_usb: bool,
+        pub mute_uplink: bool,
         pub on_event: Option<EventCallback>,
     }
 
@@ -89,6 +90,12 @@ mod core_impl {
 
         pub fn autoconnect_to_usb(mut self) -> Self {
             self.autoconnect_usb = true;
+            self
+        }
+
+        /// Whether systems start with their uplink muted, see [`crate::System::muted`].
+        pub fn mute_uplink(mut self, muted: bool) -> Self {
+            self.mute_uplink = muted;
             self
         }
 
@@ -118,7 +125,7 @@ mod core_impl {
             let core = Core {
                 event_sender: tx,
                 links: Arc::new(Mutex::new(HashMap::new())),
-                live: Source::live(proxy),
+                live: Source::live(self.mute_uplink, proxy),
             };
 
             let c = core.clone();

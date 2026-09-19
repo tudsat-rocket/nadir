@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::f32;
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
@@ -44,6 +45,7 @@ pub struct System {
     pub origin: Origin,
     pub message_sender: broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
+    muted: Arc<AtomicBool>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
     pub logs: Arc<Mutex<FlightLogUiState>>,
@@ -59,6 +61,7 @@ impl System {
         tlog: Option<crate::tlog::Writer>,
         origin: Origin,
         callback: Option<Callback<V2>>,
+        muted: bool,
         can_proxy: Option<crate::CanProxy>,
     ) -> Self {
         let available_modes = Arc::new(Mutex::new(None));
@@ -90,6 +93,7 @@ impl System {
                 endpoint,
                 channels: HashMap::new(),
             })),
+            muted: Arc::new(AtomicBool::new(muted)),
             available_modes,
             params,
             logs,
@@ -213,6 +217,14 @@ impl System {
         }
     }
 
+    pub fn muted(&self) -> bool {
+        self.muted.load(Ordering::Relaxed)
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Relaxed);
+    }
+
     pub fn send_message<M: Message + MessageExt + Debug>(&self, message: &M) {
         let mut connection = self.conn.lock().unwrap();
         let SystemConnection {
@@ -229,6 +241,14 @@ impl System {
             );
             return;
         };
+
+        if self.muted() {
+            tracing::debug!(
+                system_id = self.system_id,
+                "Discarding {message:?}, this system is muted"
+            );
+            return;
+        }
 
         let frame = {
             let endpoint = endpoint.lock().unwrap();

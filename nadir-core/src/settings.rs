@@ -10,6 +10,7 @@ use crate::LinkId;
 pub struct Settings {
     pub autoconnect_usb: bool,
     pub links: Vec<LinkId>,
+    pub mute_uplink_by_default: bool,
     pub map: MapSettings,
     pub theme: Theme,
 }
@@ -19,6 +20,7 @@ impl Default for Settings {
         Self {
             autoconnect_usb: true,
             links: Self::default_links(),
+            mute_uplink_by_default: false,
             map: MapSettings::default(),
             theme: Theme::default(),
         }

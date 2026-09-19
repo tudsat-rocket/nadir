@@ -64,6 +64,7 @@ impl App {
             if settings.autoconnect_usb {
                 builder = builder.autoconnect_to_usb();
             }
+            builder = builder.mute_uplink(settings.mute_uplink_by_default);
 
             builder
                 .on_event(Box::new(move |event| {
