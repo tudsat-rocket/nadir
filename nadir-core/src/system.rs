@@ -147,7 +147,18 @@ impl System {
     }
 
     pub fn last_message<M: MessageExt + Default>(&self) -> Result<M, DbError> {
-        self.db.last_message(self.system_id, 0x01)
+        self.last_message_from(0x01)
+    }
+
+    pub fn last_message_from<M: MessageExt + Default>(
+        &self,
+        component_id: u8,
+    ) -> Result<M, DbError> {
+        self.db.last_message(self.system_id, component_id)
+    }
+
+    pub fn components(&self) -> Vec<(u8, DateTime<Utc>)> {
+        self.db.components(self.system_id)
     }
 
     pub fn last_instance_message<M: MessageExt + Default>(&self, id: i64) -> Result<M, DbError> {
@@ -186,19 +197,7 @@ impl System {
     }
 
     pub fn icon(&self) -> &'static str {
-        match self.mav_type() {
-            MavType::Rocket => "🚀",
-            MavType::Tricopter => "🚁",
-            MavType::Quadrotor => "🚁",
-            MavType::Hexarotor => "🚁",
-            MavType::Octorotor => "🚁",
-            MavType::Helicopter => "🚁",
-            MavType::Coaxial => "🚁",
-            MavType::FixedWing => "✈",
-            MavType::GroundRover => "🚗",
-            MavType::Gcs | MavType::AntennaTracker => "📡",
-            _ => "?",
-        }
+        mav_type_icon(self.mav_type())
     }
 
     pub fn parameter_encoding(&self) -> Option<ParamEncoding> {
@@ -473,4 +472,21 @@ impl System {
 pub fn mode_name_string(buf: &[u8]) -> String {
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     String::from_utf8_lossy(&buf[..end]).into_owned()
+}
+
+pub fn mav_type_icon(mav_type: MavType) -> &'static str {
+    match mav_type {
+        MavType::Rocket => "🚀",
+        MavType::Tricopter => "🚁",
+        MavType::Quadrotor => "🚁",
+        MavType::Hexarotor => "🚁",
+        MavType::Octorotor => "🚁",
+        MavType::Helicopter => "🚁",
+        MavType::Coaxial => "🚁",
+        MavType::FixedWing => "✈",
+        MavType::GroundRover => "🚗",
+        MavType::Gcs | MavType::AntennaTracker => "📡",
+        MavType::Servo => "⚙",
+        _ => "?",
+    }
 }

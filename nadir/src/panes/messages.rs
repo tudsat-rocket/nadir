@@ -10,6 +10,7 @@ use crate::widgets::Readout;
 
 #[derive(Clone, PartialEq, Eq)]
 struct SelectedMessage {
+    component_id: u8,
     name: String,
     instance: Option<MessageInstance>,
 }
@@ -34,7 +35,9 @@ impl PaneUi for MessagesPane {
             ui.style_mut().text_styles.get_mut(&style).unwrap().size = 12.0;
         }
 
-        let summary = system.db.message_summary(system.system_id, 0x01);
+        let summary = system.db.message_summary(system.system_id);
+        // Every system has a component 1; a column of nothing but "01" is noise.
+        let show_components = summary.iter().any(|entry| entry.component_id != 0x01);
 
         let has_detail = self.selected_message.is_some();
         let total = ui.available_rect_before_wrap();
@@ -46,7 +49,7 @@ impl PaneUi for MessagesPane {
         };
 
         let mut table_ui = ui.new_child(egui::UiBuilder::new().max_rect(table_rect));
-        self.table_ui(&mut table_ui, &summary, now);
+        self.table_ui(&mut table_ui, &summary, show_components, now);
 
         if has_detail {
             let detail_rect =
@@ -55,7 +58,7 @@ impl PaneUi for MessagesPane {
                 .rect_filled(detail_rect, 0.0, ui.visuals().panel_fill);
             let mut detail_ui = ui.new_child(egui::UiBuilder::new().max_rect(detail_rect));
             detail_ui.separator();
-            self.detail_ui(&mut detail_ui, &system);
+            self.detail_ui(&mut detail_ui, &system, show_components);
         }
 
         // Advance the parent layout past the space we used.
@@ -64,15 +67,25 @@ impl PaneUi for MessagesPane {
 }
 
 impl MessagesPane {
-    fn table_ui(&mut self, ui: &mut egui::Ui, summary: &[MessageSummary], now: DateTime<Utc>) {
+    fn table_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        summary: &[MessageSummary],
+        show_components: bool,
+        now: DateTime<Utc>,
+    ) {
         let h = ui.available_height();
 
-        TableBuilder::new(ui)
+        let mut table = TableBuilder::new(ui)
             .striped(true)
             .cell_layout(Layout::left_to_right(Align::Center))
             .max_scroll_height(h)
             .auto_shrink(false)
-            .column(Column::auto().resizable(true))
+            .column(Column::auto().resizable(true));
+        if show_components {
+            table = table.column(Column::auto().resizable(true));
+        }
+        table
             .column(Column::remainder())
             .column(Column::auto().resizable(true))
             .column(Column::auto().resizable(true))
@@ -80,6 +93,11 @@ impl MessagesPane {
                 header.col(|ui| {
                     ui.weak("Last Received");
                 });
+                if show_components {
+                    header.col(|ui| {
+                        ui.weak("Cmp");
+                    });
+                }
                 header.col(|ui| {
                     ui.weak("Message");
                 });
@@ -113,6 +131,11 @@ impl MessagesPane {
                                     .to_string(),
                             );
                         });
+                        if show_components {
+                            row.col(|ui| {
+                                ui.monospace(format!("{:02x}", entry.component_id));
+                            });
+                        }
                         row.col(|ui| {
                             let label_text =
                                 format_message_label(&entry.name, entry.instance.as_ref());
@@ -122,12 +145,15 @@ impl MessagesPane {
                             );
                             if label.clicked() {
                                 let is_selected = self.selected_message.as_ref().is_some_and(|s| {
-                                    s.name == entry.name && s.instance == entry.instance
+                                    s.component_id == entry.component_id
+                                        && s.name == entry.name
+                                        && s.instance == entry.instance
                                 });
                                 self.selected_message = if is_selected {
                                     None
                                 } else {
                                     Some(SelectedMessage {
+                                        component_id: entry.component_id,
                                         name: entry.name.clone(),
                                         instance: entry.instance.clone(),
                                     })
@@ -154,12 +180,17 @@ impl MessagesPane {
             });
     }
 
-    fn detail_ui(&mut self, ui: &mut egui::Ui, system: &System) {
+    fn detail_ui(&mut self, ui: &mut egui::Ui, system: &System, show_components: bool) {
         let Some(selected) = self.selected_message.clone() else {
             return;
         };
 
-        let title = format_message_label(&selected.name, selected.instance.as_ref());
+        let label = format_message_label(&selected.name, selected.instance.as_ref());
+        let title = if show_components {
+            format!("{:02x} {label}", selected.component_id)
+        } else {
+            label
+        };
 
         ui.horizontal(|ui| {
             ui.strong(&title);
@@ -179,7 +210,7 @@ impl MessagesPane {
         match system.db.last_message_debug_by_name(
             &selected.name,
             system.system_id,
-            0x01,
+            selected.component_id,
             instance_arg,
         ) {
             Ok(Some(mut debug)) => {

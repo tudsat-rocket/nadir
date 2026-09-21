@@ -76,6 +76,7 @@ struct SummaryRow {
 
 #[derive(Debug, Clone)]
 pub struct MessageSummary {
+    pub component_id: u8,
     pub msg_id: u32,
     pub name: String,
     pub instance: Option<MessageInstance>,
@@ -431,23 +432,48 @@ impl Db {
             .sum()
     }
 
-    /// One row per `(message_id, instance_value)` pair stored for the given system/component,
-    /// sorted by message ID and instance value.
-    pub fn message_summary(&self, system_id: u8, component_id: u8) -> Vec<MessageSummary> {
-        let cutoff = Utc::now() - chrono::TimeDelta::seconds(FREQ_WINDOW_SECS);
+    /// Components this system has been heard from, with the time of their last message, by id.
+    pub fn components(&self, system_id: u8) -> Vec<(u8, DateTime<Utc>)> {
         let series = self.series.lock().unwrap();
 
-        // A message two dialects define is stored once per dialect type, and reported as one row.
-        let mut rows: HashMap<(u32, Option<i64>), SummaryRow> = HashMap::new();
-        for ((sys, comp, msg_id, _, instance_value), stored) in series.iter() {
-            if *sys != system_id || *comp != component_id {
+        let mut last_heard: HashMap<u8, DateTime<Utc>> = HashMap::new();
+        for ((sys, comp, ..), stored) in series.iter() {
+            if *sys != system_id {
                 continue;
             }
             let Some(last) = stored.last_time() else {
                 continue;
             };
 
-            let row = rows.entry((*msg_id, *instance_value)).or_default();
+            let entry = last_heard.entry(*comp).or_insert(last);
+            *entry = (*entry).max(last);
+        }
+
+        drop(series);
+
+        let mut result: Vec<_> = last_heard.into_iter().collect();
+        result.sort_unstable_by_key(|(comp, _)| *comp);
+
+        result
+    }
+
+    /// One row per `(component_id, message_id, instance_value)` triple stored for the given system,
+    /// sorted the same way.
+    pub fn message_summary(&self, system_id: u8) -> Vec<MessageSummary> {
+        let cutoff = Utc::now() - chrono::TimeDelta::seconds(FREQ_WINDOW_SECS);
+        let series = self.series.lock().unwrap();
+
+        // A message two dialects define is stored once per dialect type, and reported as one row.
+        let mut rows: HashMap<(u8, u32, Option<i64>), SummaryRow> = HashMap::new();
+        for ((sys, comp, msg_id, _, instance_value), stored) in series.iter() {
+            if *sys != system_id {
+                continue;
+            }
+            let Some(last) = stored.last_time() else {
+                continue;
+            };
+
+            let row = rows.entry((*comp, *msg_id, *instance_value)).or_default();
             row.count += stored.samples();
             row.recent += stored.count_since(cutoff);
             row.last = row.last.max(Some(last));
@@ -461,8 +487,9 @@ impl Db {
         )]
         let mut result: Vec<MessageSummary> = rows
             .into_iter()
-            .filter_map(|((msg_id, instance_value), row)| {
+            .filter_map(|((component_id, msg_id, instance_value), row)| {
                 Some(MessageSummary {
+                    component_id,
                     msg_id,
                     name: self
                         .msg_names
@@ -482,7 +509,13 @@ impl Db {
             })
             .collect();
 
-        result.sort_by_key(|row| (row.msg_id, row.instance.as_ref().map(|i| i.value)));
+        result.sort_by_key(|row| {
+            (
+                row.component_id,
+                row.msg_id,
+                row.instance.as_ref().map(|i| i.value),
+            )
+        });
 
         result
     }
@@ -1068,7 +1101,7 @@ mod tests {
         db.write_message(1, 1, &rapid::CommandLong::default());
         db.write_message(2, 1, &common::Attitude::default());
 
-        let summary = db.message_summary(1, 1);
+        let summary = db.message_summary(1);
         let row = |name: &str, instance| {
             summary
                 .iter()

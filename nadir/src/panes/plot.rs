@@ -125,7 +125,14 @@ impl PaneUi for PlotPane {
             return;
         };
 
-        let summary = behavior.source.db.message_summary(system_id, 1);
+        // The pane plots one component's series at a time, and that is component 1.
+        let summary: Vec<_> = behavior
+            .source
+            .db
+            .message_summary(system_id)
+            .into_iter()
+            .filter(|entry| entry.component_id == 1)
+            .collect();
 
         ui.with_layout(
             egui::Layout::left_to_right(Align::TOP).with_cross_justify(true),
