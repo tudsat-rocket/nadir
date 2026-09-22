@@ -1,3 +1,4 @@
+use mavinspect::protocol::MavType;
 use nadir_core::{MessageInstance, format_message_label};
 
 use eframe::egui;
@@ -55,6 +56,29 @@ macro_rules! draw_field_selector {
                     ))
                     .default_open(default_open)
                     .show($ui, |ui| {
+                        let active = &mut *$active;
+                        let mut field_button = |ui: &mut egui::Ui, label: String, name: String| {
+                            let id = ActiveField {
+                                message_name: entry.name.clone(),
+                                instance: entry.instance.clone(),
+                                field_name: name,
+                            };
+                            let selected = active.contains(&id);
+                            let button = egui::Button::new(label).selected(selected);
+
+                            if ui
+                                .add_sized(egui::Vec2::new(ui.available_width(), 20.0), button)
+                                .clicked()
+                            {
+                                if selected {
+                                    let pos = active.iter().position(|i| i == &id).unwrap();
+                                    active.remove(pos);
+                                } else {
+                                    active.push(id);
+                                }
+                            }
+                        };
+
                         for field in message.fields() {
                             if entry
                                 .instance
@@ -69,25 +93,28 @@ macro_rules! draw_field_selector {
                                 field.name().to_owned()
                             };
 
-                            let id = ActiveField {
-                                message_name: entry.name.clone(),
-                                instance: entry.instance.clone(),
-                                field_name: field.name().to_owned(),
+                            let MavType::Array(_, len) = field.r#type() else {
+                                field_button(ui, label, field.name().to_owned());
+                                continue;
                             };
-                            let selected = $active.contains(&id);
-                            let button = egui::Button::new(label).selected(selected);
 
-                            if ui
-                                .add_sized(egui::Vec2::new(ui.available_width(), 20.0), button)
-                                .clicked()
-                            {
-                                if selected {
-                                    let pos = $active.iter().position(|i| i == &id).unwrap();
-                                    $active.remove(pos);
-                                } else {
-                                    $active.push(id);
-                                }
+                            // A char array is a string: no entry of it is a number to plot.
+                            if *field.r#type().base_type() == MavType::Char {
+                                continue;
                             }
+
+                            egui::CollapsingHeader::new(label)
+                                .id_salt((
+                                    entry.name.as_str(),
+                                    entry.instance.as_ref().map(|i| i.value),
+                                    field.name(),
+                                ))
+                                .show(ui, |ui| {
+                                    for element in 0..*len {
+                                        let name = format!("{}[{element}]", field.name());
+                                        field_button(ui, name.clone(), name);
+                                    }
+                                });
                         }
                     });
             }

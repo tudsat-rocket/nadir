@@ -24,12 +24,12 @@ type SeriesMap = HashMap<SeriesKey, Box<dyn Series>>;
 /// One field of one message over time, oldest first.
 type Points = Vec<(DateTime<Utc>, f64)>;
 
-/// (series, field index, samples per chunk, sentinel)
+/// (series, plotted value, samples per chunk, sentinel)
 ///
 /// The sentinel is part of the key because two panes can plot one field with different ones - the
 /// propulsion pressures drop `u16::MAX`, the generic field browser does not - and both can be on
 /// screen at once.
-type ChunkKey = (SeriesKey, usize, usize, Option<u64>);
+type ChunkKey = (SeriesKey, Field, usize, Option<u64>);
 
 /// Chunks a plot has already asked for, in series order. Whole ones only, so the edges a window
 /// cuts are never cached.
@@ -58,6 +58,25 @@ pub enum DbError {
     NotFound(&'static str),
     #[error("Unknown message or field: {0}")]
     UnknownField(String),
+}
+
+/// A plottable number in a message: a field, and which of its entries when that field is an array.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Field {
+    index: usize,
+    element: Option<usize>,
+}
+
+impl Field {
+    /// Splits a plotted value's name into the field it names and the array element it selects,
+    /// e.g. `voltages[3]` into `("voltages", Some(3))`.
+    fn split(name: &str) -> (&str, Option<usize>) {
+        let Some((field, element)) = name.strip_suffix(']').and_then(|n| n.rsplit_once('[')) else {
+            return (name, None);
+        };
+
+        element.parse().map_or((name, None), |e| (field, Some(e)))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,13 +119,15 @@ pub trait MessageExt: MessageSpec + Clone + Debug + Send + Sync + 'static {
         None
     }
 
-    /// Numeric value of the field at `index`, or `None` for an array field, which has no single
-    /// number to plot.
-    fn field_f64(&self, index: usize) -> Option<f64>;
+    /// Numeric value of the field at `index`: its `element`th entry where it is an array, the
+    /// field itself where it is not. `None` for a string, for an element past the end, and for an
+    /// array addressed without one.
+    fn field_f64(&self, index: usize, element: Option<usize>) -> Option<f64>;
 
     /// As [`Self::field_f64`], with readings equal to `sentinel` dropped as "no reading".
-    fn field_value(&self, index: usize, sentinel: Option<f64>) -> Option<f64> {
-        self.field_f64(index).filter(|v| Some(*v) != sentinel)
+    fn field_value(&self, field: Field, sentinel: Option<f64>) -> Option<f64> {
+        self.field_f64(field.index, field.element)
+            .filter(|v| Some(*v) != sentinel)
     }
 
     /// Appends a clone of self to its series. The dialect enums dispatch to the inner variant, so
@@ -133,10 +154,10 @@ trait Series: Any + Send + Sync {
 
     fn field_index(&self, field_name: &str) -> Option<usize>;
 
-    fn chunk(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Chunk;
+    fn chunk(&self, range: Range<usize>, field: Field, sentinel: Option<f64>) -> Chunk;
 
     /// Every sample in `range` as a plot point, undecimated.
-    fn points(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Points;
+    fn points(&self, range: Range<usize>, field: Field, sentinel: Option<f64>) -> Points;
 
     fn last_time(&self) -> Option<DateTime<Utc>>;
 
@@ -164,18 +185,18 @@ impl<M: MessageExt> Series for Vec<(DateTime<Utc>, M)> {
         M::rows().iter().position(|row| *row == field_name)
     }
 
-    fn chunk(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Chunk {
+    fn chunk(&self, range: Range<usize>, field: Field, sentinel: Option<f64>) -> Chunk {
         Chunk::of(
             self[range]
                 .iter()
-                .filter_map(|(t, msg)| Some((*t, msg.field_value(index, sentinel)?))),
+                .filter_map(|(t, msg)| Some((*t, msg.field_value(field, sentinel)?))),
         )
     }
 
-    fn points(&self, range: Range<usize>, index: usize, sentinel: Option<f64>) -> Points {
+    fn points(&self, range: Range<usize>, field: Field, sentinel: Option<f64>) -> Points {
         self[range]
             .iter()
-            .filter_map(|(t, msg)| Some((*t, msg.field_value(index, sentinel)?)))
+            .filter_map(|(t, msg)| Some((*t, msg.field_value(field, sentinel)?)))
             .collect()
     }
 
@@ -568,7 +589,8 @@ impl Db {
             .get(msg_name)
             .ok_or_else(|| DbError::UnknownField(msg_name.to_owned()))?;
 
-        if !fields.iter().any(|field| field == field_name) {
+        let (name, element) = Field::split(field_name);
+        if !fields.iter().any(|field| field == name) {
             return Err(DbError::UnknownField(field_name.to_owned()));
         }
 
@@ -583,9 +605,12 @@ impl Db {
         // A shared message can have a different field set in each dialect; the ones without this
         // field contribute nothing rather than failing the whole line.
         .filter_map(|(key, stored)| {
-            let index = stored.field_index(field_name)?;
+            let field = Field {
+                index: stored.field_index(name)?,
+                element,
+            };
             let window = stored.window_range(args.since, args.until);
-            (!window.is_empty()).then_some((key, stored, index, window))
+            (!window.is_empty()).then_some((key, stored, field, window))
         });
 
         let (Some(first), second) = (found.next(), found.next()) else {
@@ -593,8 +618,8 @@ impl Db {
         };
 
         let Some(second) = second else {
-            let (key, stored, index, window) = first;
-            return Ok(self.line(key, stored, index, window, args));
+            let (key, stored, field, window) = first;
+            return Ok(self.line(key, stored, field, window, args));
         };
 
         // Chunks of two series fall on different boundaries, and one can come back decimated while
@@ -604,7 +629,7 @@ impl Db {
         let mut points: Points = [first, second]
             .into_iter()
             .chain(found)
-            .flat_map(|(_, stored, index, window)| stored.points(window, index, args.sentinel))
+            .flat_map(|(_, stored, field, window)| stored.points(window, field, args.sentinel))
             .collect();
         points.sort_by_key(|(t, _)| *t);
 
@@ -642,16 +667,16 @@ impl Db {
         &self,
         key: &SeriesKey,
         series: &dyn Series,
-        index: usize,
+        field: Field,
         window: Range<usize>,
         args: TimeseriesArgs<'_>,
     ) -> Points {
         let Some(max_points) = args.max_points.filter(|budget| window.len() > *budget) else {
-            return series.points(window, index, args.sentinel);
+            return series.points(window, field, args.sentinel);
         };
 
         let stride = Chunk::stride(window.len(), max_points);
-        let chunk = |range| series.chunk(range, index, args.sentinel);
+        let chunk = |range| series.chunk(range, field, args.sentinel);
 
         if stride < MIN_CACHED_STRIDE {
             return Chunk::assemble(window, stride, &[], &chunk);
@@ -659,7 +684,7 @@ impl Db {
 
         let mut cache = self.chunks.lock().unwrap();
         let chunks = cache
-            .entry((*key, index, stride, args.sentinel.map(f64::to_bits)))
+            .entry((*key, field, stride, args.sentinel.map(f64::to_bits)))
             .or_default();
 
         // Chunks are only ever appended, because a series is: what is already there covers the
@@ -1215,11 +1240,18 @@ mod tests {
         assert_eq!(rows[0].1.id, 0x42);
         assert_eq!(rows[0].1.data, [1, 2, 3, 4, 5, 6, 7, 8]);
 
-        // An array has no single number to plot, so it yields no points rather than an error.
-        let series = db
-            .timeseries_by_name("CAN_FRAME", "data", args(1, 1))
-            .unwrap();
-        assert!(series.is_empty());
+        let series = |field| {
+            db.timeseries_by_name("CAN_FRAME", field, args(1, 1))
+                .unwrap()
+        };
+
+        assert_eq!(series("data[3]").len(), 1);
+        assert!((series("data[3]")[0].1 - 4.0).abs() < f64::EPSILON);
+
+        // The array as a whole has no single number to plot, and neither has an element past its
+        // end; both yield no points rather than an error.
+        assert!(series("data").is_empty());
+        assert!(series("data[8]").is_empty());
     }
 
     #[test]

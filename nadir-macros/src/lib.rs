@@ -104,7 +104,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 }
             }
 
-            fn field_f64(&self, index: usize) -> Option<f64> {
+            fn field_f64(&self, index: usize, element: Option<usize>) -> Option<f64> {
                 unreachable!()
             }
 
@@ -193,8 +193,8 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 })
                 .map_or_else(|| quote! { None }, |row_name| quote! { Some(#row_name) });
 
-            // Each field as a plain number, indexed as `row_names` is. An array field has no
-            // single number, and so nothing to plot.
+            // Each field as a plain number, indexed as `row_names` is. An array field is
+            // addressed one element at a time, and a string has no number to plot at all.
             let field_value_arms: Vec<_> = msg_spec
                 .fields()
                 .iter()
@@ -204,12 +204,25 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                     let var_ident = format_ident!("{}", varname);
 
                     match (f.r#type(), f.r#enum()) {
-                        (MavType::Array(_, _), _) => quote! { #i => None },
-                        (_, Some(_)) if is_field_bitmask(f) => quote! {
-                            #i => Some(self.#var_ident.bits() as f64)
+                        (MavType::Array(_, _), _) if *f.r#type().base_type() == MavType::Char => {
+                            quote! { (#i, _) => None }
+                        }
+                        (MavType::Array(_, _), Some(_)) if is_field_bitmask(f) => quote! {
+                            (#i, Some(e)) => Some(self.#var_ident.get(e)?.bits() as f64)
                         },
-                        (_, Some(_)) => quote! { #i => Some(self.#var_ident.value() as f64) },
-                        _ => quote! { #i => Some(self.#var_ident as f64) },
+                        (MavType::Array(_, _), Some(_)) => quote! {
+                            (#i, Some(e)) => Some(self.#var_ident.get(e)?.value() as f64)
+                        },
+                        (MavType::Array(_, _), None) => quote! {
+                            (#i, Some(e)) => Some(*self.#var_ident.get(e)? as f64)
+                        },
+                        (_, Some(_)) if is_field_bitmask(f) => quote! {
+                            (#i, None) => Some(self.#var_ident.bits() as f64)
+                        },
+                        (_, Some(_)) => {
+                            quote! { (#i, None) => Some(self.#var_ident.value() as f64) }
+                        }
+                        _ => quote! { (#i, None) => Some(self.#var_ident as f64) },
                     }
                 })
                 .collect();
@@ -230,8 +243,8 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                         #instance_field_impl
                     }
 
-                    fn field_f64(&self, index: usize) -> Option<f64> {
-                        match index {
+                    fn field_f64(&self, index: usize, element: Option<usize>) -> Option<f64> {
+                        match (index, element) {
                             #(#field_value_arms,)*
                             _ => None
                         }

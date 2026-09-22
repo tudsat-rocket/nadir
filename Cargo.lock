@@ -3265,6 +3265,7 @@ dependencies = [
  "egui_tracing",
  "ehttp",
  "log",
+ "mavinspect",
  "mavio",
  "maviola",
  "mavspec",

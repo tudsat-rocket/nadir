@@ -17,6 +17,7 @@ shadow-rs = { workspace = true }
 tracing-subscriber = { workspace = true }
 convert_case = { workspace = true }
 
+mavinspect = { workspace = true }
 mavspec = { workspace = true }
 rapid-dialect = { workspace = true }
 
