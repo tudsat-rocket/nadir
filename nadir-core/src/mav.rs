@@ -80,11 +80,16 @@ mod wasm_uplink {
     #[derive(Clone, Debug)]
     pub struct Peer {
         pub system_id: mavio::protocol::SystemId,
+        pub component_id: mavio::protocol::ComponentId,
     }
 
     impl Peer {
         pub fn system_id(&self) -> mavio::protocol::SystemId {
             self.system_id
+        }
+
+        pub fn component_id(&self) -> mavio::protocol::ComponentId {
+            self.component_id
         }
     }
 
