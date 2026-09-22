@@ -324,12 +324,18 @@ impl eframe::App for App {
                         self.sidebar.collapse();
                     }
 
-                    self.toasts
-                        .success(format!("System 0x{:02x} connected.", peer.system_id()));
+                    self.toasts.success(format!(
+                        "System 0x{:02x} component 0x{:02x} connected.",
+                        peer.system_id(),
+                        peer.component_id()
+                    ));
                 }
                 Event::PeerLost(peer) => {
-                    self.toasts
-                        .warning(format!("System 0x{:02x} lost.", peer.system_id()));
+                    self.toasts.warning(format!(
+                        "System 0x{:02x} component 0x{:02x} lost.",
+                        peer.system_id(),
+                        peer.component_id()
+                    ));
                 }
                 Event::Invalid(..) => {}
             }
