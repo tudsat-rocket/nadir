@@ -1,4 +1,5 @@
-use nadir_core::System;
+use chrono::TimeDelta;
+use nadir_core::{System, mav_type_icon};
 
 use eframe::egui;
 use egui::{Align, Color32, FontId, Layout, RichText, Vec2};
@@ -10,7 +11,8 @@ use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, dim, readable,
 };
 use crate::widgets::{
-    AutopilotLogo, Readout, TEXT_SIZE, column_header, link_quality, small_text, soc_color,
+    ArmedBadge, AutopilotLogo, Readout, TEXT_SIZE, column_header, link_quality, small_text,
+    soc_color,
 };
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
@@ -67,11 +69,18 @@ pub struct Vitals<'a> {
 /// e.g. "87%, 12.2V, -200mA" beside its label) starts truncating.
 const CONSUMABLES_MIN_WIDTH: f32 = 225.0;
 /// Share of the zone the consumables column takes. Its rows are label-plus-value and of known
-/// length, while the component list has to hold board names, so the larger share goes there.
+/// length, while the component list wraps into further sub-columns, so the larger share goes there.
 const CONSUMABLES_SHARE: f32 = 0.45;
 const SEPARATOR_WIDTH: f32 = 13.0;
+/// Two missed heartbeats at the 1 Hz zenith sends its per-node ones at.
+const STALE_AFTER: TimeDelta = TimeDelta::seconds(3);
+const ROW_GAP: f32 = 2.0;
+const CELL_GAP: f32 = 10.0;
 
 impl Vitals<'_> {
+    /// Mirrors what [`Self::component_row`] draws, since the column count is measured off it.
+    const WIDEST_ROW: &'static str = "⚙ 0x00 DISARMED";
+
     /// Width the two-column layout needs before the consumables values start truncating; below this,
     /// callers should ask for the compact form.
     pub const FULL_MIN_WIDTH: f32 = CONSUMABLES_MIN_WIDTH / CONSUMABLES_SHARE + SEPARATOR_WIDTH;
@@ -257,13 +266,123 @@ impl Vitals<'_> {
     }
 
     fn components_column(&self, ui: &mut egui::Ui) {
+        let system = self.system;
         let weak = ui.visuals().weak_text_color();
+        let nodata = dim(weak, 0.5);
 
         column_header(ui, "COMPONENTS");
 
-        // TODO: the component/PCB inventory is not plumbed through core yet. Everything the GUI
-        // reaches for is hardcoded to component 0x01, so there is nothing to enumerate.
-        small_text(ui, "no component data", weak.gamma_multiply(0.5));
+        // Component 1 is the vehicle itself, which the rest of the bar already speaks for.
+        let mut components: Vec<_> = system
+            .components()
+            .into_iter()
+            .filter(|(id, _)| *id > 1)
+            .collect();
+
+        if components.is_empty() {
+            small_text(ui, "no component data", nodata);
+            return;
+        }
+
+        // What `Grid` settles on for a row: its own minimum, or the text if that is taller.
+        let row_h = ui
+            .fonts_mut(|fonts| fonts.row_height(&FontId::monospace(TEXT_SIZE)))
+            .max(ui.spacing().interact_size.y)
+            + ROW_GAP;
+        let row_w = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    Self::WIDEST_ROW.to_owned(),
+                    FontId::monospace(TEXT_SIZE),
+                    Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+        }) + CELL_GAP
+            + ui.spacing().item_spacing.x;
+
+        // The gap sits between rows, not after the last one.
+        let per_column = (((ui.available_height() + ROW_GAP) / row_h) as usize).max(1);
+        let max_columns = ((ui.available_width() / row_w) as usize).max(1);
+        let columns = components.len().div_ceil(per_column).min(max_columns);
+
+        // Too narrow even for wrapping: the tail is stated as a count rather than dropped.
+        let capacity = columns * per_column;
+        let elided = if components.len() > capacity {
+            let shown = capacity - 1;
+            let elided = components.len() - shown;
+            components.truncate(shown);
+            elided
+        } else {
+            0
+        };
+
+        let now = system.now();
+
+        ui.columns(columns, |sub_columns| {
+            for (index, (chunk, column)) in components
+                .chunks(per_column)
+                .zip(sub_columns.iter_mut())
+                .enumerate()
+            {
+                egui::Grid::new(("bar_components", index))
+                    .num_columns(2)
+                    .striped(true)
+                    .spacing(Vec2::new(CELL_GAP, ROW_GAP))
+                    .min_col_width(0.0)
+                    .show(column, |ui| {
+                        for (id, last) in chunk {
+                            Self::component_row(ui, system, *id, now - *last > STALE_AFTER, nodata);
+                        }
+                        if elided > 0 && index + 1 == columns {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("+{elided} more"))
+                                        .monospace()
+                                        .size(TEXT_SIZE)
+                                        .color(nodata),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            }
+        });
+    }
+
+    fn component_row(ui: &mut egui::Ui, system: &System, id: u8, stale: bool, nodata: Color32) {
+        let heartbeat = system.last_message_from::<Heartbeat>(id).ok();
+        let icon = heartbeat.as_ref().map_or("?", |hb| mav_type_icon(hb.type_));
+
+        // Extend, not Truncate: see the consumables labels.
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("{icon} 0x{id:02x}"))
+                    .monospace()
+                    .size(TEXT_SIZE)
+                    .color(if stale {
+                        nodata
+                    } else {
+                        ui.visuals().text_color()
+                    }),
+            )
+            .wrap_mode(egui::TextWrapMode::Extend),
+        );
+        ui.horizontal(|ui| {
+            match heartbeat {
+                Some(hb) => {
+                    ui.add(ArmedBadge {
+                        mode: hb.base_mode,
+                        faded: stale,
+                    });
+                }
+                // Heard from, but never with a heartbeat: nothing states its arm state.
+                None => small_text(ui, "--", nodata),
+            }
+            ui.add_space(ui.available_width().max(0.0));
+        });
+        ui.end_row();
     }
 }
 
