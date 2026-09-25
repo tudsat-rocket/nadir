@@ -6,15 +6,15 @@ use egui::{
     StrokeKind, Vec2, pos2,
 };
 use mavspec::rust::dialects::common::messages::BatteryStatus;
-use rapid_dialect::rapid::enums::{PressureVesselFlag, ValveId};
+use rapid_dialect::rapid::enums::{PressureVesselFlag, ValveFlag, ValveId};
 use rapid_dialect::rapid::messages::{PressureVessel, Valve};
 
 use super::ValveInteractionMode;
 use crate::colors::{
-    COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_ink, schematic_line,
-    schematic_void, schematic_wash,
+    COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_ink,
+    schematic_line, schematic_void, schematic_wash,
 };
-use crate::widgets::MeasurementIndicator;
+use crate::widgets::{MeasurementIndicator, Readout};
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
 const TANK_BULKHEAD_STEPS: usize = 32;
@@ -294,20 +294,6 @@ pub fn draw_hybrid(
             indicator,
         );
     }
-
-    let indicator = MeasurementIndicator {
-        values: vec![n2o_temp1, n2o_temp2],
-        unit: "\u{00b0}C",
-        color: schematic_ink(&visuals),
-        decimals: Some(0),
-        // No temperature limit in the message yet; flag missing readings instead.
-        blink: n2o_temp1.is_none() || n2o_temp2.is_none(),
-    };
-    let size = indicator.intrinsic_size(ui.ctx());
-    ui.place(
-        Rect::from_center_size(pos2(temp_cx, tank_rect.center().y), size),
-        indicator,
-    );
 
     let battery_temp = system
         .last_instance_message::<BatteryStatus>(1)
@@ -608,6 +594,80 @@ pub fn draw_hybrid(
             pos2(vent_end_x, tank_vent_y),
         ],
         stroke,
+    );
+
+    let oxidizer_vent = system
+        .last_instance_message::<Valve>(i64::from(ValveId::OxidizerVent.value()))
+        .ok();
+    let oxidizer_vent_temp = oxidizer_vent
+        .as_ref()
+        .and_then(|v| temperature_c(v.temperature));
+    let heater = oxidizer_vent
+        .as_ref()
+        .filter(|v| v.flags.contains(ValveFlag::HEATED))
+        .map(|v| v.flags.contains(ValveFlag::HEATER_ON));
+    let temp_font = egui::FontId::monospace(12.0);
+    let temp_readout = oxidizer_vent_temp.map(|t| Readout {
+        value: t,
+        decimals: 0,
+        unit: Some("\u{00b0}C"),
+        font: temp_font.clone(),
+        color: schematic_ink(&visuals),
+        ..Default::default()
+    });
+    let temp_missing = painter.layout_no_wrap("--\u{00b0}C".to_owned(), temp_font, label_color);
+    let size = temp_readout
+        .as_ref()
+        .map_or(temp_missing.size(), |r| r.size(ui.ctx()));
+    let heater_size = Vec2::new(0.8, 1.0) * size.y;
+    let group_w = size.x + heater.map_or(0.0, |_| LABEL_GAP + heater_size.x);
+    let group_left =
+        (tank_vent_valve_cx + LABEL_GAP - group_w / 2.0).min(square.right() - LABEL_GAP - group_w);
+    let temp_rect = Rect::from_min_size(
+        pos2(
+            group_left,
+            tank_vent_y + valve_half * VALVE_GLYPH_BASE_RATIO + LABEL_GAP,
+        ),
+        size,
+    );
+    match temp_readout {
+        Some(r) => {
+            r.paint(&painter, temp_rect.min, Align2::LEFT_TOP);
+        }
+        None => painter.galley(temp_rect.min, temp_missing, label_color),
+    }
+    if let Some(on) = heater {
+        let color = if on {
+            readable(COLOR_INDICATOR_LIMITS, &visuals)
+        } else {
+            schematic_line(&visuals)
+        };
+        let heater_rect = Rect::from_center_size(
+            pos2(
+                temp_rect.right() + LABEL_GAP + heater_size.x / 2.0,
+                temp_rect.center().y,
+            ),
+            heater_size,
+        );
+        draw_heater(&painter, heater_rect, Stroke::new(1.5_f32, color));
+    }
+
+    let indicator = MeasurementIndicator {
+        values: vec![n2o_temp1, n2o_temp2],
+        unit: "\u{00b0}C",
+        color: schematic_ink(&visuals),
+        decimals: Some(0),
+        // No temperature limit in the message yet; flag missing readings instead.
+        blink: n2o_temp1.is_none() || n2o_temp2.is_none(),
+    };
+    let size = indicator.intrinsic_size(ui.ctx());
+    let tank_temp_cy = tank_rect
+        .center()
+        .y
+        .max(temp_rect.bottom() + LABEL_GAP + size.y / 2.0);
+    ui.place(
+        Rect::from_center_size(pos2(temp_cx, tank_temp_cy), size),
+        indicator,
     );
 
     let tank_vent_bot_x = center_x - tank_w * 0.35;
@@ -1487,6 +1547,22 @@ fn draw_pressure_regulator(painter: &egui::Painter, center: Pos2, half: f32, str
     ];
     for shape in Shape::dashed_line(&path, stroke, half * 0.3, half * 0.2) {
         painter.add(shape);
+    }
+}
+
+fn draw_heater(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
+    const STEPS: usize = 16;
+    let amplitude = rect.width() / 10.0;
+    for i in 1..=3 {
+        let x = rect.left() + rect.width() * i as f32 / 4.0;
+        let points = (0..=STEPS)
+            .map(|s| {
+                let t = s as f32 / STEPS as f32;
+                let dx = amplitude * (t * std::f32::consts::TAU).sin();
+                pos2(x + dx, rect.bottom() - t * rect.height())
+            })
+            .collect();
+        painter.line(points, stroke);
     }
 }
 

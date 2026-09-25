@@ -334,5 +334,6 @@ fn is_field_bitmask(f: &MessageField) -> bool {
             | "VIDEO_STREAM_STATUS_FLAGS"
             | "PRESSURE_VESSEL_FLAG"
             | "ROCKET_CAPABILITY"
+            | "VALVE_FLAG"
     )
 }
