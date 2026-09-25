@@ -457,6 +457,36 @@ mod tests {
         }
     }
 
+    /// A valve's colour identifies it in three places at once: its glyph on the schematic, its
+    /// heading over the knob, and its trace in the state plot.
+    #[test]
+    fn every_valve_colour_reads_wherever_it_identifies_its_valve() {
+        use crate::panes::propulsion_valve_colors;
+
+        for (theme, visuals, canvas, hc) in schematic_canvases() {
+            with_high_contrast(hc, || {
+                for (valve, color) in propulsion_valve_colors() {
+                    let color = readable(color, &visuals);
+                    assert_at_least(
+                        contrast_ratio(color, canvas),
+                        AA_NON_TEXT,
+                        &format!("the {valve} glyph on the {theme} canvas"),
+                    );
+                    assert_at_least(
+                        contrast_ratio(color, schematic_void(&visuals)),
+                        AA_NON_TEXT,
+                        &format!("an open {valve} against a closed one on the {theme} canvas"),
+                    );
+                    assert_at_least(
+                        contrast_ratio(color, visuals.panel_fill),
+                        AA_TEXT,
+                        &format!("the {valve} heading on the {theme} panel"),
+                    );
+                }
+            });
+        }
+    }
+
     #[test]
     fn the_dark_theme_is_left_alone() {
         let dark = egui::Visuals::dark();

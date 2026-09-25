@@ -78,6 +78,7 @@ pub struct Plot<'a> {
     source: &'a nadir_core::Source,
     shared: &'a mut SharedPlotState,
     ylimits: (Option<f32>, Option<f32>),
+    legend: bool,
 }
 
 impl<'a> Plot<'a> {
@@ -92,7 +93,14 @@ impl<'a> Plot<'a> {
             source,
             shared,
             ylimits,
+            legend: true,
         }
+    }
+
+    // For plots whose lines are named somewhere else on screen.
+    pub fn without_legend(mut self) -> Self {
+        self.legend = false;
+        self
     }
 
     // Takes its arguments rather than `&self` so the plot closure captures only these fields,
@@ -162,10 +170,12 @@ impl egui::Widget for Plot<'_> {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
-        let legend = Legend::default()
-            .background_alpha(0.5)
-            .text_style(TextStyle::Small)
-            .position(Corner::LeftTop);
+        let legend = self.legend.then(|| {
+            Legend::default()
+                .background_alpha(0.5)
+                .text_style(TextStyle::Small)
+                .position(Corner::LeftTop)
+        });
 
         // Weaken the text color, used for the grid lines.
         //let text_color = ui.style().visuals.text_color();
@@ -190,8 +200,11 @@ impl egui::Widget for Plot<'_> {
                 let tick = gm.value;
                 let digits = -gm.step_size.log10() as usize;
                 format!("{tick:.digits$}")
-            })
-            .legend(legend.clone());
+            });
+
+        if let Some(legend) = legend {
+            plot = plot.legend(legend);
+        }
 
         if self.shared.attached_to_edge {
             plot = plot

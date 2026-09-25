@@ -124,7 +124,7 @@ pub fn draw_hybrid(
     system: &System,
     square: Rect,
     mode: &mut ValveInteractionMode,
-    pulse_secs: [f32; super::VALVE_COUNT],
+    pulse_secs: &mut f32,
     blink: [bool; super::VALVE_COUNT],
 ) {
     let visuals = ui.visuals().clone();
@@ -400,17 +400,16 @@ pub fn draw_hybrid(
         tank_fill_indicator,
     );
     let time = ui.input(|i| i.time);
-    let valve_fill_closed = schematic_void(&visuals);
-    let valve_fill_open = readable(COLOR_INDICATOR_WARNING, &visuals);
-    let valve_stroke_closed = Stroke::new(1.5_f32, schematic_ink(&visuals));
-    let valve_stroke_open = Stroke::new(1.5_f32, valve_fill_open);
-    // Solid fill/stroke reflect the reported state; the intended (commanded)
-    // position is drawn separately as hatching, and a mismatch blinks a box.
+    // The valve's own color identifies it here as it does in the knobs and the
+    // state plot; filled means open. The intended (commanded) position is drawn
+    // separately as hatching, and a mismatch blinks a box.
     let style_for = |id: ValveId| -> (Stroke, Color32) {
-        match valve_state(system, id) {
-            Some(s) if s > 0.0 => (valve_stroke_open, valve_fill_open),
-            _ => (valve_stroke_closed, valve_fill_closed),
-        }
+        let color = readable(super::Valve::color(id), &visuals);
+        let fill = match valve_state(system, id) {
+            Some(s) if s > 0.0 => color,
+            _ => schematic_void(&visuals),
+        };
+        (Stroke::new(1.5_f32, color), fill)
     };
     let cmd = |id: ValveId| valve_reading(system, id).and_then(|r| r.commanded);
     let (stroke_pressurant_vent, fill_pressurant_vent) = style_for(ValveId::PressurantVent);
@@ -430,7 +429,7 @@ pub fn draw_hybrid(
         valve_stroke_pressurization,
         cmd(ValveId::Pressurization),
         hatch_stride,
-        blink[super::valve_index(ValveId::Pressurization)],
+        blink[super::Valve::index(ValveId::Pressurization)],
         time,
     );
     interact_valve(
@@ -442,7 +441,7 @@ pub fn draw_hybrid(
         ValveId::Pressurization,
         false,
         *mode,
-        pulse_secs[super::valve_index(ValveId::Pressurization)],
+        *pulse_secs,
     );
     draw_valve_label(
         pos2(center_x, valve_top_cy),
@@ -500,7 +499,7 @@ pub fn draw_hybrid(
         stroke_pressurant_vent,
         cmd(ValveId::PressurantVent),
         hatch_stride,
-        blink[super::valve_index(ValveId::PressurantVent)],
+        blink[super::Valve::index(ValveId::PressurantVent)],
         time,
     );
     interact_valve(
@@ -512,7 +511,7 @@ pub fn draw_hybrid(
         ValveId::PressurantVent,
         true,
         *mode,
-        pulse_secs[super::valve_index(ValveId::PressurantVent)],
+        *pulse_secs,
     );
     draw_valve_label(
         pos2(vent_valve_cx, junction_cy),
@@ -560,7 +559,7 @@ pub fn draw_hybrid(
         stroke_oxidizer_vent,
         cmd(ValveId::OxidizerVent),
         hatch_stride,
-        blink[super::valve_index(ValveId::OxidizerVent)],
+        blink[super::Valve::index(ValveId::OxidizerVent)],
         time,
     );
     interact_valve(
@@ -572,7 +571,7 @@ pub fn draw_hybrid(
         ValveId::OxidizerVent,
         true,
         *mode,
-        pulse_secs[super::valve_index(ValveId::OxidizerVent)],
+        *pulse_secs,
     );
     draw_valve_label(
         pos2(tank_vent_valve_cx, tank_vent_y),
@@ -695,7 +694,7 @@ pub fn draw_hybrid(
         stroke_oxidizer_fill,
         cmd(ValveId::OxidizerFill),
         hatch_stride,
-        blink[super::valve_index(ValveId::OxidizerFill)],
+        blink[super::Valve::index(ValveId::OxidizerFill)],
         time,
     );
     interact_valve(
@@ -707,7 +706,7 @@ pub fn draw_hybrid(
         ValveId::OxidizerFill,
         true,
         *mode,
-        pulse_secs[super::valve_index(ValveId::OxidizerFill)],
+        *pulse_secs,
     );
     draw_valve_label(
         pos2(bot_vent_valve_cx, tank_vent_bot_y),
@@ -872,7 +871,7 @@ pub fn draw_hybrid(
         };
         let valve_visual = |id: ValveId, s: Stroke, c: Color32| {
             if available {
-                (c, s, cmd(id), blink[super::valve_index(id)])
+                (c, s, cmd(id), blink[super::Valve::index(id)])
             } else {
                 (
                     dim(c, muted),
@@ -910,7 +909,7 @@ pub fn draw_hybrid(
                 fill_id,
                 false,
                 *mode,
-                pulse_secs[super::valve_index(fill_id)],
+                *pulse_secs,
             );
         }
         draw_valve_label(
@@ -970,7 +969,7 @@ pub fn draw_hybrid(
                 vent_id,
                 false,
                 *mode,
-                pulse_secs[super::valve_index(vent_id)],
+                *pulse_secs,
             );
         }
         draw_valve_label(
@@ -1009,7 +1008,7 @@ pub fn draw_hybrid(
         valve_stroke_main,
         cmd(ValveId::Main),
         hatch_stride,
-        blink[super::valve_index(ValveId::Main)],
+        blink[super::Valve::index(ValveId::Main)],
         time,
     );
     interact_valve(
@@ -1021,7 +1020,7 @@ pub fn draw_hybrid(
         ValveId::Main,
         false,
         *mode,
-        pulse_secs[super::valve_index(ValveId::Main)],
+        *pulse_secs,
     );
     draw_valve_label(
         pos2(center_x, valve_bot_cy),
@@ -1080,37 +1079,69 @@ pub fn draw_hybrid(
     painter.add(Shape::Path(PathShape::closed_line(chamber_path, stroke)));
     draw_tank_label(cc_interior, 2);
 
-    draw_valve_mode_toggle(ui, strip, mode);
+    draw_valve_mode_toggle(ui, strip, mode, pulse_secs);
 }
 
-// Bottom-left selector that switches what a click on a valve does. Mirrors the
-// altitude-source toggle in the artificial horizon pane.
-fn draw_valve_mode_toggle(ui: &egui::Ui, square: Rect, mode: &mut ValveInteractionMode) {
+// Bottom corners of the schematic: what a click on a valve does at the left,
+// how long a pulse lasts at the right. Mirrors the altitude-source toggle in the
+// artificial horizon pane.
+fn draw_valve_mode_toggle(
+    ui: &egui::Ui,
+    square: Rect,
+    mode: &mut ValveInteractionMode,
+    pulse_secs: &mut f32,
+) {
     let button_size = Vec2::new(52.0, 18.0);
+    let visuals = ui.visuals().clone();
+    let outline = |selected: bool, label: &str| {
+        let stroke = if selected {
+            Stroke::new(1.0_f32, schematic_ink(&visuals))
+        } else {
+            Stroke::new(0.5_f32, schematic_line(&visuals))
+        };
+        Button::new(RichText::new(label).size(12.0))
+            .fill(Color32::TRANSPARENT)
+            .stroke(stroke)
+            .corner_radius(CornerRadius::same(3))
+            .selected(false)
+    };
+
     Area::new(Id::new("valve_mode_toggle"))
         .order(Order::Foreground)
         .pivot(Align2::LEFT_BOTTOM)
         .fixed_pos(square.left_bottom() + Vec2::new(6.0, -6.0))
         .show(ui.ctx(), |ui| {
-            let visuals = ui.visuals().clone();
             ui.spacing_mut().item_spacing.y = 2.0;
+
             for (m, label) in [
                 (ValveInteractionMode::Pulse, "PULSE"),
                 (ValveInteractionMode::Toggle, "TGGL"),
             ] {
-                let selected = *mode == m;
-                let stroke = if selected {
-                    Stroke::new(1.0_f32, schematic_ink(&visuals))
-                } else {
-                    Stroke::new(0.5_f32, schematic_line(&visuals))
-                };
-                let button = Button::new(RichText::new(label).size(12.0))
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(stroke)
-                    .corner_radius(CornerRadius::same(3))
-                    .selected(false);
-                if ui.add_sized(button_size, button).clicked() {
+                if ui
+                    .add_sized(button_size, outline(*mode == m, label))
+                    .clicked()
+                {
                     *mode = m;
+                }
+            }
+        });
+
+    if *mode != ValveInteractionMode::Pulse {
+        return;
+    }
+
+    Area::new(Id::new("valve_pulse_duration"))
+        .order(Order::Foreground)
+        .pivot(Align2::RIGHT_BOTTOM)
+        .fixed_pos(square.right_bottom() + Vec2::new(-6.0, -6.0))
+        .show(ui.ctx(), |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+
+            // Longest at the top, so the stack reads like a scale.
+            for (secs, label) in super::valves::PULSE_DURATIONS.into_iter().rev() {
+                let button = outline((*pulse_secs - secs).abs() < f32::EPSILON, label);
+                if ui.add_sized(button_size, button).clicked() {
+                    *pulse_secs = secs;
                 }
             }
         });

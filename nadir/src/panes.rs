@@ -34,6 +34,8 @@ pub use preflight::PreflightPane;
 pub use propulsion::PropulsionPane;
 #[cfg(test)]
 pub(crate) use propulsion::fluid_colors as propulsion_fluid_colors;
+#[cfg(test)]
+pub(crate) use propulsion::valve_colors as propulsion_valve_colors;
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
