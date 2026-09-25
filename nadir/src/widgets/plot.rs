@@ -20,6 +20,9 @@ const MAX_POINTS: usize = 2_000;
 /// at the last sample inside it.
 const MARGIN_SECS: i64 = 5;
 
+/// Two missed heartbeats at 1 Hz, as `STALE_AFTER` in the status bar.
+const CONNECTED_WITHIN: TimeDelta = TimeDelta::seconds(3);
+
 /// State shared by all linked plots
 pub struct SharedPlotState {
     /// Are we currently attached to the right edge?
@@ -136,6 +139,21 @@ impl<'a> Plot<'a> {
         }
 
         transitions
+    }
+
+    /// Whether a plotted component has been heard recently.
+    fn live(&self) -> bool {
+        if !matches!(self.source.origin, nadir_core::Origin::Live) {
+            return false;
+        }
+        let now = self.source.now();
+        self.lines.iter().any(|line| {
+            self.source
+                .db
+                .components(line.system_id)
+                .into_iter()
+                .any(|(id, last)| id == line.component_id && now - last <= CONNECTED_WITHIN)
+        })
     }
 }
 
@@ -297,6 +315,11 @@ impl egui::Widget for Plot<'_> {
             .process_drag_released(ir.response.drag_stopped());
         self.shared
             .process_box_dragging(ir.response.dragged_by(PointerButton::Secondary));
+
+        if self.shared.attached_to_edge && self.live() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(33));
+        }
 
         ir.response
     }
