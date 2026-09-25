@@ -491,6 +491,7 @@ pub fn mav_type_icon(mav_type: MavType) -> &'static str {
         MavType::GroundRover => "🚗",
         MavType::Gcs | MavType::AntennaTracker => "📡",
         MavType::Servo => "⚙",
+        MavType::ChargingStation => "⛽",
         _ => "?",
     }
 }
