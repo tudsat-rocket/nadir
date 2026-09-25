@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use egui::{Color32, Key, Margin, Modifiers};
-use mavspec::rust::dialects::Common;
-use mavspec::rust::dialects::common::enums::{MavCmd, MavResult};
 use nadir_core::mav::{Event, V2};
+use rapid_dialect::Rapid;
+use rapid_dialect::rapid::enums::{MavCmd, MavResult};
 
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
@@ -295,7 +295,8 @@ impl eframe::App for App {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
                 Event::Frame(frame, _callback) => {
-                    if let Ok(Common::CommandAck(ack)) = frame.decode() {
+                    // Common cannot decode acks for rapid-only commands such as valve commands.
+                    if let Ok(Rapid::CommandAck(ack)) = frame.decode() {
                         if ack.command == MavCmd::RequestMessage
                             || ack.command == MavCmd::SetMessageInterval
                         {

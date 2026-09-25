@@ -150,6 +150,10 @@ impl System {
         self.last_message_from(0x01)
     }
 
+    pub fn last_message_at<M: MessageExt + Default>(&self) -> Result<(DateTime<Utc>, M), DbError> {
+        self.db.last_message_at(self.system_id, 0x01)
+    }
+
     pub fn last_message_from<M: MessageExt + Default>(
         &self,
         component_id: u8,

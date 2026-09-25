@@ -8,6 +8,7 @@ use mavspec::rust::dialects::common::enums::{
 use mavspec::rust::dialects::common::messages::{
     CommandAck, LinkNodeStatus, RadioStatus, SysStatus,
 };
+use rapid_dialect::rapid;
 
 use crate::colors::{
     COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, high_contrast, readable,
@@ -133,14 +134,8 @@ impl AlertLine<'_> {
         match self.tier {
             AlertTier::Critical => {
                 let mut out = Vec::new();
-                if let Ok(ack) = self.system.last_message::<CommandAck>()
-                    && !matches!(ack.result, MavResult::Accepted | MavResult::InProgress)
-                    && !matches!(
-                        ack.command,
-                        MavCmd::RequestMessage | MavCmd::SetMessageInterval
-                    )
-                {
-                    out.push(format!("NACK {:?}", ack.command));
+                if let Some(nack) = last_nack(self.system) {
+                    out.push(nack);
                 }
                 let (down, up) = link_quality(self.system);
                 if let Some(q) = down.filter(|q| *q < LINK_ALARM_QUALITY) {
@@ -160,6 +155,34 @@ impl AlertLine<'_> {
                 .unwrap_or_default(),
         }
     }
+}
+
+/// Acks for rapid-only commands fail the common decode and are stored as their own type.
+fn last_nack(system: &System) -> Option<String> {
+    let common = system.last_message_at::<CommandAck>().ok().map(|(t, ack)| {
+        let failed = !matches!(ack.result, MavResult::Accepted | MavResult::InProgress)
+            && !matches!(
+                ack.command,
+                MavCmd::RequestMessage | MavCmd::SetMessageInterval
+            );
+        (t, failed.then(|| format!("NACK {:?}", ack.command)))
+    });
+    let rapid = system
+        .last_message_at::<rapid::messages::CommandAck>()
+        .ok()
+        .map(|(t, ack)| {
+            let failed = !matches!(
+                ack.result,
+                rapid::enums::MavResult::Accepted | rapid::enums::MavResult::InProgress
+            );
+            (t, failed.then(|| format!("NACK {:?}", ack.command)))
+        });
+
+    [common, rapid]
+        .into_iter()
+        .flatten()
+        .max_by_key(|(t, _)| *t)?
+        .1
 }
 
 impl egui::Widget for AlertLine<'_> {

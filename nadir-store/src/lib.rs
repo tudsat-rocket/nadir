@@ -359,21 +359,30 @@ impl Db {
         msg.store(self, system_id, component_id, received_at);
     }
 
-    #[allow(
-        clippy::unwrap_in_result,
-        reason = "a poisoned store is not recoverable"
-    )]
     pub fn last_message<M: MessageExt + Default>(
         &self,
         system_id: u8,
         component_id: u8,
     ) -> Result<M, DbError> {
+        self.last_message_at(system_id, component_id)
+            .map(|(_, msg)| msg)
+    }
+
+    #[allow(
+        clippy::unwrap_in_result,
+        reason = "a poisoned store is not recoverable"
+    )]
+    pub fn last_message_at<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+    ) -> Result<(DateTime<Utc>, M), DbError> {
         let series = self.series.lock().unwrap();
 
         Self::slices::<M>(&series, system_id, component_id)
             .filter_map(|(_, rows)| rows.last())
             .max_by_key(|(t, _)| *t)
-            .map(|(_, msg)| msg.clone())
+            .cloned()
             .ok_or_else(|| DbError::NotFound(std::any::type_name::<M>()))
     }
 
