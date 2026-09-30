@@ -4,7 +4,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use eframe::egui;
 use eframe::egui::PointerButton;
 use egui::{Color32, TextStyle};
-use egui_plot::{Corner, Legend, LineStyle, VLine};
+use egui_plot::{Corner, HoverPosition, Legend, LineStyle, VLine};
 
 use nadir_core::mav::{ComponentId, SystemId};
 use nadir_core::{MessageInstance, TimeseriesArgs, format_message_label};
@@ -190,6 +190,21 @@ impl egui::Widget for Plot<'_> {
                 let tick = gm.value;
                 let digits = -gm.step_size.log10() as usize;
                 format!("{tick:.digits$}")
+            })
+            .label_formatter(|pos| {
+                Some(match pos {
+                    HoverPosition::NearDataPoint {
+                        plot_name,
+                        position,
+                        ..
+                    } if !plot_name.is_empty() => {
+                        format!("{plot_name}\n{:.3} @ {:.3} s", position.y, position.x)
+                    }
+                    HoverPosition::NearDataPoint { position, .. }
+                    | HoverPosition::Elsewhere { position } => {
+                        format!("{:.3} @ {:.3} s", position.y, position.x)
+                    }
+                })
             })
             .legend(legend.clone());
 
