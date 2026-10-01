@@ -147,9 +147,9 @@ pub fn draw_hybrid(
     // Shadowing `square` insets every downstream computation without touching it.
     let strip = square;
     // The external tanks stack above their fill valves and hug the boundary, so the
-    // lane only needs to be about a tank wide (sized in height units to match the
-    // rest of the layout).
-    let ground_lane_w = 0.088 * strip.height();
+    // lane only needs to be a tank plus its P-tag wide (sized in height units to match
+    // the rest of the layout).
+    let ground_lane_w = 0.112 * strip.height();
     let square = Rect::from_min_max(pos2(strip.left() + ground_lane_w, strip.top()), strip.max);
 
     let center_x = square.center().x;
@@ -194,8 +194,8 @@ pub fn draw_hybrid(
     if let Some(indicator) = super::battery_indicator(system, true) {
         let battery_half_w = tank_w * 0.6;
         let battery_rect = Rect::from_min_max(
-            pos2(center_x - battery_half_w, square.top() + 0.02 * n),
-            pos2(center_x + battery_half_w, top_tank_rect.top() - 0.03 * n),
+            pos2(center_x - battery_half_w, square.top() + 0.005 * n),
+            pos2(center_x + battery_half_w, top_tank_rect.top() - 0.045 * n),
         );
         ui.place(battery_rect, indicator);
     }
@@ -321,41 +321,43 @@ pub fn draw_hybrid(
     let painter = ui.painter().clone();
     let hatch_stride = (0.012 * n).max(4.0);
 
-    // Small muted monospace instance-ID tags next to each tank and valve, matching
-    // the pressure/temperature unit styling, so a reading can be cross-referenced
-    // against the raw MAVLink logs (PressureVessel instance / ValveId).
-    let label_font = egui::FontId::monospace(11.0);
+    // Instance-ID tags next to each vessel and valve, so a reading can be cross-referenced against
+    // the raw MAVLink logs (PressureVessel instance / ValveId).
+    let label_font = egui::FontId::monospace(9.5);
     let label_color = schematic_line(&visuals);
-    // Above the vessel, not inside: a capsule's widest point is `bulkhead_h` below the top of its
-    // bounding rect, so a tag in that corner lands on the curve.
-    let draw_tank_label = |rect: Rect, id: i64| {
-        let galley = painter.layout_no_wrap(format!("#{id}"), label_font.clone(), label_color);
-        // Clamped into the schematic: the ground-support tanks sit too close to its left edge.
-        let x = (rect.left() + LABEL_GAP - galley.size().x).max(strip.left() + LABEL_GAP);
-        let y = rect.top() - LABEL_GAP - galley.size().y;
-        painter.galley(pos2(x, y), galley, label_color);
+    // Off the top-left corner, not inside: a capsule's widest point is `bulkhead_h` below the top
+    // of its bounding rect, so the corner itself is empty.
+    let draw_tank_label = |rect: Rect, id: i64, color: Color32| {
+        let galley = painter.layout_no_wrap(format!("P{id}"), label_font.clone(), color);
+        let pos = rect.left_top() - galley.size() + Vec2::splat(LABEL_GAP);
+        painter.galley(pos.max(strip.left_top()), galley, color);
     };
-    let draw_valve_label =
-        |center: Pos2, half: f32, horizontal: bool, id: ValveId, color: Color32| {
-            // Off the glyph's own edge, not its bounding `half`, or the tag hangs out far enough
-            // to look like it labels whatever sits above.
-            let edge = half * VALVE_GLYPH_BASE_RATIO + LABEL_GAP;
-            let (pos, anchor) = if horizontal {
-                (pos2(center.x, center.y - edge), Align2::CENTER_BOTTOM)
-            } else {
-                (pos2(center.x + edge, center.y), Align2::LEFT_CENTER)
-            };
-            painter.text(
-                pos,
-                anchor,
-                format!("#{}", id.value()),
-                label_font.clone(),
-                color,
-            );
+    let draw_valve_label = |center: Pos2, half: f32, horizontal: bool, id: ValveId, muted: bool| {
+        let color = readable(super::Valve::color(id), &visuals);
+        let color = if muted {
+            dim(color, gse_muted_opacity(&visuals))
+        } else {
+            color
         };
+        // Off the glyph's own edge, not its bounding `half`, or the tag hangs out far enough
+        // to look like it labels whatever sits above.
+        let edge = half * VALVE_GLYPH_BASE_RATIO + LABEL_GAP;
+        let (pos, anchor) = if horizontal {
+            (pos2(center.x, center.y - edge), Align2::CENTER_BOTTOM)
+        } else {
+            (pos2(center.x + edge, center.y), Align2::LEFT_CENTER)
+        };
+        painter.text(
+            pos,
+            anchor,
+            format!("V{}", id.value()),
+            label_font.clone(),
+            color,
+        );
+    };
 
     draw_capsule_tank(&painter, top_tank_rect, bulkhead_h, fill, stroke);
-    draw_tank_label(top_tank_rect, 0);
+    draw_tank_label(top_tank_rect, 0, n2_color);
     draw_hatching(
         &painter,
         &capsule_polygon(top_tank_rect, bulkhead_h),
@@ -366,7 +368,7 @@ pub fn draw_hybrid(
     );
 
     draw_capsule_tank(&painter, tank_rect, bulkhead_h, fill, stroke);
-    draw_tank_label(tank_rect, 1);
+    draw_tank_label(tank_rect, 1, n2o_color);
     draw_tank_fill(
         &painter,
         tank_rect,
@@ -451,7 +453,7 @@ pub fn draw_hybrid(
         valve_half,
         false,
         ValveId::Pressurization,
-        label_color,
+        false,
     );
     painter.line(
         vec![
@@ -484,11 +486,11 @@ pub fn draw_hybrid(
     );
     painter.circle_filled(pos2(center_x, junction_cy), junction_r, node_color);
     painter.text(
-        pos2(center_x - junction_r - 3.0, junction_cy),
-        Align2::RIGHT_CENTER,
-        "#3",
+        pos2(center_x - junction_r - LABEL_GAP, junction_cy - junction_r),
+        Align2::RIGHT_TOP,
+        "P3",
         label_font.clone(),
-        label_color,
+        node_color,
     );
 
     let vent_end_x = square.right();
@@ -521,7 +523,7 @@ pub fn draw_hybrid(
         valve_half,
         true,
         ValveId::PressurantVent,
-        label_color,
+        false,
     );
     painter.line(
         vec![
@@ -581,7 +583,7 @@ pub fn draw_hybrid(
         valve_half,
         true,
         ValveId::OxidizerVent,
-        label_color,
+        false,
     );
     painter.line(
         vec![
@@ -716,7 +718,7 @@ pub fn draw_hybrid(
         valve_half,
         true,
         ValveId::OxidizerFill,
-        label_color,
+        false,
     );
     painter.line(
         vec![
@@ -765,7 +767,7 @@ pub fn draw_hybrid(
     let ext_bulkhead_h = TANK_BULKHEAD_RATIO * ext_tank_h;
     let gse_valve_half = valve_half * 0.85;
     // Tanks hug the boundary; the fill valve rides the vertical riser directly
-    // below each tank, so the lane only has to be about a tank wide.
+    // below each tank.
     let ext_cx = lane_right - ext_tank_w / 2.0 - 0.006 * n;
     let gse_gap = 0.012 * n;
     // Length of each riser (fill below, vent above): a valve plus a gap either side.
@@ -798,7 +800,7 @@ pub fn draw_hybrid(
     let ext_ox_rect = ext_tank_rect(tank_vent_bot_y);
 
     draw_capsule_tank(&painter, ext_press_rect, ext_bulkhead_h, fill, stroke);
-    draw_tank_label(ext_press_rect, 4);
+    draw_tank_label(ext_press_rect, 4, ext_n2_color);
     draw_hatching(
         &painter,
         &capsule_polygon(ext_press_rect, ext_bulkhead_h),
@@ -809,7 +811,7 @@ pub fn draw_hybrid(
     );
 
     draw_capsule_tank(&painter, ext_ox_rect, ext_bulkhead_h, fill, stroke);
-    draw_tank_label(ext_ox_rect, 5);
+    draw_tank_label(ext_ox_rect, 5, ext_n2o_color);
     draw_tank_fill(
         &painter,
         ext_ox_rect,
@@ -920,11 +922,7 @@ pub fn draw_hybrid(
             gse_valve_half,
             false,
             fill_id,
-            if available {
-                label_color
-            } else {
-                dim(label_color, muted)
-            },
+            !available,
         );
         painter.line(
             vec![pos2(lane_right, fill_cy), pos2(ext_cx, fill_cy)],
@@ -980,11 +978,7 @@ pub fn draw_hybrid(
             gse_valve_half,
             false,
             vent_id,
-            if available {
-                label_color
-            } else {
-                dim(label_color, muted)
-            },
+            !available,
         );
         painter.line(
             vec![
@@ -1030,7 +1024,7 @@ pub fn draw_hybrid(
         valve_half,
         false,
         ValveId::Main,
-        label_color,
+        false,
     );
     painter.line(
         vec![
@@ -1080,7 +1074,7 @@ pub fn draw_hybrid(
     draw_fuel_grain(&painter, cc_interior, fuel_port_half, stroke, fuel_color);
 
     painter.add(Shape::Path(PathShape::closed_line(chamber_path, stroke)));
-    draw_tank_label(cc_interior, 2);
+    draw_tank_label(cc_interior, 2, cc_color);
 
     draw_valve_mode_toggle(ui, strip, mode, pulse_secs);
 }
