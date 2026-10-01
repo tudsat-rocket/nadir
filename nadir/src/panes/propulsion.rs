@@ -132,11 +132,12 @@ impl Valve {
 }
 
 // What a click on a valve in the graphical overview does. Every valve honors
-// Pulse now; the mode just picks pulse-open vs toggle for the whole schematic.
+// Pulse now; the mode just picks pulse, open or close for the whole schematic.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ValveInteractionMode {
     Pulse,
-    Toggle,
+    Open,
+    Close,
 }
 
 pub struct PropulsionPane {

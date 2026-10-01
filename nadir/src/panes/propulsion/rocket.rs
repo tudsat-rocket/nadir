@@ -1139,7 +1139,8 @@ fn draw_valve_mode_toggle(
 
             let modes = [
                 (ValveInteractionMode::Pulse, "PLSE"),
-                (ValveInteractionMode::Toggle, "TGGL"),
+                (ValveInteractionMode::Open, "OPEN"),
+                (ValveInteractionMode::Close, "CLSE"),
             ];
             let button_size = size(&modes.map(|(_, label)| label));
             for (m, label) in modes {
@@ -1741,10 +1742,8 @@ fn interact_valve(
     if Hazard::confirm(ui, &resp, system) {
         match mode {
             ValveInteractionMode::Pulse => system.do_pulse_valve(id, pulse_duration),
-            ValveInteractionMode::Toggle => {
-                let currently_open = matches!(valve_state(system, id), Some(s) if s > 0.0);
-                system.do_set_valve(id, if currently_open { 0.0 } else { 1.0 });
-            }
+            ValveInteractionMode::Open => system.do_set_valve(id, 1.0),
+            ValveInteractionMode::Close => system.do_set_valve(id, 0.0),
         }
     }
     if resp.hovered() {
