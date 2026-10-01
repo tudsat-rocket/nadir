@@ -37,39 +37,77 @@ const VALVE_COUNT: usize = 9;
 // Solenoid valves are binary; servo valves additionally accept a proportional
 // set-position, making the servo control a strict superset of the solenoid one.
 #[derive(Copy, Clone, PartialEq, Eq)]
-enum ValveKind {
+pub(super) enum ValveKind {
     Solenoid,
     Servo,
 }
 
-// Single source of truth for the rocket's valves: identity, label, capability.
-// A valve's position in this table indexes the per-valve pane state and blink flags.
-const VALVES: [(ValveId, &str, ValveKind); VALVE_COUNT] = [
-    (ValveId::PressurantVent, "Pressurant Vent", ValveKind::Servo),
-    (ValveId::Pressurization, "Pressurization", ValveKind::Servo),
-    (ValveId::OxidizerVent, "Oxidizer Vent", ValveKind::Solenoid),
-    (ValveId::OxidizerFill, "Oxidizer Fill", ValveKind::Servo),
-    (ValveId::Main, "Main", ValveKind::Servo),
-    (
-        ValveId::ExternalPressurantFill,
-        "Ext Pressurant Fill",
-        ValveKind::Servo,
-    ),
-    (
-        ValveId::ExternalOxidizerFill,
-        "Ext Oxidizer Fill",
-        ValveKind::Servo,
-    ),
-    (
-        ValveId::ExternalPressurantVent,
-        "Ext Pressurant Vent",
-        ValveKind::Solenoid,
-    ),
-    (
-        ValveId::ExternalOxidizerVent,
-        "Ext Oxidizer Vent",
-        ValveKind::Solenoid,
-    ),
+pub(super) struct Valve {
+    pub id: ValveId,
+    pub label: &'static str,
+    pub kind: ValveKind,
+    // Pastel, so a warm hue does not read as a warning.
+    pub color: Color32,
+}
+
+// Single source of truth for the rocket's valves, ordered roughly by use over a
+// flight. A valve's position in this table indexes the per-valve pane state and
+// blink flags.
+pub(super) const VALVES: [Valve; VALVE_COUNT] = [
+    Valve {
+        id: ValveId::OxidizerFill,
+        label: "Oxidizer Fill",
+        kind: ValveKind::Servo,
+        color: Color32::from_rgb(125, 170, 245),
+    },
+    Valve {
+        id: ValveId::PressurantVent,
+        label: "Pressurant Vent",
+        kind: ValveKind::Servo,
+        color: Color32::from_rgb(118, 181, 135),
+    },
+    Valve {
+        id: ValveId::OxidizerVent,
+        label: "Oxidizer Vent",
+        kind: ValveKind::Solenoid,
+        color: Color32::from_rgb(106, 180, 189),
+    },
+    Valve {
+        id: ValveId::Pressurization,
+        label: "Pressurization",
+        kind: ValveKind::Servo,
+        color: Color32::from_rgb(194, 165, 103),
+    },
+    Valve {
+        id: ValveId::Main,
+        label: "Main",
+        kind: ValveKind::Servo,
+        color: Color32::from_rgb(235, 145, 145),
+    },
+    Valve {
+        id: ValveId::ExternalPressurantFill,
+        label: "Ext Press. Fill",
+        kind: ValveKind::Servo,
+        color: Color32::from_rgb(178, 159, 227),
+    },
+    Valve {
+        id: ValveId::ExternalOxidizerFill,
+        label: "Ext Oxidizer Fill",
+        kind: ValveKind::Servo,
+        color: Color32::from_rgb(212, 148, 189),
+    },
+    Valve {
+        id: ValveId::ExternalPressurantVent,
+        label: "Ext Press. Vent",
+        kind: ValveKind::Solenoid,
+        color: Color32::from_rgb(169, 173, 111),
+    },
+    Valve {
+        id: ValveId::ExternalOxidizerVent,
+        label: "Ext Oxidizer Vent",
+        kind: ValveKind::Solenoid,
+        color: Color32::from_rgb(194, 161, 134),
+    },
 ];
 
 /// For the contrast tests in [`crate::colors`], which cannot reach into `rocket`.
@@ -78,8 +116,20 @@ pub(crate) fn fluid_colors() -> [(&'static str, Color32); 7] {
     rocket::fluid_colors()
 }
 
-fn valve_index(id: ValveId) -> usize {
-    VALVES.iter().position(|(v, _, _)| *v == id).unwrap_or(0)
+/// For the contrast tests in [`crate::colors`].
+#[cfg(test)]
+pub(crate) fn valve_colors() -> impl Iterator<Item = (&'static str, Color32)> {
+    VALVES.iter().map(|v| (v.label, v.color))
+}
+
+impl Valve {
+    pub(super) fn index(id: ValveId) -> usize {
+        VALVES.iter().position(|v| v.id == id).unwrap_or(0)
+    }
+
+    pub(super) fn color(id: ValveId) -> Color32 {
+        VALVES[Self::index(id)].color
+    }
 }
 
 // What a click on a valve in the graphical overview does. Every valve honors
@@ -153,8 +203,9 @@ impl PropulsionPane {
     // the schematic so the two surfaces stay consistent.
     fn update_valve_blink(&mut self, system: &System, now: f64) -> [bool; VALVE_COUNT] {
         let mut flags = [false; VALVE_COUNT];
-        for (i, (id, _, _)) in VALVES.iter().enumerate() {
-            let mismatch = rocket::valve_reading(system, *id).is_some_and(rocket::valve_mismatch);
+        for (i, valve) in VALVES.iter().enumerate() {
+            let mismatch =
+                rocket::valve_reading(system, valve.id).is_some_and(rocket::valve_mismatch);
             flags[i] = debounce_blink(&mut self.valve_mismatch_since[i], mismatch, now);
         }
         flags
@@ -346,12 +397,17 @@ fn valve_row(
     blink: bool,
     button_size: Vec2,
 ) {
-    let (id, label, kind) = VALVES[index];
+    let Valve {
+        id,
+        label,
+        kind,
+        color,
+    } = VALVES[index];
     let reading = rocket::valve_reading(system, id);
     let commanded = reading.and_then(|r| r.commanded);
     let time = ui.input(|i| i.time);
 
-    ui.weak(label.to_uppercase());
+    ui.label(RichText::new(label.to_uppercase()).color(readable(color, ui.visuals())));
 
     let close_active = matches!(commanded, Some(c) if c <= VALVE_LATCH_EPS);
     let close_text = if close_active { "CLOSED" } else { "CLOSE" };
@@ -411,34 +467,24 @@ fn valve_row(
 }
 
 fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
-    [
-        (ValveId::PressurantVent, "Pressurant Vent"),
-        (ValveId::Pressurization, "Pressurization"),
-        (ValveId::OxidizerVent, "Oxidizer Vent"),
-        (ValveId::OxidizerFill, "Oxidizer Fill"),
-        (ValveId::Main, "Main"),
-        (ValveId::ExternalPressurantFill, "Ext Pressurant Fill"),
-        (ValveId::ExternalOxidizerFill, "Ext Oxidizer Fill"),
-        (ValveId::ExternalPressurantVent, "Ext Pressurant Vent"),
-        (ValveId::ExternalOxidizerVent, "Ext Oxidizer Vent"),
-    ]
-    .into_iter()
-    .map(|(id, alias)| PlotLine {
-        system_id,
-        component_id: 1,
-        message_name: "VALVE".to_owned(),
-        instance: Some(MessageInstance {
-            field: "id".to_owned(),
-            value: i64::from(id.value()),
-        }),
-        field_name: "state".to_owned(),
-        alias: Some(alias.to_owned()),
-        unit: None,
-        color: None,
-        scale: None,
-        sentinel: None,
-    })
-    .collect()
+    VALVES
+        .iter()
+        .map(|valve| PlotLine {
+            system_id,
+            component_id: 1,
+            message_name: "VALVE".to_owned(),
+            instance: Some(MessageInstance {
+                field: "id".to_owned(),
+                value: i64::from(valve.id.value()),
+            }),
+            field_name: "state".to_owned(),
+            alias: Some(valve.label.to_owned()),
+            unit: None,
+            color: Some(valve.color),
+            scale: None,
+            sentinel: None,
+        })
+        .collect()
 }
 
 /// Colours are left undarkened: `Plot` runs every line through `readable` itself.
@@ -552,7 +598,8 @@ impl PaneUi for PropulsionPane {
                             &behavior.source,
                             behavior.shared_plot_state,
                             (Some(0.0), Some(3.0)),
-                        );
+                        )
+                        .without_legend();
                         ui.add_sized(
                             Vec2::new(ui.available_width(), ui.available_height()),
                             valve_states_plot,

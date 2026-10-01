@@ -400,19 +400,21 @@ pub fn draw_hybrid(
         tank_fill_indicator,
     );
     let time = ui.input(|i| i.time);
-    let valve_fill_closed = schematic_void(&visuals);
-    let valve_fill_open = readable(COLOR_INDICATOR_WARNING, &visuals);
-    let valve_stroke_closed = Stroke::new(1.5_f32, schematic_ink(&visuals));
-    let valve_stroke_open = Stroke::new(1.5_f32, valve_fill_open);
-    // Solid fill/stroke reflect the reported state; the intended (commanded)
-    // position is drawn separately as hatching, and a mismatch blinks a box.
-    let style_for = |id: ValveId| -> (Stroke, Color32) {
-        match valve_state(system, id) {
-            Some(s) if s > 0.0 => (valve_stroke_open, valve_fill_open),
-            _ => (valve_stroke_closed, valve_fill_closed),
-        }
+    // Fill reflects the reported state; while the commanded position disagrees
+    // with it, only that is drawn, as hatching, and a lasting mismatch blinks a box.
+    let cmd = |id: ValveId| {
+        valve_reading(system, id)
+            .filter(|r| valve_mismatch(*r))
+            .and_then(|r| r.commanded)
     };
-    let cmd = |id: ValveId| valve_reading(system, id).and_then(|r| r.commanded);
+    let style_for = |id: ValveId| -> (Stroke, Color32) {
+        let color = readable(super::Valve::color(id), &visuals);
+        let fill = match valve_state(system, id) {
+            Some(s) if s > 0.0 && cmd(id).is_none() => color,
+            _ => schematic_void(&visuals),
+        };
+        (Stroke::new(1.5_f32, color), fill)
+    };
     let (stroke_pressurant_vent, fill_pressurant_vent) = style_for(ValveId::PressurantVent);
     let (valve_stroke_pressurization, valve_fill_pressurization) =
         style_for(ValveId::Pressurization);
@@ -430,7 +432,7 @@ pub fn draw_hybrid(
         valve_stroke_pressurization,
         cmd(ValveId::Pressurization),
         hatch_stride,
-        blink[super::valve_index(ValveId::Pressurization)],
+        blink[super::Valve::index(ValveId::Pressurization)],
         time,
     );
     interact_valve(
@@ -442,7 +444,7 @@ pub fn draw_hybrid(
         ValveId::Pressurization,
         false,
         *mode,
-        pulse_secs[super::valve_index(ValveId::Pressurization)],
+        pulse_secs[super::Valve::index(ValveId::Pressurization)],
     );
     draw_valve_label(
         pos2(center_x, valve_top_cy),
@@ -500,7 +502,7 @@ pub fn draw_hybrid(
         stroke_pressurant_vent,
         cmd(ValveId::PressurantVent),
         hatch_stride,
-        blink[super::valve_index(ValveId::PressurantVent)],
+        blink[super::Valve::index(ValveId::PressurantVent)],
         time,
     );
     interact_valve(
@@ -512,7 +514,7 @@ pub fn draw_hybrid(
         ValveId::PressurantVent,
         true,
         *mode,
-        pulse_secs[super::valve_index(ValveId::PressurantVent)],
+        pulse_secs[super::Valve::index(ValveId::PressurantVent)],
     );
     draw_valve_label(
         pos2(vent_valve_cx, junction_cy),
@@ -560,7 +562,7 @@ pub fn draw_hybrid(
         stroke_oxidizer_vent,
         cmd(ValveId::OxidizerVent),
         hatch_stride,
-        blink[super::valve_index(ValveId::OxidizerVent)],
+        blink[super::Valve::index(ValveId::OxidizerVent)],
         time,
     );
     interact_valve(
@@ -572,7 +574,7 @@ pub fn draw_hybrid(
         ValveId::OxidizerVent,
         true,
         *mode,
-        pulse_secs[super::valve_index(ValveId::OxidizerVent)],
+        pulse_secs[super::Valve::index(ValveId::OxidizerVent)],
     );
     draw_valve_label(
         pos2(tank_vent_valve_cx, tank_vent_y),
@@ -695,7 +697,7 @@ pub fn draw_hybrid(
         stroke_oxidizer_fill,
         cmd(ValveId::OxidizerFill),
         hatch_stride,
-        blink[super::valve_index(ValveId::OxidizerFill)],
+        blink[super::Valve::index(ValveId::OxidizerFill)],
         time,
     );
     interact_valve(
@@ -707,7 +709,7 @@ pub fn draw_hybrid(
         ValveId::OxidizerFill,
         true,
         *mode,
-        pulse_secs[super::valve_index(ValveId::OxidizerFill)],
+        pulse_secs[super::Valve::index(ValveId::OxidizerFill)],
     );
     draw_valve_label(
         pos2(bot_vent_valve_cx, tank_vent_bot_y),
@@ -872,7 +874,7 @@ pub fn draw_hybrid(
         };
         let valve_visual = |id: ValveId, s: Stroke, c: Color32| {
             if available {
-                (c, s, cmd(id), blink[super::valve_index(id)])
+                (c, s, cmd(id), blink[super::Valve::index(id)])
             } else {
                 (
                     dim(c, muted),
@@ -910,7 +912,7 @@ pub fn draw_hybrid(
                 fill_id,
                 false,
                 *mode,
-                pulse_secs[super::valve_index(fill_id)],
+                pulse_secs[super::Valve::index(fill_id)],
             );
         }
         draw_valve_label(
@@ -970,7 +972,7 @@ pub fn draw_hybrid(
                 vent_id,
                 false,
                 *mode,
-                pulse_secs[super::valve_index(vent_id)],
+                pulse_secs[super::Valve::index(vent_id)],
             );
         }
         draw_valve_label(
@@ -1009,7 +1011,7 @@ pub fn draw_hybrid(
         valve_stroke_main,
         cmd(ValveId::Main),
         hatch_stride,
-        blink[super::valve_index(ValveId::Main)],
+        blink[super::Valve::index(ValveId::Main)],
         time,
     );
     interact_valve(
@@ -1021,7 +1023,7 @@ pub fn draw_hybrid(
         ValveId::Main,
         false,
         *mode,
-        pulse_secs[super::valve_index(ValveId::Main)],
+        pulse_secs[super::Valve::index(ValveId::Main)],
     );
     draw_valve_label(
         pos2(center_x, valve_bot_cy),
@@ -1599,8 +1601,8 @@ fn valve_glyph_polygons(center: Pos2, half: f32, horizontal: bool) -> [Vec<Pos2>
     }
 }
 
-// Draws a valve: solid fill/stroke for the reported state, hatching for the
-// intended (commanded) position, and a blinking orange box on a mismatch.
+// Draws a valve: solid fill/stroke for the reported state, hatching for a
+// differing commanded position, and a blinking orange box on a mismatch.
 #[allow(clippy::too_many_arguments)]
 fn draw_valve(
     painter: &egui::Painter,
