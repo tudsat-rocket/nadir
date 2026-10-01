@@ -33,3 +33,6 @@ pub use measurement::*;
 
 mod readout;
 pub use readout::*;
+
+mod hazard;
+pub use hazard::*;

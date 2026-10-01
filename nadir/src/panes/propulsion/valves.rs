@@ -8,6 +8,7 @@ use nadir_core::System;
 use rapid_dialect::rapid::enums::ValveId;
 
 use crate::colors::{COLOR_INDICATOR_WARNING, blink_on, high_contrast, readable, text_on};
+use crate::widgets::Hazard;
 
 use super::rocket::{self, ValveReading};
 use super::{MAX_PULSE_DURATION_SECS, VALVE_COUNT, VALVE_LATCH_EPS, VALVES, Valve, ValveKind};
@@ -252,7 +253,8 @@ fn close_button(
     let latched = matches!(commanded, Some(c) if c <= VALVE_LATCH_EPS);
     let close = label_button(text, BTN_FONT, rect.size()).selected(latched);
 
-    if ui.put(rect, close).clicked() {
+    let close = ui.put(rect, close);
+    if Hazard::confirm(ui, &close, system) {
         system.do_set_valve(id, 0.0);
     }
 }
@@ -274,7 +276,8 @@ fn open_group(ui: &mut egui::Ui, system: &System, id: ValveId, commanded: Option
         open = open.fill(fill);
         ui.style_mut().visuals.override_text_color = Some(text_on(fill));
     }
-    if ui.put(open_rect, open).clicked() {
+    let open = ui.put(open_rect, open);
+    if Hazard::confirm(ui, &open, system) {
         system.do_set_valve(id, 1.0);
     }
     ui.style_mut().visuals.override_text_color = None;
@@ -286,7 +289,8 @@ fn open_group(ui: &mut egui::Ui, system: &System, id: ValveId, commanded: Option
             open_rect.bottom() + GAP,
         );
         let button = label_button(text, PULSE_FONT, size);
-        if ui.put(Rect::from_min_size(min, size), button).clicked() {
+        let button = ui.put(Rect::from_min_size(min, size), button);
+        if Hazard::confirm(ui, &button, system) {
             system.do_pulse_valve(id, secs);
         }
     }
@@ -328,7 +332,9 @@ fn target_drag(
                 .speed(1.0)
                 .range(0.0..=100.0)
                 .suffix("%");
-            ui.put(hub(knob), drag)
+            ui.add_enabled_ui(system.hot(), |ui| ui.put(hub(knob), drag))
+                .inner
+                .on_disabled_hover_text("Set HOT to drag")
         })
         .inner;
 

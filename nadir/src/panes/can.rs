@@ -9,6 +9,7 @@ use egui_extras::{Column, TableBuilder};
 use mavspec::rust::dialects::common::messages::CanFrame;
 
 use crate::panes::{MUTED_HINT, PaneUi};
+use crate::widgets::Hazard;
 
 const ROW_HEIGHT: f32 = 20.0;
 
@@ -135,14 +136,14 @@ impl CanProbePane {
             );
             self.hex_to_send = self.hex_to_send.to_lowercase();
 
-            if ui
+            let send = ui
                 .add_enabled_ui(can_command, |ui| {
                     ui.add_sized(Vec2::new(button_w, h), Button::new("Send ➡"))
                 })
                 .inner
-                .on_disabled_hover_text(MUTED_HINT)
-                .clicked()
-            {
+                .on_disabled_hover_text(MUTED_HINT);
+            Hazard::tick(ui, send.rect, system);
+            if Hazard::confirm(ui, &send, system) {
                 self.send(system);
             }
         });

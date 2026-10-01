@@ -18,6 +18,7 @@ use rapid_dialect::rapid::{
 };
 
 use crate::panes::PaneUi;
+use crate::widgets::Hazard;
 
 #[derive(PartialEq)]
 enum CommandType {
@@ -232,7 +233,9 @@ impl PaneUi for CommandsPane {
             });
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Send ➡").clicked() {
+                let send = ui.button("Send ➡");
+                Hazard::tick(ui, send.rect, &system);
+                if Hazard::confirm(ui, &send, &system) {
                     self.send(&system);
                 }
             });

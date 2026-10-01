@@ -14,7 +14,7 @@ use crate::colors::{
     COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_ink,
     schematic_line, schematic_void, schematic_wash,
 };
-use crate::widgets::{MeasurementIndicator, Readout};
+use crate::widgets::{Hazard, MeasurementIndicator, Readout};
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
 const TANK_BULKHEAD_STEPS: usize = 32;
@@ -1744,7 +1744,7 @@ fn interact_valve(
         egui::Id::new(("valve", id.value())),
         egui::Sense::click(),
     );
-    if resp.clicked() {
+    if Hazard::confirm(ui, &resp, system) {
         match mode {
             ValveInteractionMode::Pulse => system.do_pulse_valve(id, pulse_duration),
             ValveInteractionMode::Toggle => {

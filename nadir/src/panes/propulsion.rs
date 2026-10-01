@@ -10,7 +10,7 @@ use rapid_dialect::rapid::enums::ValveId;
 use crate::colors::{schematic_frame, schematic_ink};
 use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
-use crate::widgets::{BatteryIndicator, Plot, PlotLine};
+use crate::widgets::{BatteryIndicator, Hazard, Plot, PlotLine};
 
 mod arducopter;
 mod arduplane;
@@ -253,6 +253,7 @@ impl PropulsionPane {
                         &mut self.pulse_secs,
                         valve_blink,
                     );
+                    Hazard::tick(ui, square, system);
                 }
                 (MavAutopilot::Px4, _) => {
                     px4::draw_rotors(ui, system, square);
@@ -402,6 +403,7 @@ impl PaneUi for PropulsionPane {
                                     let label = Label::new(RichText::new("🚰 Valves").weak())
                                         .sense(Sense::click());
                                     label_clicked = ui.add(label).clicked();
+                                    Hazard::tick(ui, ui.max_rect(), &system);
                                 })
                                 .body_unindented(|ui| {
                                     let vs_lines = valve_state_lines(system_id);

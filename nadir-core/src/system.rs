@@ -46,6 +46,7 @@ pub struct System {
     pub message_sender: broadcast::Sender<Common>,
     pub conn: Arc<Mutex<SystemConnection>>,
     muted: Arc<AtomicBool>,
+    hot: Arc<AtomicBool>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
     pub logs: Arc<Mutex<FlightLogUiState>>,
@@ -94,6 +95,7 @@ impl System {
                 channels: HashMap::new(),
             })),
             muted: Arc::new(AtomicBool::new(muted)),
+            hot: Arc::new(AtomicBool::new(false)),
             available_modes,
             params,
             logs,
@@ -226,6 +228,15 @@ impl System {
 
     pub fn set_muted(&self, muted: bool) {
         self.muted.store(muted, Ordering::Relaxed);
+    }
+
+    /// Whether hazardous actions fire on a single click instead of a hold. Not enforced here.
+    pub fn hot(&self) -> bool {
+        self.hot.load(Ordering::Relaxed)
+    }
+
+    pub fn set_hot(&self, hot: bool) {
+        self.hot.store(hot, Ordering::Relaxed);
     }
 
     pub fn send_message<M: Message + MessageExt + Debug>(&self, message: &M) {

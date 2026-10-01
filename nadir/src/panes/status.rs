@@ -11,7 +11,7 @@ use crate::colors::{
     mode_border, readable, text_on,
 };
 use crate::panes::{MUTED_HINT, PaneUi};
-use crate::widgets::{AlertLine, AlertTier};
+use crate::widgets::{AlertLine, AlertTier, Hazard};
 
 pub struct StatusPane {}
 
@@ -64,15 +64,48 @@ impl PaneUi for StatusPane {
         // beside ARM, amber cautions beside DISARM. The mode grid (which shows the current mode via
         // its highlighted button) sits below so the mode buttons don't ride the window edge.
         let row_gap = 4.0;
-        egui::Panel::top(egui::Id::new("status_arm_caution_strip"))
+        let hot = system.hot();
+        let hot_stroke = 2;
+        // Widened by the inside stroke, so the border's inner edge curves like the buttons.
+        let hot_radius = ui.visuals().widgets.inactive.corner_radius + hot_stroke;
+        let strip = egui::Panel::top(egui::Id::new("status_arm_caution_strip"))
             .resizable(false)
             .exact_size(2.0 * button_h + row_gap + 10.0)
             .frame(
                 Frame::new()
                     .fill(ui.visuals().extreme_bg_color)
+                    .corner_radius(if hot { hot_radius } else { 0.into() })
                     .inner_margin(Margin::symmetric(7, 5)),
             )
             .show(ui, |ui| {
+                egui::Panel::right(egui::Id::new("status_hot_toggle"))
+                    .resizable(false)
+                    .exact_size(16.0)
+                    .show_separator_line(false)
+                    .frame(Frame::new())
+                    .show(ui, |ui| {
+                        let hot_fill = readable(COLOR_INDICATOR_ADVANCED, ui.visuals());
+                        let button = if hot {
+                            ui.style_mut().visuals.override_text_color = Some(text_on(hot_fill));
+                            Button::selectable(true, RichText::new("H\nO\nT").small())
+                                .fill(hot_fill)
+                        } else {
+                            Button::selectable(false, RichText::new("H\nO\nT").small())
+                                .frame_when_inactive(true)
+                        };
+                        let hover = if hot {
+                            "Hazardous actions fire on a single click"
+                        } else {
+                            "Hold to make hazardous actions fire on a single click"
+                        };
+                        let toggle = ui
+                            .add_sized(ui.available_size(), button)
+                            .on_hover_text(hover);
+                        if Hazard::held(ui, &toggle, &system) {
+                            system.set_hot(!hot);
+                        }
+                    });
+
                 ui.spacing_mut().item_spacing.y = row_gap;
                 let size = Vec2::new(90.0, button_h);
 
@@ -89,12 +122,12 @@ impl PaneUi for StatusPane {
                     if armed {
                         ui.style_mut().visuals.override_text_color = Some(text_on(armed_fill));
                     }
-                    if ui
+                    let arm = ui
                         .add_enabled_ui(can_command, |ui| ui.add_sized(size, arm_button))
                         .inner
-                        .on_disabled_hover_text(MUTED_HINT)
-                        .clicked()
-                    {
+                        .on_disabled_hover_text(MUTED_HINT);
+                    Hazard::tick(ui, arm.rect, &system);
+                    if Hazard::confirm(ui, &arm, &system) {
                         system.do_arm(true, false);
                     }
                     ui.style_mut().visuals.override_text_color = None;
@@ -131,6 +164,17 @@ impl PaneUi for StatusPane {
                     });
                 });
             });
+        if hot {
+            ui.painter().rect_stroke(
+                strip.response.rect,
+                hot_radius,
+                Stroke::new(
+                    f32::from(hot_stroke),
+                    readable(COLOR_INDICATOR_ADVANCED, ui.visuals()),
+                ),
+                egui::StrokeKind::Inside,
+            );
+        }
 
         ui.style_mut().spacing.item_spacing = Vec2::ZERO;
 
@@ -353,31 +397,28 @@ impl PaneUi for StatusPane {
                                 );
                                 col_ui.painter().galley(galley_pos, galley, text_color);
 
-                                // Advanced modes get a small amber corner tick: a "careful" marker
-                                // in the caution color family that stays visible when the mode is
-                                // selected.
                                 if advanced {
-                                    let r = resp.rect;
-                                    col_ui.painter().add(egui::Shape::convex_polygon(
-                                        vec![
-                                            egui::pos2(r.max.x - 11.0, r.min.y + 3.0),
-                                            egui::pos2(r.max.x - 3.0, r.min.y + 3.0),
-                                            egui::pos2(r.max.x - 3.0, r.min.y + 11.0),
-                                        ],
-                                        readable(COLOR_INDICATOR_ADVANCED, col_ui.visuals()),
-                                        Stroke::NONE,
-                                    ));
+                                    Hazard::tick(col_ui, resp.rect, &system);
                                 }
-                                if auto_mode || advanced {
-                                    let hover = match (auto_mode, advanced) {
-                                        (true, true) => "Autonomous mode; advanced users only.",
-                                        (true, false) => "Autonomous mode.",
-                                        _ => "Advanced users only.",
-                                    };
+                                let hover = [
+                                    auto_mode.then_some("Autonomous mode."),
+                                    advanced.then_some("Advanced users only."),
+                                    (advanced && !system.hot()).then_some(Hazard::HINT),
+                                ]
+                                .into_iter()
+                                .flatten()
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                                if !hover.is_empty() {
                                     resp = resp.on_hover_text(hover);
                                 }
 
-                                if resp.clicked() {
+                                let fire = if advanced {
+                                    Hazard::held(col_ui, &resp, &system)
+                                } else {
+                                    resp.clicked()
+                                };
+                                if fire {
                                     if mode_info.standard_mode == MavStandardMode::NonStandard {
                                         system.do_set_custom_mode(mode_info.custom_mode);
                                     } else {
