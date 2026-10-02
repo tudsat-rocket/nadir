@@ -115,6 +115,17 @@ pub(crate) fn fluid_colors() -> [(&'static str, Color32); 7] {
     rocket::fluid_colors()
 }
 
+pub(super) const SERVO_COUNT: usize = 4;
+
+// The quick-disconnect servos. A servo's position in this table is its
+// SERVO_OUTPUT_RAW channel and DO_SET_SERVO instance, both 1-based.
+pub(super) const SERVOS: [&str; SERVO_COUNT] = [
+    "Press. Disconnect",
+    "Ox. Disconnect",
+    "Press. Retract",
+    "Ox. Retract",
+];
+
 /// For the contrast tests in [`crate::colors`].
 #[cfg(test)]
 pub(crate) fn valve_colors() -> impl Iterator<Item = (&'static str, Color32)> {
@@ -142,7 +153,7 @@ pub(crate) enum ValveInteractionMode {
 
 pub struct PropulsionPane {
     pulse_secs: f32,
-    pending_target: [Option<f32>; VALVE_COUNT],
+    pending_target: [Option<f32>; VALVE_COUNT + SERVO_COUNT],
     valve_mismatch_since: [Option<f64>; VALVE_COUNT],
     valve_mode: ValveInteractionMode,
 }
@@ -195,7 +206,7 @@ impl PropulsionPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {
             pulse_secs: 1.0,
-            pending_target: [None; VALVE_COUNT],
+            pending_target: [None; VALVE_COUNT + SERVO_COUNT],
             valve_mismatch_since: [None; VALVE_COUNT],
             valve_mode: ValveInteractionMode::Pulse,
         }

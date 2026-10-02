@@ -4,6 +4,7 @@ use egui::{
     Align2, Button, Color32, CornerRadius, DragValue, FontId, Label, Pos2, Rect, RichText, Sense,
     Shape, Stroke, StrokeKind, UiBuilder, Vec2,
 };
+use mavspec::rust::dialects::common::messages::ServoOutputRaw;
 use nadir_core::System;
 use rapid_dialect::rapid::enums::ValveId;
 
@@ -11,7 +12,13 @@ use crate::colors::{COLOR_INDICATOR_WARNING, blink_on, high_contrast, readable, 
 use crate::widgets::Hazard;
 
 use super::rocket::{self, ValveReading};
-use super::{MAX_PULSE_DURATION_SECS, VALVE_COUNT, VALVE_LATCH_EPS, VALVES, Valve, ValveKind};
+use super::{
+    MAX_PULSE_DURATION_SECS, SERVO_COUNT, SERVOS, VALVE_COUNT, VALVE_LATCH_EPS, VALVES, Valve,
+    ValveKind,
+};
+
+// Every valve, plus one cell holding all servos.
+const CELL_COUNT: usize = VALVE_COUNT + 1;
 
 pub(super) const PULSE_DURATIONS: [(f32, &str); 3] = [(0.2, "0.2s"), (1.0, "1s"), (5.0, "5s")];
 
@@ -30,6 +37,7 @@ const CLOSE_W: f32 = 34.0;
 const CLOSE_H: f32 = 14.0;
 
 const OPEN_H: f32 = 18.0;
+const SERVO_DRAG_W: f32 = 44.0;
 const PULSE_W: f32 = 22.0;
 const PULSE_H: f32 = 18.0;
 const OUTLINE_PAD: f32 = 4.0;
@@ -77,11 +85,10 @@ impl Plan {
             (TALL_MIN_W, TALL_CHROME, GAUGE_MIN)
         };
 
-        let fit = (((avail.x + gap.x) / (min_w + gap.x)).floor() as usize).clamp(1, VALVE_COUNT);
-        // Spread the valves evenly over the rows they already need: 4 across
-        // leaves a row of one, 3 across fills every row without costing a fourth.
-        let cols = VALVE_COUNT.div_ceil(VALVE_COUNT.div_ceil(fit));
-        let rows = VALVE_COUNT.div_ceil(cols);
+        let fit = (((avail.x + gap.x) / (min_w + gap.x)).floor() as usize).clamp(1, CELL_COUNT);
+        // Spread the cells evenly over the rows they already need.
+        let cols = CELL_COUNT.div_ceil(CELL_COUNT.div_ceil(fit));
+        let rows = CELL_COUNT.div_ceil(cols);
 
         let spare = (avail.y - (rows - 1) as f32 * gap.y).max(0.0) / rows as f32;
         let gauge = (spare - chrome).clamp(GAUGE_MIN, GAUGE_MAX).max(knob_min);
@@ -123,7 +130,7 @@ impl Plan {
 pub(super) fn grid(
     ui: &mut egui::Ui,
     system: &System,
-    pending: &mut [Option<f32>; VALVE_COUNT],
+    pending: &mut [Option<f32>; VALVE_COUNT + SERVO_COUNT],
     blink: [bool; VALVE_COUNT],
     plan: &Plan,
 ) {
@@ -135,13 +142,15 @@ pub(super) fn grid(
                 .num_columns(plan.cols)
                 .spacing(CELL_GAP)
                 .show(ui, |ui| {
+                    let (valves, servo_pending) = pending.split_at_mut(VALVE_COUNT);
                     for (i, blink) in blink.into_iter().enumerate() {
-                        knob(ui, system, i, &mut pending[i], blink, plan);
+                        knob(ui, system, i, &mut valves[i], blink, plan);
                         if (i + 1).is_multiple_of(plan.cols) {
                             ui.end_row();
                         }
                     }
-                    if !VALVE_COUNT.is_multiple_of(plan.cols) {
+                    servos(ui, system, servo_pending, plan);
+                    if !CELL_COUNT.is_multiple_of(plan.cols) {
                         ui.end_row();
                     }
                 });
@@ -211,7 +220,9 @@ fn knob(
     let font = FontId::monospace((plan.gauge * GAUGE_FONT_RATIO).max(GAUGE_FONT_MIN));
     gauge(ui, dial, reading, blink, time);
     if kind == ValveKind::Servo {
-        target_drag(ui, dial, font, system, id, commanded, pending);
+        target_drag(ui, dial, font, system, commanded, pending, |v| {
+            system.do_set_valve(id, v);
+        });
     } else {
         reported(ui, dial, &font, reading);
     }
@@ -313,9 +324,9 @@ fn target_drag(
     knob: Rect,
     font: FontId,
     system: &System,
-    id: ValveId,
     commanded: Option<f32>,
     pending: &mut Option<f32>,
+    send: impl FnOnce(f32),
 ) {
     let mut value = pending.unwrap_or(commanded.unwrap_or(0.0) * 100.0);
     let resp = ui
@@ -338,10 +349,20 @@ fn target_drag(
         })
         .inner;
 
+    commit(&resp, value, commanded, pending, send);
+}
+
+fn commit(
+    resp: &egui::Response,
+    value: f32,
+    commanded: Option<f32>,
+    pending: &mut Option<f32>,
+    send: impl FnOnce(f32),
+) {
     if resp.drag_stopped() || resp.lost_focus() {
         // A click that opens the text entry and leaves it alone is not a command.
         if commanded.is_none_or(|c| (c * 100.0 - value).abs() >= 0.5) {
-            system.do_set_valve(id, value / 100.0);
+            send(value / 100.0);
         }
         *pending = None;
     } else if resp.dragged() || resp.has_focus() {
@@ -349,6 +370,75 @@ fn target_drag(
     } else {
         *pending = None;
     }
+}
+
+fn servos(ui: &mut egui::Ui, system: &System, pending: &mut [Option<f32>], plan: &Plan) {
+    let (rect, _) = ui.allocate_exact_size(plan.cell, Sense::hover());
+    let ui = &mut ui.new_child(UiBuilder::new().max_rect(rect));
+    let raw = system.last_message::<ServoOutputRaw>().ok();
+    let row_h = rect.height() / SERVO_COUNT as f32;
+
+    for (i, (label, pending)) in SERVOS.into_iter().zip(pending).enumerate() {
+        let row = Rect::from_min_size(
+            Pos2::new(rect.left(), rect.top() + i as f32 * row_h),
+            Vec2::new(rect.width(), row_h),
+        );
+        let drag_w = SERVO_DRAG_W.min(row.width() / 2.0);
+        let drag_rect = Rect::from_center_size(
+            Pos2::new(row.right() - drag_w / 2.0, row.center().y),
+            Vec2::new(drag_w, (row_h - GAP).min(OPEN_H)),
+        );
+        name(
+            ui,
+            label,
+            ui.visuals().text_color(),
+            Rect::from_min_max(row.min, Pos2::new(drag_rect.left() - GAP, row.bottom())),
+        );
+
+        let commanded = raw.as_ref().and_then(|raw| servo_commanded(raw, i));
+        let editing = pending.is_some();
+        let mut value = pending.unwrap_or(commanded.unwrap_or(0.0) * 100.0);
+        let resp = ui
+            .scope(|ui| {
+                ui.spacing_mut().interact_size.y = drag_rect.height();
+                ui.style_mut().override_font_id = Some(FontId::monospace(BTN_FONT));
+                let drag = DragValue::new(&mut value).speed(1.0).range(0.0..=100.0);
+                let drag = if commanded.is_none() && !editing {
+                    drag.custom_formatter(|_, _| "--".to_owned())
+                } else {
+                    drag.suffix("%")
+                };
+                ui.add_enabled_ui(system.hot(), |ui| ui.put(drag_rect, drag))
+                    .inner
+                    .on_disabled_hover_text("Set HOT to drag")
+            })
+            .inner;
+
+        let instance = u8::try_from(i + 1).unwrap_or(u8::MAX);
+        commit(&resp, value, commanded, pending, |v| {
+            system.do_set_servo(instance, servo_pwm(v));
+        });
+    }
+}
+
+// 0 marks a channel the firmware has never driven.
+fn servo_commanded(raw: &ServoOutputRaw, index: usize) -> Option<f32> {
+    let pwm = [
+        raw.servo1_raw,
+        raw.servo2_raw,
+        raw.servo3_raw,
+        raw.servo4_raw,
+    ][index];
+    (pwm != 0).then(|| (f32::from(pwm) - 1000.0) / 1000.0)
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "clamped to 0..=1000 first"
+)]
+fn servo_pwm(position: f32) -> u16 {
+    1000 + (position.clamp(0.0, 1.0) * 1000.0).round() as u16
 }
 
 fn reported(ui: &egui::Ui, knob: Rect, font: &FontId, reading: Option<ValveReading>) {

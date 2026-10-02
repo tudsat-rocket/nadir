@@ -373,6 +373,20 @@ impl System {
         self.send_message(&cmd);
     }
 
+    /// `instance` is 1-based.
+    pub fn do_set_servo(&self, instance: u8, pwm_us: u16) {
+        let cmd = CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: MavCmd::DoSetServo,
+            param1: f32::from(instance),
+            param2: f32::from(pwm_us),
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
     pub fn request_can_forwarding(&self, enable: bool) {
         let cmd = CommandLong {
             target_system: self.system_id,
