@@ -232,9 +232,9 @@ impl Sidebar {
 
                 ui.horizontal(|ui| {
                     if let Some(soc) = state_of_charge(&system) {
-                        let color = soc_color(f32::from(soc) / 100.0, ui.visuals());
+                        let color = soc_color(soc / 100.0, ui.visuals());
                         ui.add(Readout {
-                            value: f32::from(soc),
+                            value: soc,
                             decimals: 0,
                             prefix: "🔋 ",
                             unit: Some("%"),

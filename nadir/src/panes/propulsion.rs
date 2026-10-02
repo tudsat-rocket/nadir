@@ -3,14 +3,14 @@ use nadir_core::{MessageInstance, System};
 use egui::collapsing_header::CollapsingState;
 use egui::{Color32, Image, Label, Pos2, Rect, RichText, Sense, Vec2};
 use mavspec::rust::dialects::common::enums::MavType;
-use mavspec::rust::dialects::common::messages::{BatteryStatus, Heartbeat, SysStatus};
+use mavspec::rust::dialects::common::messages::Heartbeat;
 use mavspec::rust::dialects::minimal::enums::MavAutopilot;
 use rapid_dialect::rapid::enums::ValveId;
 
 use crate::colors::{schematic_frame, schematic_ink};
 use crate::panes::{PaneUi, TreeBehavior};
 use crate::views::View;
-use crate::widgets::{BatteryIndicator, Hazard, Plot, PlotLine};
+use crate::widgets::{BatteryIndicator, BatteryReading, Hazard, Plot, PlotLine};
 
 mod arducopter;
 mod arduplane;
@@ -169,37 +169,15 @@ fn debounce_blink(since: &mut Option<f64>, mismatch: bool, now: f64) -> bool {
     }
 }
 
-// TODO: properly handle multiple batteries / different instance IDs
-pub(super) fn battery_indicator(system: &System, compact: bool) -> Option<BatteryIndicator> {
-    if let Ok(battery) = system.last_instance_message::<BatteryStatus>(1) {
-        let voltage = battery
-            .voltages
-            .iter()
-            .filter(|v| **v > 0 && **v < u16::MAX)
-            .map(|v| f32::from(*v) / 1000.0)
-            .next_back();
-
-        Some(BatteryIndicator {
-            id: battery.id,
-            soc: f32::from(battery.battery_remaining) / 100.0,
-            voltage,
-            current: (battery.current_battery != -1)
-                .then_some(f32::from(battery.current_battery) / 100.0),
-            consumed: (battery.current_consumed != -1).then_some(battery.current_consumed as f32),
+pub(super) fn battery_indicators(system: &System, compact: bool) -> Vec<BatteryIndicator> {
+    BatteryReading::all(system)
+        .into_iter()
+        .map(|(id, reading)| BatteryIndicator {
+            id,
+            reading,
             compact,
         })
-    } else if let Ok(status) = system.last_message::<SysStatus>() {
-        Some(BatteryIndicator {
-            id: 0,
-            soc: f32::from(status.battery_remaining) / 100.0,
-            voltage: Some(f32::from(status.voltage_battery) / 1000.0),
-            current: Some(f32::from(status.current_battery) / 100.0),
-            consumed: None,
-            compact,
-        })
-    } else {
-        None
-    }
+        .collect()
 }
 
 impl PropulsionPane {
@@ -226,7 +204,7 @@ impl PropulsionPane {
 
     fn draw_battery(&mut self, ui: &mut egui::Ui, system: &System, pos: Pos2) {
         let battery_rect = Rect::from_center_size(pos, Vec2::new(60.0, 120.0));
-        if let Some(indicator) = battery_indicator(system, false) {
+        if let Some(indicator) = battery_indicators(system, false).into_iter().next() {
             ui.place(battery_rect, indicator);
         }
     }

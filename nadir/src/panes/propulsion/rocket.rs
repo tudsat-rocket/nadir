@@ -2,10 +2,9 @@ use nadir_core::System;
 
 use egui::epaint::{PathShape, PathStroke};
 use egui::{
-    Align2, Area, Button, Color32, CornerRadius, FontId, Id, Order, Pos2, Rect, RichText, Shape,
-    Stroke, StrokeKind, Vec2, pos2,
+    Align2, Area, Button, Color32, CornerRadius, FontId, Id, Order, Pos2, Rangef, Rect, RichText,
+    Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
-use mavspec::rust::dialects::common::messages::BatteryStatus;
 use rapid_dialect::rapid::enums::{PressureVesselFlag, ValveFlag, ValveId};
 use rapid_dialect::rapid::messages::{PressureVessel, Valve};
 
@@ -14,7 +13,7 @@ use crate::colors::{
     COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_ink,
     schematic_line, schematic_void, schematic_wash,
 };
-use crate::widgets::{Hazard, MeasurementIndicator, Readout};
+use crate::widgets::{BatteryIndicator, Hazard, MeasurementIndicator, Readout};
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
 const TANK_BULKHEAD_STEPS: usize = 32;
@@ -191,11 +190,29 @@ pub fn draw_hybrid(
     let valve_half = 0.022 * n;
     let valve_bot_cy = f32::midpoint(tank_rect.bottom(), cc_top);
 
-    if let Some(indicator) = super::battery_indicator(system, true) {
-        let battery_half_w = tank_w * 0.6;
-        let battery_rect = Rect::from_min_max(
-            pos2(center_x - battery_half_w, square.top() + 0.005 * n),
-            pos2(center_x + battery_half_w, top_tank_rect.top() - 0.045 * n),
+    let batteries = super::battery_indicators(system, true);
+    let battery_count = batteries.len() as f32;
+    let battery_band = Rangef::new(square.top() + 0.005 * n, top_tank_rect.top() - 0.035 * n);
+    let battery_size = BatteryIndicator::compact_size(
+        ui,
+        vec2(
+            f32::min(
+                0.1 * n,
+                (square.width() - (battery_count + 1.0) * 0.008 * n) / battery_count,
+            ),
+            battery_band.span(),
+        ),
+    );
+    let battery_gap = f32::min(
+        (square.width() - battery_count * battery_size.x) / (battery_count + 1.0),
+        0.03 * n,
+    );
+    let batteries_w = battery_count * (battery_size.x + battery_gap) - battery_gap;
+    for (i, indicator) in batteries.into_iter().enumerate() {
+        let left = center_x - batteries_w / 2.0 + i as f32 * (battery_size.x + battery_gap);
+        let battery_rect = Rect::from_min_size(
+            pos2(left, battery_band.center() - battery_size.y / 2.0),
+            battery_size,
         );
         ui.place(battery_rect, indicator);
     }
@@ -294,26 +311,6 @@ pub fn draw_hybrid(
             indicator,
         );
     }
-
-    let battery_temp = system
-        .last_instance_message::<BatteryStatus>(1)
-        .ok()
-        .and_then(|b| temperature_c(b.temperature));
-
-    let battery_cy = square.top() + 0.08 * n;
-    let battery_temp_cx = temp_cx + 0.02 * n;
-    let indicator = MeasurementIndicator {
-        values: vec![battery_temp],
-        unit: "\u{00b0}C",
-        color: schematic_ink(&visuals),
-        decimals: Some(0),
-        blink: false,
-    };
-    let size = indicator.intrinsic_size(ui.ctx());
-    ui.place(
-        Rect::from_center_size(pos2(battery_temp_cx, battery_cy), size),
-        indicator,
-    );
 
     let stroke_col = schematic_line(&visuals);
     let stroke = Stroke::new(1.5_f32, stroke_col);

@@ -18,7 +18,7 @@ pub struct MeasurementIndicator {
 }
 
 impl MeasurementIndicator {
-    fn value_font() -> FontId {
+    pub(crate) fn value_font() -> FontId {
         FontId::monospace(13.0)
     }
 

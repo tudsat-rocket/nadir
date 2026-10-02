@@ -3,16 +3,14 @@ use nadir_core::{System, mav_type_icon};
 
 use eframe::egui;
 use egui::{Align, Color32, FontId, Layout, RichText, Vec2};
-use mavspec::rust::dialects::common::messages::{
-    BatteryStatus, GpsRawInt, Heartbeat, LocalPositionNed, SysStatus,
-};
+use mavspec::rust::dialects::common::messages::{GpsRawInt, Heartbeat, LocalPositionNed};
 
 use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, dim, readable,
 };
 use crate::widgets::{
-    ArmedBadge, AutopilotLogo, Readout, TEXT_SIZE, column_header, link_quality, small_text,
-    soc_color,
+    ArmedBadge, AutopilotLogo, BatteryReading, Readout, TEXT_SIZE, column_header, link_quality,
+    small_text, soc_color,
 };
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
@@ -33,6 +31,8 @@ fn current_color(ui: &egui::Ui, amps: f32) -> Color32 {
 enum Segment {
     Text(String, Color32),
     Value(Readout),
+    /// Narrower than a monospace space.
+    Gap(f32),
 }
 
 impl Segment {
@@ -53,6 +53,7 @@ impl Segment {
             Self::Value(readout) => {
                 ui.add(readout);
             }
+            Self::Gap(width) => ui.add_space(width),
         }
     }
 }
@@ -118,50 +119,38 @@ impl Vitals<'_> {
             }
         });
 
-        // TODO: properly handle multiple batteries (same as StatusPane)
-        // Both messages report current in cA, with -1 for "not measured".
-        let (battery, voltage, current) = if let Ok(b) =
-            system.last_instance_message::<BatteryStatus>(1)
-        {
-            // Same reading as the propulsion pane's indicator: the last populated cell-sum
-            // entry.
-            let voltage = b
-                .voltages
-                .iter()
-                .filter(|v| **v > 0 && **v < u16::MAX)
-                .map(|v| f32::from(*v) / 1000.0)
-                .next_back();
-            let current = (b.current_battery != -1).then(|| f32::from(b.current_battery) / 100.0);
-            (Some(b.battery_remaining), voltage, current)
-        } else if let Ok(s) = system.last_message::<SysStatus>() {
-            (
-                Some(s.battery_remaining),
-                (s.voltage_battery != u16::MAX).then(|| f32::from(s.voltage_battery) / 1000.0),
-                (s.current_battery != -1).then(|| f32::from(s.current_battery) / 100.0),
-            )
-        } else {
-            (None, None, None)
-        };
         // Charge and voltage share the state-of-charge color; the current is a separate segment so
-        // it can carry the battery widget's brightness ramp instead.
-        let battery_cell = {
-            let soc = battery.filter(|soc| *soc >= 0);
+        // it can carry the battery widget's brightness ramp instead. Several packs leave room for
+        // charge and voltage only.
+        let batteries = BatteryReading::all(system);
+        let mut battery_cell = Vec::new();
+        for (pack, (_, reading)) in batteries.iter().enumerate() {
             // A pack reporting only volts stays neutral, with nothing to color it by.
-            let charge_color = soc.map_or(normal, |soc| {
-                soc_color(f32::from(soc) / 100.0, ui.visuals())
-            });
-
-            let mut cell = Vec::new();
-            if let Some(soc) = soc {
-                cell.push(Segment::value(f32::from(soc), 0, Some("%"), charge_color));
+            let charge_color = reading
+                .soc
+                .map_or(normal, |soc| soc_color(soc, ui.visuals()));
+            if pack > 0 {
+                battery_cell.extend([
+                    Segment::Gap(3.0),
+                    Segment::Text("/".into(), weak),
+                    Segment::Gap(3.0),
+                ]);
             }
-            if let Some(u) = voltage {
+
+            let separator = if batteries.len() > 1 { " " } else { ", " };
+            let mut cell = Vec::new();
+            if let Some(soc) = reading.soc {
+                cell.push(Segment::value(soc * 100.0, 0, Some("%"), charge_color));
+            }
+            if let Some(u) = reading.voltage {
                 if !cell.is_empty() {
-                    cell.push(Segment::Text(", ".into(), charge_color));
+                    cell.push(Segment::Text(separator.into(), charge_color));
                 }
                 cell.push(Segment::value(u, 1, Some("V"), charge_color));
             }
-            if let Some(i) = current {
+            if batteries.len() == 1
+                && let Some(i) = reading.current
+            {
                 let color = current_color(ui, i);
                 if !cell.is_empty() {
                     cell.push(Segment::Text(", ".into(), color));
@@ -177,8 +166,11 @@ impl Vitals<'_> {
             if cell.is_empty() {
                 cell.push(Segment::Text("--".into(), nodata));
             }
-            cell
-        };
+            battery_cell.extend(cell);
+        }
+        if battery_cell.is_empty() {
+            battery_cell.push(Segment::Text("--".into(), nodata));
+        }
 
         let gps = system.last_message::<GpsRawInt>().ok();
         let gps_cell = match gps {

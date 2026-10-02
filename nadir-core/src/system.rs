@@ -173,6 +173,10 @@ impl System {
             .last_message_filtered(self.system_id, 0x01, instance)
     }
 
+    pub fn last_instance_messages<M: MessageExt + Default>(&self) -> Vec<M> {
+        self.db.last_message_per_instance(self.system_id, 0x01)
+    }
+
     pub fn all_messages<M: MessageExt + Default>(&self) -> Vec<(DateTime<Utc>, M)> {
         self.db.all_messages(self.system_id, 0x01)
     }
@@ -517,6 +521,7 @@ pub fn mav_type_icon(mav_type: MavType) -> &'static str {
         MavType::Gcs | MavType::AntennaTracker => "📡",
         MavType::Servo => "⚙",
         MavType::ChargingStation => "⛽",
+        MavType::Battery => "🔋",
         _ => "?",
     }
 }

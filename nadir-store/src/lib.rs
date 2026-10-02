@@ -409,6 +409,22 @@ impl Db {
             .ok_or_else(|| DbError::NotFound(std::any::type_name::<M>()))
     }
 
+    /// The newest message of every instance stored, by instance value.
+    pub fn last_message_per_instance<M: MessageExt + Default>(
+        &self,
+        system_id: u8,
+        component_id: u8,
+    ) -> Vec<M> {
+        let series = self.series.lock().unwrap();
+
+        let mut last: Vec<_> = Self::slices::<M>(&series, system_id, component_id)
+            .filter_map(|((.., instance), rows)| Some((*instance, rows.last()?.1.clone())))
+            .collect();
+        last.sort_unstable_by_key(|(instance, _)| *instance);
+
+        last.into_iter().map(|(_, msg)| msg).collect()
+    }
+
     pub fn all_messages<M: MessageExt + Default>(
         &self,
         system_id: u8,
@@ -1293,6 +1309,13 @@ mod tests {
 
         assert_eq!(vessel(0), 150);
         assert_eq!(vessel(1), 200);
+
+        let last: Vec<_> = db
+            .last_message_per_instance::<rapid::PressureVessel>(1, 1)
+            .into_iter()
+            .map(|v| (v.id, v.pressure1))
+            .collect();
+        assert_eq!(last, [(0, 150), (1, 200)]);
 
         // Unfiltered, the newest across every instance.
         assert_eq!(
