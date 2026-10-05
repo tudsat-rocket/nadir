@@ -82,10 +82,10 @@ impl From<&LinkId> for LinkDraft {
 
 pub struct SettingsView {
     links: Vec<LinkDraft>,
-    autoconnect_usb: bool,
-    mute_uplink_by_default: bool,
     mapbox_access_token: String,
-    theme: Theme,
+    /// Applied as edited, even while an invalid link keeps it from being saved.
+    settings: Settings,
+    saved: Settings,
     /// What came of the last save, kept on screen until the next one.
     status: Option<Result<PathBuf, String>>,
 }
@@ -94,10 +94,9 @@ impl SettingsView {
     pub fn new(settings: &Settings) -> Self {
         Self {
             links: settings.links.iter().map(LinkDraft::from).collect(),
-            autoconnect_usb: settings.autoconnect_usb,
-            mute_uplink_by_default: settings.mute_uplink_by_default,
             mapbox_access_token: settings.map.mapbox_access_token.clone().unwrap_or_default(),
-            theme: settings.theme,
+            settings: settings.clone(),
+            saved: settings.clone(),
             status: None,
         }
     }
@@ -120,12 +119,14 @@ impl SettingsView {
                 self.appearance_ui(ui);
 
                 ui.add_space(15.0);
-                self.save_ui(ui, links);
+                let links_ok = links.is_ok();
+                self.save(links);
+                self.status_ui(ui, links_ok);
             });
         });
     }
 
-    /// Returns the links as they currently parse, so the save button can refuse a broken one.
+    /// Returns the links as they currently parse, so a broken one is not saved.
     fn links_ui(&mut self, ui: &mut egui::Ui) -> Result<Vec<LinkId>, ()> {
         column_header(ui, "🖧 LINKS");
 
@@ -188,14 +189,17 @@ impl SettingsView {
         ui.horizontal(|ui| {
             ui.add_space(5.0);
             ui.checkbox(
-                &mut self.autoconnect_usb,
+                &mut self.settings.autoconnect_usb,
                 "Open USB serial ports as they appear",
             );
         });
 
         ui.horizontal(|ui| {
             ui.add_space(5.0);
-            ui.checkbox(&mut self.mute_uplink_by_default, "Mute uplink by default");
+            ui.checkbox(
+                &mut self.settings.mute_uplink_by_default,
+                "Mute uplink by default",
+            );
         });
 
         built
@@ -224,8 +228,11 @@ impl SettingsView {
             ui.label("Theme");
 
             for theme in crate::theme::ALL {
-                let response =
-                    ui.selectable_value(&mut self.theme, theme, crate::theme::label(theme));
+                let response = ui.selectable_value(
+                    &mut self.settings.theme,
+                    theme,
+                    crate::theme::label(theme),
+                );
                 let response = if theme == Theme::HighContrast {
                     response.on_hover_text(
                         "The light theme, retuned so every colour clears WCAG 2.2 level AA, \
@@ -242,25 +249,35 @@ impl SettingsView {
         });
     }
 
-    fn save_ui(&mut self, ui: &mut egui::Ui, links: Result<Vec<LinkId>, ()>) {
+    fn save(&mut self, links: Result<Vec<LinkId>, ()>) {
+        let Ok(links) = links else {
+            return;
+        };
+
+        self.settings.links = links;
+        self.settings.map.mapbox_access_token =
+            (!self.mapbox_access_token.is_empty()).then(|| self.mapbox_access_token.clone());
+
+        if self.settings != self.saved {
+            self.status = Some(self.settings.save().map_err(|e| e.to_string()));
+            self.saved = self.settings.clone();
+        }
+    }
+
+    fn status_ui(&self, ui: &mut egui::Ui, links_ok: bool) {
         ui.horizontal(|ui| {
             ui.add_space(5.0);
 
-            let ok = links.is_ok();
-            if ui
-                .add_enabled(ok, egui::Button::new("💾 Save"))
-                .on_disabled_hover_text("One of the links is not a valid address")
-                .clicked()
-            {
-                self.status = Some(self.save(links.unwrap_or_default()));
-            }
-
+            let error = readable(COLOR_INDICATOR_LIMITS, ui.visuals());
             match &self.status {
+                _ if !links_ok => {
+                    ui.colored_label(error, "Not saved: one of the links is not a valid address");
+                }
                 Some(Ok(path)) => {
                     ui.weak(format!("Saved to {}", path.display()));
                 }
                 Some(Err(e)) => {
-                    ui.colored_label(readable(COLOR_INDICATOR_LIMITS, ui.visuals()), e);
+                    ui.colored_label(error, e);
                 }
                 None => {}
             }
@@ -272,20 +289,5 @@ impl SettingsView {
             // Honest rather than tidy: there is no way to retire a link once `Core` has spawned it.
             ui.weak("Links and the map token are read at startup. Restart to apply them.");
         });
-    }
-
-    fn save(&self, links: Vec<LinkId>) -> Result<PathBuf, String> {
-        let settings = Settings {
-            autoconnect_usb: self.autoconnect_usb,
-            links,
-            mute_uplink_by_default: self.mute_uplink_by_default,
-            map: nadir_core::settings::MapSettings {
-                mapbox_access_token: (!self.mapbox_access_token.is_empty())
-                    .then_some(self.mapbox_access_token.clone()),
-            },
-            theme: self.theme,
-        };
-
-        settings.save().map_err(|e| e.to_string())
     }
 }

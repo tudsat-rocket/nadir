@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::LinkId;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub autoconnect_usb: bool,
@@ -39,7 +39,7 @@ pub enum Theme {
     HighContrast,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MapSettings {
     /// Enables the satellite layer, which needs a Mapbox account.
@@ -167,8 +167,7 @@ mod tests {
         let text = toml::to_string_pretty(&settings).unwrap();
         let read: Settings = toml::from_str(&text).unwrap();
 
-        assert_eq!(read.links, settings.links);
-        assert_eq!(read.autoconnect_usb, settings.autoconnect_usb);
+        assert_eq!(read, settings);
     }
 
     /// The layout is a user-facing interface, so pin it rather than only asserting it round-trips.
