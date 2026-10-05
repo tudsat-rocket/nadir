@@ -14,6 +14,7 @@ pub struct Settings {
     pub map: MapSettings,
     pub theme: Theme,
     pub plot_line_width: f32,
+    pub pulse_durations: [f32; 3],
 }
 
 impl Default for Settings {
@@ -25,6 +26,7 @@ impl Default for Settings {
             map: MapSettings::default(),
             theme: Theme::default(),
             plot_line_width: 1.0,
+            pulse_durations: [0.2, 1.0, 5.0],
         }
     }
 }

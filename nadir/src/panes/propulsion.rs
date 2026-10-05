@@ -19,7 +19,7 @@ mod rocket;
 mod valves;
 
 // Firmware bound on pulse length (mission::valves::MAX_PULSE_DURATION).
-pub(super) const MAX_PULSE_DURATION_SECS: f32 = 30.0;
+pub const MAX_PULSE_DURATION_SECS: f32 = 30.0;
 
 // How long a commanded-vs-actual mismatch must persist before the cue starts
 // blinking, so normal valve travel doesn't flash the UI.
@@ -152,7 +152,8 @@ pub(crate) enum ValveInteractionMode {
 }
 
 pub struct PropulsionPane {
-    pulse_secs: f32,
+    /// Which of the configured pulse durations a click on the schematic sends.
+    pulse: usize,
     pending_target: [Option<f32>; VALVE_COUNT + SERVO_COUNT],
     valve_mismatch_since: [Option<f64>; VALVE_COUNT],
     valve_mode: ValveInteractionMode,
@@ -183,7 +184,7 @@ pub(super) fn battery_indicators(system: &System, compact: bool) -> Vec<BatteryI
 impl PropulsionPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {
-            pulse_secs: 1.0,
+            pulse: 1,
             pending_target: [None; VALVE_COUNT + SERVO_COUNT],
             valve_mismatch_since: [None; VALVE_COUNT],
             valve_mode: ValveInteractionMode::Pulse,
@@ -215,6 +216,7 @@ impl PropulsionPane {
         system: &System,
         square: Rect,
         valve_blink: [bool; VALVE_COUNT],
+        pulse_durations: [f32; 3],
     ) {
         let n = square.width();
 
@@ -240,7 +242,8 @@ impl PropulsionPane {
                         system,
                         square,
                         &mut self.valve_mode,
-                        &mut self.pulse_secs,
+                        &mut self.pulse,
+                        pulse_durations,
                         valve_blink,
                     );
                     Hazard::tick(ui, square, system);
@@ -363,7 +366,7 @@ impl PaneUi for PropulsionPane {
                 let blink = self.update_valve_blink(&system, now);
                 let cursor = ui.cursor().min;
                 let square = Rect::from_min_size(cursor, Vec2::new(w, h));
-                self.draw_frame(ui, &system, square, blink);
+                self.draw_frame(ui, &system, square, blink, behavior.pulse_durations);
 
                 ui.vertical(|ui| {
                     // Measured before the panel resolves: inside it, available height
@@ -423,6 +426,7 @@ impl PaneUi for PropulsionPane {
                                         &system,
                                         &mut self.pending_target,
                                         blink,
+                                        behavior.pulse_durations,
                                         &plan,
                                     );
                                 });
@@ -460,7 +464,13 @@ impl PaneUi for PropulsionPane {
                 Vec2::new(n, n),
             );
             ui.vertical_centered(|ui| {
-                self.draw_frame(ui, &system, square, [false; VALVE_COUNT]);
+                self.draw_frame(
+                    ui,
+                    &system,
+                    square,
+                    [false; VALVE_COUNT],
+                    behavior.pulse_durations,
+                );
             });
         }
     }

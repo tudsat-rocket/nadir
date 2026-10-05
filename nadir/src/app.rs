@@ -422,12 +422,19 @@ impl eframe::App for App {
         let settings = self.settings.settings();
         self.shared_plot_state.line_width = settings.plot_line_width;
 
+        let settings = self.settings.settings();
+        self.shared_plot_state.line_width = settings.plot_line_width;
+
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
             // The fallback is never read; nothing outside `View::System` draws through this.
             source: active_source.clone().unwrap_or_else(|| self.live.clone()),
             active_view: self.active_view,
             position_source: &mut self.position_source,
+            // The settings view keeps them in range, but a hand-edited file need not.
+            pulse_durations: settings
+                .pulse_durations
+                .map(|secs| secs.clamp(0.0, MAX_PULSE_DURATION_SECS)),
         };
 
         if let View::System { system_id, .. } = self.active_view

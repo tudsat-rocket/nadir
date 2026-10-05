@@ -8,6 +8,7 @@ use nadir_core::{LinkId, Settings};
 use eframe::egui;
 
 use crate::colors::{COLOR_INDICATOR_LIMITS, readable};
+use crate::panes::MAX_PULSE_DURATION_SECS;
 use crate::widgets::column_header;
 
 /// What kind of endpoint a link is, separated from its address so the two can be edited apart.
@@ -121,6 +122,9 @@ impl SettingsView {
 
                 ui.add_space(15.0);
                 self.appearance_ui(ui);
+
+                ui.add_space(15.0);
+                self.valves_ui(ui);
 
                 ui.add_space(15.0);
                 let links_ok = links.is_ok();
@@ -261,6 +265,24 @@ impl SettingsView {
                     .speed(0.05)
                     .max_decimals(2),
             );
+        });
+    }
+
+    fn valves_ui(&mut self, ui: &mut egui::Ui) {
+        column_header(ui, "🚰 VALVES");
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Pulse durations");
+            for secs in &mut self.settings.pulse_durations {
+                ui.add(
+                    egui::DragValue::new(secs)
+                        .range(0.05..=MAX_PULSE_DURATION_SECS)
+                        .speed(0.05)
+                        .max_decimals(2)
+                        .suffix(" s"),
+                );
+            }
         });
     }
 

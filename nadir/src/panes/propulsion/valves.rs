@@ -14,17 +14,10 @@ use crate::colors::{
 use crate::widgets::Hazard;
 
 use super::rocket::{self, ValveReading};
-use super::{
-    MAX_PULSE_DURATION_SECS, SERVO_COUNT, SERVOS, VALVE_COUNT, VALVE_LATCH_EPS, VALVES, Valve,
-    ValveKind,
-};
+use super::{SERVO_COUNT, SERVOS, VALVE_COUNT, VALVE_LATCH_EPS, VALVES, Valve, ValveKind};
 
 // Every valve, plus one cell holding all servos.
 const CELL_COUNT: usize = VALVE_COUNT + 1;
-
-pub(super) const PULSE_DURATIONS: [(f32, &str); 3] = [(0.2, "0.2s"), (1.0, "1s"), (5.0, "5s")];
-
-const _: () = assert!(PULSE_DURATIONS[2].0 <= MAX_PULSE_DURATION_SECS);
 
 const GAP: f32 = 3.0;
 const CELL_GAP: Vec2 = Vec2::new(12.0, 4.0);
@@ -134,6 +127,7 @@ pub(super) fn grid(
     system: &System,
     pending: &mut [Option<f32>; VALVE_COUNT + SERVO_COUNT],
     blink: [bool; VALVE_COUNT],
+    pulse_durations: [f32; 3],
     plan: &Plan,
 ) {
     egui::ScrollArea::vertical()
@@ -146,7 +140,7 @@ pub(super) fn grid(
                 .show(ui, |ui| {
                     let (valves, servo_pending) = pending.split_at_mut(VALVE_COUNT);
                     for (i, blink) in blink.into_iter().enumerate() {
-                        knob(ui, system, i, &mut valves[i], blink, plan);
+                        knob(ui, system, i, &mut valves[i], blink, pulse_durations, plan);
                         if (i + 1).is_multiple_of(plan.cols) {
                             ui.end_row();
                         }
@@ -165,6 +159,7 @@ fn knob(
     index: usize,
     pending: &mut Option<f32>,
     blink: bool,
+    pulse_durations: [f32; 3],
     plan: &Plan,
 ) {
     let Valve {
@@ -229,7 +224,7 @@ fn knob(
         reported(ui, dial, &font, reading);
     }
 
-    open_group(ui, system, id, commanded, group);
+    open_group(ui, system, id, commanded, pulse_durations, group);
 }
 
 fn name(ui: &mut egui::Ui, label: &str, color: Color32, rect: Rect) {
@@ -272,7 +267,14 @@ fn close_button(
     }
 }
 
-fn open_group(ui: &mut egui::Ui, system: &System, id: ValveId, commanded: Option<f32>, rect: Rect) {
+fn open_group(
+    ui: &mut egui::Ui,
+    system: &System,
+    id: ValveId,
+    commanded: Option<f32>,
+    pulse_durations: [f32; 3],
+    rect: Rect,
+) {
     ui.painter().add(Shape::rect_stroke(
         rect,
         CornerRadius::same(2),
@@ -296,12 +298,13 @@ fn open_group(ui: &mut egui::Ui, system: &System, id: ValveId, commanded: Option
     ui.style_mut().visuals.override_text_color = None;
 
     let size = Vec2::new((inner.width() - 2.0 * GAP) / 3.0, PULSE_H);
-    for (i, (secs, text)) in PULSE_DURATIONS.into_iter().enumerate() {
+    for (i, secs) in pulse_durations.into_iter().enumerate() {
         let min = Pos2::new(
             inner.left() + i as f32 * (size.x + GAP),
             open_rect.bottom() + GAP,
         );
-        let button = label_button(text, PULSE_FONT, size);
+        let text = format!("{secs}s");
+        let button = label_button(&text, PULSE_FONT, size);
         let button = ui.put(Rect::from_min_size(min, size), button);
         if Hazard::confirm(ui, &button, system) {
             system.do_pulse_valve(id, secs);

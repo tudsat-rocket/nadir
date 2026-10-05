@@ -32,11 +32,11 @@ pub use navigation::NavigationPane;
 pub use params::ParamsPane;
 pub use plot::PlotPane;
 pub use preflight::PreflightPane;
-pub use propulsion::PropulsionPane;
 #[cfg(test)]
 pub(crate) use propulsion::fluid_colors as propulsion_fluid_colors;
 #[cfg(test)]
 pub(crate) use propulsion::valve_colors as propulsion_valve_colors;
+pub use propulsion::{MAX_PULSE_DURATION_SECS, PropulsionPane};
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
@@ -81,6 +81,7 @@ pub struct TreeBehavior<'a> {
     pub active_view: View,
     pub shared_plot_state: &'a mut SharedPlotState,
     pub position_source: &'a mut PositionSource,
+    pub pulse_durations: [f32; 3],
 }
 
 // Links, Horizon and Status are not Pane variants: they live in the fixed status bar (see app.rs)

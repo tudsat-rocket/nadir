@@ -123,9 +123,11 @@ pub fn draw_hybrid(
     system: &System,
     square: Rect,
     mode: &mut ValveInteractionMode,
-    pulse_secs: &mut f32,
+    pulse: &mut usize,
+    pulse_durations: [f32; 3],
     blink: [bool; super::VALVE_COUNT],
 ) {
+    let pulse_secs = pulse_durations[*pulse];
     let visuals = ui.visuals().clone();
     let n2_color = readable(N2_COLOR, &visuals);
     let n2o_color = readable(N2O_COLOR, &visuals);
@@ -443,7 +445,7 @@ pub fn draw_hybrid(
         ValveId::Pressurization,
         false,
         *mode,
-        *pulse_secs,
+        pulse_secs,
     );
     draw_valve_label(
         pos2(center_x, valve_top_cy),
@@ -513,7 +515,7 @@ pub fn draw_hybrid(
         ValveId::PressurantVent,
         true,
         *mode,
-        *pulse_secs,
+        pulse_secs,
     );
     draw_valve_label(
         pos2(vent_valve_cx, junction_cy),
@@ -573,7 +575,7 @@ pub fn draw_hybrid(
         ValveId::OxidizerVent,
         true,
         *mode,
-        *pulse_secs,
+        pulse_secs,
     );
     draw_valve_label(
         pos2(tank_vent_valve_cx, tank_vent_y),
@@ -708,7 +710,7 @@ pub fn draw_hybrid(
         ValveId::OxidizerFill,
         true,
         *mode,
-        *pulse_secs,
+        pulse_secs,
     );
     draw_valve_label(
         pos2(bot_vent_valve_cx, tank_vent_bot_y),
@@ -911,7 +913,7 @@ pub fn draw_hybrid(
                 fill_id,
                 false,
                 *mode,
-                *pulse_secs,
+                pulse_secs,
             );
         }
         draw_valve_label(
@@ -967,7 +969,7 @@ pub fn draw_hybrid(
                 vent_id,
                 false,
                 *mode,
-                *pulse_secs,
+                pulse_secs,
             );
         }
         draw_valve_label(
@@ -1014,7 +1016,7 @@ pub fn draw_hybrid(
         ValveId::Main,
         false,
         *mode,
-        *pulse_secs,
+        pulse_secs,
     );
     draw_valve_label(
         pos2(center_x, valve_bot_cy),
@@ -1073,7 +1075,7 @@ pub fn draw_hybrid(
     painter.add(Shape::Path(PathShape::closed_line(chamber_path, stroke)));
     draw_tank_label(cc_interior, 2, cc_color);
 
-    draw_valve_mode_toggle(ui, strip, mode, pulse_secs);
+    draw_valve_mode_toggle(ui, strip, mode, pulse, pulse_durations);
 }
 
 // Bottom-left selector that switches what a click on a valve does, bottom-right
@@ -1083,7 +1085,8 @@ fn draw_valve_mode_toggle(
     ui: &egui::Ui,
     square: Rect,
     mode: &mut ValveInteractionMode,
-    pulse_secs: &mut f32,
+    pulse: &mut usize,
+    pulse_durations: [f32; 3],
 ) {
     let font = FontId::proportional(12.0);
     // Wide enough for the longest label, so a stack's buttons line up.
@@ -1162,12 +1165,14 @@ fn draw_valve_mode_toggle(
         .show(ui.ctx(), |ui| {
             stack(ui);
 
-            let durations = super::valves::PULSE_DURATIONS;
-            let button_size = size(&durations.map(|(_, label)| label));
-            for (secs, label) in durations.into_iter().rev() {
-                let button = outline((*pulse_secs - secs).abs() < f32::EPSILON, label);
-                if ui.add_sized(button_size, button).clicked() {
-                    *pulse_secs = secs;
+            let labels = pulse_durations.map(|secs| format!("{secs}s"));
+            let button_size = size(&labels.each_ref().map(String::as_str));
+            for (i, label) in labels.iter().enumerate().rev() {
+                if ui
+                    .add_sized(button_size, outline(*pulse == i, label))
+                    .clicked()
+                {
+                    *pulse = i;
                 }
             }
         });
