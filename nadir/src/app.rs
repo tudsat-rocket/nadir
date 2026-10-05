@@ -2,16 +2,16 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use egui::{Color32, Key, Margin, Modifiers};
-use egui_tiles::{Linear, LinearDir, TileId, Tiles};
+use egui_tiles::{Container, Grid, GridLayout, Linear, LinearDir, Tabs, Tile, TileId, Tiles};
 use nadir_core::mav::{Event, V2};
-use nadir_core::settings::Layout;
+use nadir_core::settings::{Layout, LayoutNode, LayoutRef, SavedLayout};
 use rapid_dialect::Rapid;
 use rapid_dialect::rapid::enums::{MavCmd, MavResult};
 
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
 use crate::shell::{Sidebar, SidebarAction, StatusBar};
-use crate::views::{LIVE, Overview, SettingsView, SourceId, View};
+use crate::views::{LIVE, LayoutAction, Overview, SettingsView, SourceId, View};
 use crate::widgets::SharedPlotState;
 
 pub struct App {
@@ -32,7 +32,6 @@ pub struct App {
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
     panes: PaneIds,
-    layout: Layout,
     sidebar: Sidebar,
     status_bar: StatusBar,
     overview: Overview,
@@ -113,7 +112,7 @@ impl App {
             #[cfg(not(feature = "profiling"))]
             profiler: None,
         };
-        let root = panes.arrange(&mut tiles, settings.layout);
+        let root = panes.root(&mut tiles, &settings.default_layout, &settings.layouts);
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
 
@@ -134,7 +133,6 @@ impl App {
                 }),
             tiles_tree,
             panes,
-            layout: settings.layout,
             logs: BTreeMap::new(),
             next_source_id: LIVE + 1,
             #[cfg(target_arch = "wasm32")]
@@ -256,6 +254,14 @@ impl App {
         });
     }
 
+    fn restore_layout(&mut self, layout: &LayoutRef) {
+        self.panes.rearrange(
+            &mut self.tiles_tree,
+            layout,
+            &self.settings.settings().layouts,
+        );
+    }
+
     fn close_log(&mut self, id: SourceId) {
         if let Some(source) = self.logs.remove(&id) {
             // The loader holds its own handle, so dropping ours does not stop it on its own.
@@ -368,10 +374,12 @@ impl eframe::App for App {
             &self.logs,
             &mut self.active_view,
             &mut self.logs_shown,
+            &self.settings.settings().layouts,
         );
         match action {
             Some(SidebarAction::OpenLog) => self.pick_log(&ctx),
             Some(SidebarAction::CloseLog(id)) => self.close_log(id),
+            Some(SidebarAction::RestoreLayout(layout)) => self.restore_layout(&layout),
             None => {}
         }
 
@@ -403,10 +411,6 @@ impl eframe::App for App {
 
         let settings = self.settings.settings();
         self.shared_plot_state.line_width = settings.plot_line_width;
-        if settings.layout != self.layout {
-            self.layout = settings.layout;
-            self.panes.rearrange(&mut self.tiles_tree, self.layout);
-        }
 
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
@@ -458,6 +462,7 @@ impl eframe::App for App {
         });
 
         let mut to_open = None;
+        let mut layout_action = None;
 
         egui::CentralPanel::default()
             .frame(egui::Frame {
@@ -475,12 +480,22 @@ impl eframe::App for App {
                     to_open = self.overview.ui(ui, &links, &self.logs);
                 }
                 View::Settings => {
-                    self.settings.ui(ui);
+                    layout_action = self.settings.ui(ui);
                 }
                 View::System { .. } => {
                     self.tiles_tree.ui(&mut behavior, ui);
                 }
             });
+
+        match layout_action {
+            Some(LayoutAction::Restore(layout)) => self.restore_layout(&layout),
+            Some(LayoutAction::SaveCurrent(name)) => {
+                if let Some(root) = self.panes.snapshot(&self.tiles_tree) {
+                    self.settings.store_layout(name, root);
+                }
+            }
+            None => {}
+        }
 
         // Only ever `Some` where there is a log directory to list, which a browser has not.
         #[cfg(not(target_arch = "wasm32"))]
@@ -591,8 +606,204 @@ impl PaneIds {
         }
     }
 
+    /// A saved layout that has since been deleted falls back to the platform's template.
+    fn root(&self, tiles: &mut Tiles<Pane>, layout: &LayoutRef, saved: &[SavedLayout]) -> TileId {
+        match layout {
+            LayoutRef::Template(template) => self.arrange(tiles, *template),
+            LayoutRef::Saved(name) => match saved.iter().find(|saved| saved.name == *name) {
+                Some(saved) => self.build(tiles, &saved.root),
+                None => self.arrange(tiles, Layout::default()),
+            },
+        }
+    }
+
+    /// Names that identify the panes in a saved layout, so they must not change.
+    fn named(&self) -> impl Iterator<Item = (&'static str, TileId)> {
+        [
+            ("map", self.map),
+            ("propulsion", self.propulsion),
+            ("preflight", self.preflight),
+            ("navigation", self.navigation),
+            ("mission", self.mission),
+            ("state_estimator", self.state),
+            ("sensors", self.sensors),
+            ("thermals", self.thermals),
+            ("plot", self.plot),
+            ("messages", self.messages),
+            ("commands", self.commands),
+            ("params", self.params),
+            ("can_probe", self.can),
+            ("flight_logs", self.flight_log),
+        ]
+        .into_iter()
+        .chain(self.profiler.map(|id| ("profiler", id)))
+    }
+
+    fn snapshot(&self, tree: &egui_tiles::Tree<Pane>) -> Option<LayoutNode> {
+        self.node(&tree.tiles, tree.root?)
+    }
+
+    fn node(&self, tiles: &Tiles<Pane>, id: TileId) -> Option<LayoutNode> {
+        let nodes = |children: &mut dyn Iterator<Item = &TileId>| -> Vec<(TileId, LayoutNode)> {
+            children
+                .filter_map(|child| Some((*child, self.node(tiles, *child)?)))
+                .collect()
+        };
+
+        Some(match tiles.get(id)? {
+            Tile::Pane(_) => {
+                let (name, _) = self.named().find(|(_, pane)| *pane == id)?;
+                LayoutNode::Pane {
+                    pane: name.to_owned(),
+                }
+            }
+            Tile::Container(Container::Tabs(tabs)) => {
+                let children = nodes(&mut tabs.children.iter());
+                LayoutNode::Tabs {
+                    active: tabs
+                        .active
+                        .and_then(|active| children.iter().position(|(id, _)| *id == active)),
+                    children: children.into_iter().map(|(_, node)| node).collect(),
+                }
+            }
+            Tile::Container(Container::Linear(linear)) => {
+                let children = nodes(&mut linear.children.iter());
+                LayoutNode::Linear {
+                    horizontal: linear.dir == LinearDir::Horizontal,
+                    shares: children.iter().map(|(id, _)| linear.shares[*id]).collect(),
+                    children: children.into_iter().map(|(_, node)| node).collect(),
+                }
+            }
+            Tile::Container(Container::Grid(grid)) => LayoutNode::Grid {
+                columns: match grid.layout {
+                    GridLayout::Columns(columns) => Some(columns),
+                    GridLayout::Auto => None,
+                },
+                col_shares: grid.col_shares.clone(),
+                row_shares: grid.row_shares.clone(),
+                children: nodes(&mut grid.children())
+                    .into_iter()
+                    .map(|(_, node)| node)
+                    .collect(),
+            },
+        })
+    }
+
+    /// Panes the layout does not mention, such as ones added since it was saved, join the first
+    /// tab group so none becomes unreachable.
+    fn build(&self, tiles: &mut Tiles<Pane>, node: &LayoutNode) -> TileId {
+        let mut placed = Vec::new();
+        let root = self.build_node(tiles, node, &mut placed);
+        let missing: Vec<_> = self
+            .named()
+            .map(|(_, id)| id)
+            .filter(|id| !placed.contains(id))
+            .collect();
+
+        let Some(root) = root else {
+            return tiles.insert_tab_tile(missing);
+        };
+        if missing.is_empty() {
+            return root;
+        }
+
+        match Self::first_tabs(tiles, root) {
+            Some(tabs) => {
+                if let Some(Tile::Container(tabs)) = tiles.get_mut(tabs) {
+                    for id in missing {
+                        tabs.add_child(id);
+                    }
+                }
+                root
+            }
+            None => tiles.insert_tab_tile([root].into_iter().chain(missing).collect()),
+        }
+    }
+
+    /// Skips unknown and repeated panes, and containers left empty by that.
+    fn build_node(
+        &self,
+        tiles: &mut Tiles<Pane>,
+        node: &LayoutNode,
+        placed: &mut Vec<TileId>,
+    ) -> Option<TileId> {
+        let mut build_all = |children: &[LayoutNode]| -> Vec<Option<TileId>> {
+            children
+                .iter()
+                .map(|child| self.build_node(tiles, child, placed))
+                .collect()
+        };
+
+        let container: Container = match node {
+            LayoutNode::Pane { pane } => {
+                let (_, id) = self.named().find(|(name, _)| name == pane)?;
+                if placed.contains(&id) {
+                    return None;
+                }
+                placed.push(id);
+                return Some(id);
+            }
+            LayoutNode::Tabs { active, children } => {
+                let built = build_all(children);
+                let mut tabs = Tabs::new(built.iter().flatten().copied().collect());
+                if let Some(active) = active.and_then(|i| built.get(i).copied().flatten()) {
+                    tabs.active = Some(active);
+                }
+                tabs.into()
+            }
+            LayoutNode::Linear {
+                horizontal,
+                shares,
+                children,
+            } => {
+                let built = build_all(children);
+                let dir = if *horizontal {
+                    LinearDir::Horizontal
+                } else {
+                    LinearDir::Vertical
+                };
+                let mut linear = Linear::new(dir, built.iter().flatten().copied().collect());
+                for (id, share) in built.iter().zip(shares) {
+                    if let Some(id) = id {
+                        linear.shares.set_share(*id, *share);
+                    }
+                }
+                linear.into()
+            }
+            LayoutNode::Grid {
+                columns,
+                col_shares,
+                row_shares,
+                children,
+            } => {
+                let mut grid = Grid::new(build_all(children).into_iter().flatten().collect());
+                grid.layout = columns.map_or(GridLayout::Auto, GridLayout::Columns);
+                grid.col_shares.clone_from(col_shares);
+                grid.row_shares.clone_from(row_shares);
+                grid.into()
+            }
+        };
+
+        (container.num_children() > 0).then(|| tiles.insert_container(container))
+    }
+
+    fn first_tabs(tiles: &Tiles<Pane>, id: TileId) -> Option<TileId> {
+        match tiles.get(id)? {
+            Tile::Pane(_) => None,
+            Tile::Container(Container::Tabs(_)) => Some(id),
+            Tile::Container(container) => container
+                .children()
+                .find_map(|child| Self::first_tabs(tiles, *child)),
+        }
+    }
+
     /// Replaces every container, so splits and moves made by hand are lost with the old layout.
-    fn rearrange(&self, tree: &mut egui_tiles::Tree<Pane>, layout: Layout) {
+    fn rearrange(
+        &self,
+        tree: &mut egui_tiles::Tree<Pane>,
+        layout: &LayoutRef,
+        saved: &[SavedLayout],
+    ) {
         let containers: Vec<_> = tree
             .tiles
             .iter()
@@ -603,7 +814,7 @@ impl PaneIds {
             tree.tiles.remove(id);
         }
 
-        tree.root = Some(self.arrange(&mut tree.tiles, layout));
+        tree.root = Some(self.root(&mut tree.tiles, layout, saved));
     }
 }
 

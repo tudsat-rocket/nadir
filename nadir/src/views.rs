@@ -1,7 +1,7 @@
 mod overview;
 mod settings;
 pub use overview::Overview;
-pub use settings::SettingsView;
+pub use settings::{LAYOUT_TEMPLATES, LayoutAction, SettingsView};
 
 /// Identifies one open data source: [`LIVE`] is always the links, the rest are telemetry logs.
 pub type SourceId = u32;

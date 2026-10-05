@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use nadir_core::settings::{LayoutRef, SavedLayout};
 use nadir_core::{Origin, Source};
 
 use eframe::egui;
@@ -7,7 +8,7 @@ use egui::{Align, Button, Color32, Layout, RichText};
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
 use crate::colors::{COLOR_INDICATOR_LIMITS, readable};
-use crate::views::{LIVE, SourceId, View};
+use crate::views::{LAYOUT_TEMPLATES, LIVE, SourceId, View};
 use crate::widgets::{
     ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
     state_of_charge,
@@ -23,6 +24,7 @@ const COLLAPSED_WIDTH: f32 = 37.0;
 pub enum SidebarAction {
     OpenLog,
     CloseLog(SourceId),
+    RestoreLayout(LayoutRef),
 }
 
 /// Left strip listing the known systems and the global navigation: which view is active, whether the
@@ -52,6 +54,7 @@ impl Sidebar {
         logs: &BTreeMap<SourceId, Source>,
         active_view: &mut View,
         logs_shown: &mut bool,
+        layouts: &[SavedLayout],
     ) -> Option<SidebarAction> {
         let collapsed = self.collapsed;
         let mut action = None;
@@ -162,6 +165,21 @@ impl Sidebar {
                             "🔧 Preferences"
                         },
                     );
+
+                    ui.menu_button(if collapsed { "⊞" } else { "⊞ Layout" }, |ui| {
+                        let templates = LAYOUT_TEMPLATES
+                            .iter()
+                            .map(|(template, label)| (LayoutRef::Template(*template), *label));
+                        let saved = layouts.iter().map(|saved| {
+                            (LayoutRef::Saved(saved.name.clone()), saved.name.as_str())
+                        });
+
+                        for (layout, label) in templates.chain(saved) {
+                            if ui.button(label).clicked() {
+                                action = Some(SidebarAction::RestoreLayout(layout));
+                            }
+                        }
+                    });
 
                     ui.selectable_value(
                         active_view,

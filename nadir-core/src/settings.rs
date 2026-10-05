@@ -13,7 +13,8 @@ pub struct Settings {
     pub mute_uplink_by_default: bool,
     pub map: MapSettings,
     pub theme: Theme,
-    pub layout: Layout,
+    pub default_layout: LayoutRef,
+    pub layouts: Vec<SavedLayout>,
     pub plot_line_width: f32,
     pub pulse_durations: [f32; 3],
 }
@@ -26,7 +27,8 @@ impl Default for Settings {
             mute_uplink_by_default: false,
             map: MapSettings::default(),
             theme: Theme::default(),
-            layout: Layout::default(),
+            default_layout: LayoutRef::Template(Layout::default()),
+            layouts: Vec::new(),
             plot_line_width: 1.0,
             pulse_durations: [0.2, 1.0, 5.0],
         }
@@ -62,6 +64,44 @@ impl Default for Layout {
             Self::Grid
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutRef {
+    Template(Layout),
+    Saved(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedLayout {
+    pub name: String,
+    pub root: LayoutNode,
+}
+
+/// A tile tree with the panes named rather than holding them, so it can be stored and rebuilt.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LayoutNode {
+    Pane {
+        pane: String,
+    },
+    Tabs {
+        active: Option<usize>,
+        children: Vec<LayoutNode>,
+    },
+    Linear {
+        horizontal: bool,
+        shares: Vec<f32>,
+        children: Vec<LayoutNode>,
+    },
+    Grid {
+        /// `None` lets the grid pick its column count from the available space.
+        columns: Option<usize>,
+        col_shares: Vec<f32>,
+        row_shares: Vec<f32>,
+        children: Vec<LayoutNode>,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -238,6 +278,40 @@ mod tests {
 
         let read: Settings = toml::from_str(&text).unwrap();
         assert_eq!(read.theme, Theme::HighContrast);
+    }
+
+    #[test]
+    fn a_saved_layout_round_trips() {
+        let pane = |name: &str| LayoutNode::Pane {
+            pane: name.to_owned(),
+        };
+        let settings = Settings {
+            default_layout: LayoutRef::Saved("launch".to_owned()),
+            layouts: vec![SavedLayout {
+                name: "launch".to_owned(),
+                root: LayoutNode::Linear {
+                    horizontal: true,
+                    shares: vec![2.0, 1.0],
+                    children: vec![
+                        LayoutNode::Tabs {
+                            active: Some(1),
+                            children: vec![pane("map"), pane("propulsion")],
+                        },
+                        LayoutNode::Grid {
+                            columns: None,
+                            col_shares: vec![1.0],
+                            row_shares: vec![1.0, 1.0],
+                            children: vec![pane("plot"), pane("messages")],
+                        },
+                    ],
+                },
+            }],
+            ..Settings::default()
+        };
+
+        let text = toml::to_string_pretty(&settings).unwrap();
+        let read: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(read, settings, "{text}");
     }
 
     #[test]
