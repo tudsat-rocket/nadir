@@ -13,6 +13,7 @@ pub struct Settings {
     pub mute_uplink_by_default: bool,
     pub map: MapSettings,
     pub theme: Theme,
+    pub layout: Layout,
     pub plot_line_width: f32,
     pub pulse_durations: [f32; 3],
 }
@@ -25,6 +26,7 @@ impl Default for Settings {
             mute_uplink_by_default: false,
             map: MapSettings::default(),
             theme: Theme::default(),
+            layout: Layout::default(),
             plot_line_width: 1.0,
             pulse_durations: [0.2, 1.0, 5.0],
         }
@@ -41,6 +43,25 @@ pub enum Theme {
     Light,
     /// The light theme, retuned against WCAG 2.2 level AA.
     HighContrast,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Layout {
+    Grid,
+    Columns,
+    /// One large tab group, with two stacked beside it.
+    Focus,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        if cfg!(target_os = "android") {
+            Self::Columns
+        } else {
+            Self::Grid
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use egui::{Color32, Key, Margin, Modifiers};
+use egui_tiles::{Linear, LinearDir, TileId, Tiles};
 use nadir_core::mav::{Event, V2};
+use nadir_core::settings::Layout;
 use rapid_dialect::Rapid;
 use rapid_dialect::rapid::enums::{MavCmd, MavResult};
 
@@ -29,6 +31,8 @@ pub struct App {
     log_collector: egui_tracing::tracing::collector::EventCollector,
     toasts: egui_notify::Toasts,
     tiles_tree: egui_tiles::Tree<Pane>,
+    panes: PaneIds,
+    layout: Layout,
     sidebar: Sidebar,
     status_bar: StatusBar,
     overview: Overview,
@@ -86,54 +90,30 @@ impl App {
 
         let mut tiles = egui_tiles::Tiles::default();
 
-        let map = tiles.insert_pane(Pane::Map(Box::new(MapPane::new(
-            ctx,
-            settings.map.mapbox_access_token.clone(),
-        ))));
-        let propulsion = tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx)));
-        let preflight = tiles.insert_pane(Pane::Preflight(PreflightPane::new(ctx)));
-        let navigation = tiles.insert_pane(Pane::Navigation(NavigationPane::new(ctx)));
-        let mission = tiles.insert_pane(Pane::Placeholder("Mission".to_owned()));
-        let state = tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx)));
-        let sensors = tiles.insert_pane(Pane::Sensors(SensorsPane::new(ctx)));
-        let thermals = tiles.insert_pane(Pane::Thermals(ThermalsPane::new(ctx)));
-        let plot = tiles.insert_pane(Pane::Plot(PlotPane::new(ctx)));
-        let messages = tiles.insert_pane(Pane::Messages(MessagesPane::new(ctx)));
-        let commands = tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx)));
-        let params = tiles.insert_pane(Pane::Params(ParamsPane::new(ctx)));
-        let can = tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx)));
-        let flight_log = tiles.insert_pane(Pane::FlightLogs(LogsPane::new(ctx)));
-
-        #[cfg(feature = "profiling")]
-        let profiler = Some(tiles.insert_pane(Pane::Profiler));
-        #[cfg(not(feature = "profiling"))]
-        let profiler: Option<egui_tiles::TileId> = None;
-
-        // A tablet fits two panes side by side, not a grid of four tab bars.
-        let root = if cfg!(target_os = "android") {
-            let left = vec![map, preflight, propulsion, navigation, mission, flight_log];
-            let right: Vec<_> = [
-                state, sensors, thermals, plot, messages, commands, params, can,
-            ]
-            .into_iter()
-            .chain(profiler)
-            .collect();
-
-            let cells = [left, right].map(|group| tiles.insert_tab_tile(group));
-            tiles.insert_horizontal_tile(cells.to_vec())
-        } else {
-            let top_left = vec![propulsion, params];
-            let top_right = vec![state, preflight, navigation, mission];
-            let bottom_left = vec![map, messages, commands, flight_log];
-            let bottom_right: Vec<_> = [sensors, thermals, plot, can]
-                .into_iter()
-                .chain(profiler)
-                .collect();
-
-            let cells = [top_left, top_right, bottom_left, bottom_right]
-                .map(|group| tiles.insert_tab_tile(group));
-            tiles.insert_grid_tile(cells.to_vec())
+        let panes = PaneIds {
+            map: tiles.insert_pane(Pane::Map(Box::new(MapPane::new(
+                ctx,
+                settings.map.mapbox_access_token.clone(),
+            )))),
+            propulsion: tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx))),
+            preflight: tiles.insert_pane(Pane::Preflight(PreflightPane::new(ctx))),
+            navigation: tiles.insert_pane(Pane::Navigation(NavigationPane::new(ctx))),
+            mission: tiles.insert_pane(Pane::Placeholder("Mission".to_owned())),
+            state: tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx))),
+            sensors: tiles.insert_pane(Pane::Sensors(SensorsPane::new(ctx))),
+            thermals: tiles.insert_pane(Pane::Thermals(ThermalsPane::new(ctx))),
+            plot: tiles.insert_pane(Pane::Plot(PlotPane::new(ctx))),
+            messages: tiles.insert_pane(Pane::Messages(MessagesPane::new(ctx))),
+            commands: tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx))),
+            params: tiles.insert_pane(Pane::Params(ParamsPane::new(ctx))),
+            can: tiles.insert_pane(Pane::CanProbe(CanProbePane::new(ctx))),
+            flight_log: tiles.insert_pane(Pane::FlightLogs(LogsPane::new(ctx))),
+            #[cfg(feature = "profiling")]
+            profiler: Some(tiles.insert_pane(Pane::Profiler)),
+            #[cfg(not(feature = "profiling"))]
+            profiler: None,
         };
+        let root = panes.arrange(&mut tiles, settings.layout);
 
         let tiles_tree = egui_tiles::Tree::new("my_tree", root, tiles);
 
@@ -153,6 +133,8 @@ impl App {
                     color: Color32::from_black_alpha(160),
                 }),
             tiles_tree,
+            panes,
+            layout: settings.layout,
             logs: BTreeMap::new(),
             next_source_id: LIVE + 1,
             #[cfg(target_arch = "wasm32")]
@@ -421,9 +403,10 @@ impl eframe::App for App {
 
         let settings = self.settings.settings();
         self.shared_plot_state.line_width = settings.plot_line_width;
-
-        let settings = self.settings.settings();
-        self.shared_plot_state.line_width = settings.plot_line_width;
+        if settings.layout != self.layout {
+            self.layout = settings.layout;
+            self.panes.rearrange(&mut self.tiles_tree, self.layout);
+        }
 
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
@@ -523,6 +506,104 @@ impl eframe::App for App {
         });
         self.toasts.show(&ctx);
         ctx.global_style_mut(|s| s.visuals.widgets.noninteractive.bg_fill = original_bg);
+    }
+}
+
+/// The panes of the system view, kept so they can be regrouped without losing their state.
+struct PaneIds {
+    map: TileId,
+    propulsion: TileId,
+    preflight: TileId,
+    navigation: TileId,
+    mission: TileId,
+    state: TileId,
+    sensors: TileId,
+    thermals: TileId,
+    plot: TileId,
+    messages: TileId,
+    commands: TileId,
+    params: TileId,
+    can: TileId,
+    flight_log: TileId,
+    profiler: Option<TileId>,
+}
+
+impl PaneIds {
+    fn arrange(&self, tiles: &mut Tiles<Pane>, layout: Layout) -> TileId {
+        let Self {
+            map,
+            propulsion,
+            preflight,
+            navigation,
+            mission,
+            state,
+            sensors,
+            thermals,
+            plot,
+            messages,
+            commands,
+            params,
+            can,
+            flight_log,
+            profiler,
+        } = *self;
+
+        match layout {
+            Layout::Grid => {
+                let top_left = vec![propulsion, params];
+                let top_right = vec![state, preflight, navigation, mission];
+                let bottom_left = vec![map, messages, commands, flight_log];
+                let bottom_right: Vec<_> = [sensors, thermals, plot, can]
+                    .into_iter()
+                    .chain(profiler)
+                    .collect();
+
+                let cells = [top_left, top_right, bottom_left, bottom_right]
+                    .map(|group| tiles.insert_tab_tile(group));
+                tiles.insert_grid_tile(cells.to_vec())
+            }
+            Layout::Columns => {
+                let left = vec![map, preflight, propulsion, navigation, mission, flight_log];
+                let right: Vec<_> = [
+                    state, sensors, thermals, plot, messages, commands, params, can,
+                ]
+                .into_iter()
+                .chain(profiler)
+                .collect();
+
+                let cells = [left, right].map(|group| tiles.insert_tab_tile(group));
+                tiles.insert_horizontal_tile(cells.to_vec())
+            }
+            Layout::Focus => {
+                let main = tiles.insert_tab_tile(vec![
+                    propulsion, map, preflight, navigation, mission, params,
+                ]);
+                let top = tiles.insert_tab_tile(vec![state, sensors, thermals, plot]);
+                let bottom = tiles.insert_tab_tile(
+                    [messages, commands, can, flight_log]
+                        .into_iter()
+                        .chain(profiler)
+                        .collect(),
+                );
+                let side = tiles.insert_vertical_tile(vec![top, bottom]);
+                tiles.insert_container(Linear::new_binary(LinearDir::Horizontal, [main, side], 0.6))
+            }
+        }
+    }
+
+    /// Replaces every container, so splits and moves made by hand are lost with the old layout.
+    fn rearrange(&self, tree: &mut egui_tiles::Tree<Pane>, layout: Layout) {
+        let containers: Vec<_> = tree
+            .tiles
+            .iter()
+            .filter(|(_, tile)| tile.is_container())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in containers {
+            tree.tiles.remove(id);
+        }
+
+        tree.root = Some(self.arrange(&mut tree.tiles, layout));
     }
 }
 

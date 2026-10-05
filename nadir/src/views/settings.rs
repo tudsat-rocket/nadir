@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use nadir_core::settings::Theme;
+use nadir_core::settings::{Layout, Theme};
 use nadir_core::{LinkId, Settings};
 
 use eframe::egui;
@@ -253,6 +253,19 @@ impl SettingsView {
                 if response.clicked() {
                     Self::apply_theme(ui.ctx(), theme);
                 }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Layout");
+
+            for (layout, label) in [
+                (Layout::Grid, "Grid"),
+                (Layout::Columns, "Columns"),
+                (Layout::Focus, "Focus"),
+            ] {
+                ui.selectable_value(&mut self.settings.layout, layout, label);
             }
         });
 
