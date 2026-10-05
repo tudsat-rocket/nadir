@@ -19,6 +19,7 @@ mod propulsion;
 mod sensors;
 mod state_estimator;
 mod status;
+mod thermals;
 
 pub use can::CanProbePane;
 pub use commands::CommandsPane;
@@ -39,6 +40,7 @@ pub(crate) use propulsion::valve_colors as propulsion_valve_colors;
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
+pub use thermals::ThermalsPane;
 
 use crate::views::View;
 use crate::widgets::SharedPlotState;
@@ -87,6 +89,7 @@ pub enum Pane {
     Map(Box<MapPane>),
     StateEstimator(StateEstimatorPane),
     Sensors(SensorsPane),
+    Thermals(ThermalsPane),
     Plot(PlotPane),
     Messages(MessagesPane),
     Commands(CommandsPane),
@@ -151,6 +154,7 @@ impl std::fmt::Display for Pane {
             Pane::Map(_) => "Map".into(),
             Pane::StateEstimator(_) => "State Estimator".into(),
             Pane::Sensors(_) => "Sensors".into(),
+            Pane::Thermals(_) => "Thermals".into(),
             Pane::Plot(_) => "Plot".into(),
             Pane::Messages(_) => "Messages".into(),
             Pane::Commands(_) => "Commands".into(),
@@ -218,6 +222,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::Map(p) => p.outer_ui(ui, self),
             Pane::StateEstimator(p) => p.outer_ui(ui, self),
             Pane::Sensors(p) => p.outer_ui(ui, self),
+            Pane::Thermals(p) => p.outer_ui(ui, self),
             Pane::Plot(p) => p.outer_ui(ui, self),
             Pane::Messages(p) => p.outer_ui(ui, self),
             Pane::Commands(p) => p.outer_ui(ui, self),

@@ -96,6 +96,7 @@ impl App {
         let mission = tiles.insert_pane(Pane::Placeholder("Mission".to_owned()));
         let state = tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx)));
         let sensors = tiles.insert_pane(Pane::Sensors(SensorsPane::new(ctx)));
+        let thermals = tiles.insert_pane(Pane::Thermals(ThermalsPane::new(ctx)));
         let plot = tiles.insert_pane(Pane::Plot(PlotPane::new(ctx)));
         let messages = tiles.insert_pane(Pane::Messages(MessagesPane::new(ctx)));
         let commands = tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx)));
@@ -111,10 +112,12 @@ impl App {
         // A tablet fits two panes side by side, not a grid of four tab bars.
         let root = if cfg!(target_os = "android") {
             let left = vec![map, preflight, propulsion, navigation, mission, flight_log];
-            let right: Vec<_> = [state, sensors, plot, messages, commands, params, can]
-                .into_iter()
-                .chain(profiler)
-                .collect();
+            let right: Vec<_> = [
+                state, sensors, thermals, plot, messages, commands, params, can,
+            ]
+            .into_iter()
+            .chain(profiler)
+            .collect();
 
             let cells = [left, right].map(|group| tiles.insert_tab_tile(group));
             tiles.insert_horizontal_tile(cells.to_vec())
@@ -122,7 +125,10 @@ impl App {
             let top_left = vec![propulsion, params];
             let top_right = vec![state, preflight, navigation, mission];
             let bottom_left = vec![map, messages, commands, flight_log];
-            let bottom_right: Vec<_> = [sensors, plot, can].into_iter().chain(profiler).collect();
+            let bottom_right: Vec<_> = [sensors, thermals, plot, can]
+                .into_iter()
+                .chain(profiler)
+                .collect();
 
             let cells = [top_left, top_right, bottom_left, bottom_right]
                 .map(|group| tiles.insert_tab_tile(group));
