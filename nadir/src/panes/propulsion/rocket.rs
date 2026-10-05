@@ -1671,6 +1671,10 @@ fn draw_valve(
     blink_box: bool,
     time: f64,
 ) {
+    let warning = readable(
+        COLOR_INDICATOR_WARNING,
+        &painter.ctx().global_style().visuals,
+    );
     let polygons = valve_glyph_polygons(center, half, horizontal);
     for polygon in &polygons {
         painter.add(Shape::convex_polygon(polygon.clone(), fill, stroke));
@@ -1685,7 +1689,7 @@ fn draw_valve(
             draw_hatching(
                 painter,
                 polygon,
-                COLOR_INDICATOR_WARNING,
+                warning,
                 coverage,
                 hatch_stride * 0.6,
                 None,
@@ -1703,7 +1707,7 @@ fn draw_valve(
             Rect::from_center_size(center, size).expand(4.0),
             CornerRadius::same(2),
             Color32::TRANSPARENT,
-            Stroke::new(2.0_f32, COLOR_INDICATOR_WARNING),
+            Stroke::new(2.0_f32, warning),
             StrokeKind::Outside,
         );
     }

@@ -8,7 +8,9 @@ use mavspec::rust::dialects::common::messages::ServoOutputRaw;
 use nadir_core::System;
 use rapid_dialect::rapid::enums::ValveId;
 
-use crate::colors::{COLOR_INDICATOR_WARNING, blink_on, high_contrast, readable, text_on};
+use crate::colors::{
+    COLOR_INDICATOR_WARNING, blink_on, gauge_fill, gauge_track, high_contrast, readable, text_on,
+};
 use crate::widgets::Hazard;
 
 use super::rocket::{self, ValveReading};
@@ -489,7 +491,7 @@ fn gauge(ui: &egui::Ui, rect: Rect, reading: Option<ValveReading>, blink: bool, 
 
     painter.add(Shape::line(
         arc(center, radius, GAUGE_SWEEP),
-        Stroke::new(width, visuals.widgets.inactive.bg_fill),
+        Stroke::new(width, gauge_track(visuals)),
     ));
 
     let state = reading.and_then(|r| r.state).map(|s| s.clamp(0.0, 1.0));
@@ -498,10 +500,7 @@ fn gauge(ui: &egui::Ui, rect: Rect, reading: Option<ValveReading>, blink: bool, 
     {
         painter.add(Shape::line(
             arc(center, radius, GAUGE_SWEEP * s),
-            Stroke::new(
-                width,
-                readable(COLOR_INDICATOR_WARNING, visuals).gamma_multiply(0.8),
-            ),
+            Stroke::new(width, gauge_fill(visuals)),
         ));
     }
 

@@ -171,6 +171,21 @@ pub fn schematic_wash(visuals: &egui::Visuals, alpha: u8) -> Color32 {
     }
 }
 
+/// The unfilled part of a gauge. The light themes' control fills are at or near the panel colour,
+/// and their line colours are too dark for the warning-orange fill to stand out against.
+pub fn gauge_track(visuals: &egui::Visuals) -> Color32 {
+    if visuals.dark_mode {
+        visuals.widgets.inactive.bg_fill
+    } else {
+        Color32::from_gray(205)
+    }
+}
+
+/// What [`gauge_track`] is filled with as a valve opens.
+pub fn gauge_fill(visuals: &egui::Visuals) -> Color32 {
+    readable(COLOR_INDICATOR_WARNING, visuals).gamma_multiply(0.8)
+}
+
 // `time` is egui's monotonic clock in seconds. Shared so every blinking box stays in phase.
 pub fn blink_on(time: f64) -> bool {
     (time * 1.2).fract() < 0.5
@@ -486,6 +501,39 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn a_valve_mismatch_reads_on_every_canvas() {
+        for (theme, visuals, canvas, hc) in schematic_canvases() {
+            with_high_contrast(hc, || {
+                let color = readable(COLOR_INDICATOR_WARNING, &visuals);
+                assert_at_least(
+                    contrast_ratio(color, canvas),
+                    AA_NON_TEXT,
+                    &format!("the mismatch box on the {theme} canvas"),
+                );
+                assert_at_least(
+                    contrast_ratio(color, schematic_void(&visuals)),
+                    AA_NON_TEXT,
+                    &format!("the commanded hatching in a closed valve on the {theme} canvas"),
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn the_high_contrast_theme_sets_an_open_valve_gauge_off_its_track() {
+        let visuals = crate::theme::high_contrast_visuals();
+
+        with_high_contrast(true, || {
+            let track = gauge_track(&visuals);
+            assert_at_least(
+                contrast_ratio(track.blend(gauge_fill(&visuals)), track),
+                AA_NON_TEXT,
+                "an open valve's gauge against its track",
+            );
+        });
     }
 
     #[test]

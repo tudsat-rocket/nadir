@@ -45,7 +45,7 @@ pub(super) struct Valve {
     pub id: ValveId,
     pub label: &'static str,
     pub kind: ValveKind,
-    // Pastel, so a warm hue does not read as a warning.
+    // Kept off the warning, limit and good-status hues, so no valve reads as a status.
     pub color: Color32,
 }
 
@@ -57,55 +57,55 @@ pub(super) const VALVES: [Valve; VALVE_COUNT] = [
         id: ValveId::OxidizerFill,
         label: "Oxidizer Fill",
         kind: ValveKind::Servo,
-        color: Color32::from_rgb(125, 170, 245),
+        color: Color32::from_rgb(36, 149, 213),
     },
     Valve {
         id: ValveId::PressurantVent,
         label: "Pressurant Vent",
         kind: ValveKind::Servo,
-        color: Color32::from_rgb(118, 181, 135),
+        color: Color32::from_rgb(2, 180, 134),
     },
     Valve {
         id: ValveId::OxidizerVent,
         label: "Oxidizer Vent",
         kind: ValveKind::Solenoid,
-        color: Color32::from_rgb(106, 180, 189),
+        color: Color32::from_rgb(104, 187, 210),
     },
     Valve {
         id: ValveId::Pressurization,
         label: "Pressurization",
         kind: ValveKind::Servo,
-        color: Color32::from_rgb(194, 165, 103),
+        color: Color32::from_rgb(182, 167, 38),
     },
     Valve {
         id: ValveId::Main,
         label: "Main",
         kind: ValveKind::Servo,
-        color: Color32::from_rgb(235, 145, 145),
+        color: Color32::from_rgb(202, 106, 134),
     },
     Valve {
         id: ValveId::ExternalPressurantFill,
         label: "Ext Press. Fill",
         kind: ValveKind::Servo,
-        color: Color32::from_rgb(178, 159, 227),
+        color: Color32::from_rgb(235, 146, 218),
     },
     Valve {
         id: ValveId::ExternalOxidizerFill,
         label: "Ext Oxidizer Fill",
         kind: ValveKind::Servo,
-        color: Color32::from_rgb(212, 148, 189),
+        color: Color32::from_rgb(158, 133, 212),
     },
     Valve {
         id: ValveId::ExternalPressurantVent,
         label: "Ext Press. Vent",
         kind: ValveKind::Solenoid,
-        color: Color32::from_rgb(169, 173, 111),
+        color: Color32::from_rgb(142, 143, 115),
     },
     Valve {
         id: ValveId::ExternalOxidizerVent,
         label: "Ext Oxidizer Vent",
         kind: ValveKind::Solenoid,
-        color: Color32::from_rgb(194, 161, 134),
+        color: Color32::from_rgb(217, 163, 145),
     },
 ];
 
