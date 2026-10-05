@@ -13,6 +13,7 @@ pub struct Settings {
     pub mute_uplink_by_default: bool,
     pub map: MapSettings,
     pub theme: Theme,
+    pub plot_line_width: f32,
 }
 
 impl Default for Settings {
@@ -23,6 +24,7 @@ impl Default for Settings {
             mute_uplink_by_default: false,
             map: MapSettings::default(),
             theme: Theme::default(),
+            plot_line_width: 1.0,
         }
     }
 }

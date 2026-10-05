@@ -101,6 +101,10 @@ impl SettingsView {
         }
     }
 
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
     /// Also called at startup, before there is a view to edit the theme in.
     pub fn apply_theme(ctx: &egui::Context, theme: Theme) {
         crate::theme::apply(ctx, theme);
@@ -246,6 +250,17 @@ impl SettingsView {
                     Self::apply_theme(ui.ctx(), theme);
                 }
             }
+        });
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Plot line width");
+            ui.add(
+                egui::DragValue::new(&mut self.settings.plot_line_width)
+                    .range(0.5..=4.0)
+                    .speed(0.05)
+                    .max_decimals(2),
+            );
         });
     }
 

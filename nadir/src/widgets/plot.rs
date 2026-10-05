@@ -28,6 +28,7 @@ pub struct SharedPlotState {
     /// Width of the view (in seconds)
     pub view_width: f64,
     pub box_dragging: bool,
+    pub line_width: f32,
 }
 
 impl SharedPlotState {
@@ -36,6 +37,7 @@ impl SharedPlotState {
             attached_to_edge: true,
             view_width: 30.0,
             box_dragging: false,
+            line_width: 1.0,
         }
     }
 
@@ -233,6 +235,7 @@ impl egui::Widget for Plot<'_> {
         }
 
         let visuals = ui.visuals().clone();
+        let line_width = self.shared.line_width;
         let ir = plot.show(ui, move |plot_ui| {
             #[cfg(feature = "profiling")]
             puffin::profile_scope!("plot_data");
@@ -285,7 +288,7 @@ impl egui::Widget for Plot<'_> {
                     .map(|(t, v)| [(t - self.source.plot_origin).as_seconds_f64(), v * scale])
                     .collect();
 
-                let mut l = egui_plot::Line::new(name, plot_data).width(1.0_f32);
+                let mut l = egui_plot::Line::new(name, plot_data).width(line_width);
                 if let Some(color) = line.color {
                     l = l.color(readable(color, &visuals));
                 }

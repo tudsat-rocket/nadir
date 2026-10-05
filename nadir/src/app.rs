@@ -419,6 +419,9 @@ impl eframe::App for App {
             View::Overview | View::Settings => None,
         };
 
+        let settings = self.settings.settings();
+        self.shared_plot_state.line_width = settings.plot_line_width;
+
         let mut behavior = TreeBehavior {
             shared_plot_state: &mut self.shared_plot_state,
             // The fallback is never read; nothing outside `View::System` draws through this.
