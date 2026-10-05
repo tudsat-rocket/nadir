@@ -1,4 +1,3 @@
-use chrono::TimeDelta;
 use nadir_core::{System, mav_type_icon};
 
 use eframe::egui;
@@ -9,8 +8,8 @@ use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, dim, readable,
 };
 use crate::widgets::{
-    ArmedBadge, AutopilotLogo, BatteryReading, Readout, TEXT_SIZE, column_header, link_quality,
-    small_text, soc_color,
+    ArmedBadge, AutopilotLogo, BatteryReading, Readout, STALE_AFTER, TEXT_SIZE, column_header,
+    link_quality, small_text, soc_color,
 };
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
@@ -73,8 +72,6 @@ const CONSUMABLES_MIN_WIDTH: f32 = 225.0;
 /// length, while the component list wraps into further sub-columns, so the larger share goes there.
 const CONSUMABLES_SHARE: f32 = 0.45;
 const SEPARATOR_WIDTH: f32 = 13.0;
-/// Two missed heartbeats at the 1 Hz zenith sends its per-node ones at.
-const STALE_AFTER: TimeDelta = TimeDelta::seconds(3);
 const ROW_GAP: f32 = 2.0;
 const CELL_GAP: f32 = 10.0;
 

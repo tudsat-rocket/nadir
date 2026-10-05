@@ -10,6 +10,7 @@ use nadir_core::mav::{ComponentId, SystemId};
 use nadir_core::{MessageInstance, TimeseriesArgs, format_message_label};
 
 use crate::colors::{mode_color, readable};
+use crate::widgets::STALE_AFTER;
 
 /// Points a single line may put on screen. Fixed rather than derived from the plot's width: the
 /// query costs the same either way, and a budget that moved with a splitter drag would keep
@@ -19,9 +20,6 @@ const MAX_POINTS: usize = 2_000;
 /// Seconds of data read either side of the view, so a line reaches both edges rather than stopping
 /// at the last sample inside it.
 const MARGIN_SECS: i64 = 5;
-
-/// Two missed heartbeats at 1 Hz, as `STALE_AFTER` in the status bar.
-const CONNECTED_WITHIN: TimeDelta = TimeDelta::seconds(3);
 
 /// State shared by all linked plots
 pub struct SharedPlotState {
@@ -159,7 +157,7 @@ impl<'a> Plot<'a> {
                 .db
                 .components(line.system_id)
                 .into_iter()
-                .any(|(id, last)| id == line.component_id && now - last <= CONNECTED_WITHIN)
+                .any(|(id, last)| id == line.component_id && now - last <= STALE_AFTER)
         })
     }
 }

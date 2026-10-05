@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
+use chrono::TimeDelta;
 use nadir_core::System;
 
 use eframe::egui;
-use egui::Color32;
+use egui::{Color32, RichText};
 use mavspec::rust::dialects::common::enums::{
     MavCmd, MavResult, MavSysStatusSensor, MavSysStatusSensorExtended,
 };
@@ -14,7 +17,7 @@ use crate::colors::{
     COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, high_contrast, readable,
     text_on,
 };
-use crate::widgets::small_text;
+use crate::widgets::{TEXT_SIZE, small_text};
 
 fn short_sensor_name(name: &str) -> String {
     let name = name
@@ -68,6 +71,9 @@ fn sensor_lists(s: &SysStatus) -> (Vec<String>, Vec<String>) {
     (failed, disabled)
 }
 
+/// Two missed heartbeats at the 1 Hz zenith sends its per-node ones at.
+pub(crate) const STALE_AFTER: TimeDelta = TimeDelta::seconds(3);
+
 /// Below this quality (1.0 = perfect) an RF link is a flight-critical alarm, not a passing dip:
 /// neither rockets nor multirotors fly open-loop, so a degraded uplink or downlink belongs on the
 /// red line.
@@ -114,35 +120,114 @@ pub(crate) fn link_quality(system: &System) -> (Option<f32>, Option<f32>) {
 /// Which severity an [`AlertLine`] renders. The two tiers stack as separate rows in the status
 /// strip: red critical over amber caution.
 pub enum AlertTier {
-    /// Red: command rejections and RF uplink/downlink quality alarms - the "you may be losing the
-    /// vehicle" set.
+    /// Red: command rejections, RF uplink/downlink quality alarms, lost components and rising
+    /// `SYS_STATUS` error counters - the "you may be losing the vehicle" set.
     Critical,
     /// Amber: failed onboard sensors and (once the propulsion protocol exposes them) valve error
     /// states.
     Caution,
 }
 
-/// One severity row of the status strip: command NACKs and RF alarms in red (critical), failed
-/// sensors in amber (caution). Text only; a row stays dark unless something in its tier is wrong.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Counter {
+    One,
+    Two,
+    Three,
+    Comm,
+}
+
+impl Counter {
+    const ALL: [Self; 4] = [Self::One, Self::Two, Self::Three, Self::Comm];
+
+    fn value(self, s: &SysStatus) -> u16 {
+        match self {
+            Self::One => s.errors_count1,
+            Self::Two => s.errors_count2,
+            Self::Three => s.errors_count3,
+            Self::Comm => s.errors_comm,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::One => "ERROR 1",
+            Self::Two => "ERROR 2",
+            Self::Three => "ERROR 3",
+            Self::Comm => "COMM ERROR",
+        }
+    }
+}
+
+/// Acknowledged counter values by (component, counter). Without an entry, the baseline is the
+/// counter in the first `SYS_STATUS` heard from that component.
+type Acks = HashMap<(u8, Counter), u16>;
+
+struct Token {
+    text: String,
+    /// Clicking the token stores this value as the counter's new baseline.
+    ack: Option<((u8, Counter), u16)>,
+}
+
+impl From<String> for Token {
+    fn from(text: String) -> Self {
+        Self { text, ack: None }
+    }
+}
+
+/// One severity row of the status strip: command NACKs, RF alarms, lost components and rising
+/// error counters in red (critical), failed sensors in amber (caution). Text only; a row stays dark
+/// unless something in its tier is wrong.
 pub struct AlertLine<'a> {
     pub system: &'a System,
     pub tier: AlertTier,
 }
 
 impl AlertLine<'_> {
-    fn tokens(&self) -> Vec<String> {
+    fn tokens(&self, acks: &Acks) -> Vec<Token> {
         match self.tier {
             AlertTier::Critical => {
-                let mut out = Vec::new();
+                let mut out: Vec<Token> = Vec::new();
                 if let Some(nack) = last_nack(self.system) {
-                    out.push(nack);
+                    out.push(nack.into());
                 }
                 let (down, up) = link_quality(self.system);
                 if let Some(q) = down.filter(|q| *q < LINK_ALARM_QUALITY) {
-                    out.push(format!("DOWNLINK {:.0}%", q * 100.0));
+                    out.push(format!("DOWNLINK {:.0}%", q * 100.0).into());
                 }
                 if let Some(q) = up.filter(|q| *q < LINK_ALARM_QUALITY) {
-                    out.push(format!("UPLINK {:.0}%", q * 100.0));
+                    out.push(format!("UPLINK {:.0}%", q * 100.0).into());
+                }
+
+                let now = self.system.now();
+                for (id, last) in self.system.components() {
+                    let name = if id == 0x01 {
+                        "FC".to_owned()
+                    } else {
+                        format!("COMP 0x{id:02x}")
+                    };
+                    if now - last > STALE_AFTER {
+                        out.push(format!("{name} LOST").into());
+                    }
+
+                    let (Ok(latest), Some(first)) = (
+                        self.system.last_message_from::<SysStatus>(id),
+                        self.system.first_message_from::<SysStatus>(id),
+                    ) else {
+                        continue;
+                    };
+                    for counter in Counter::ALL {
+                        let value = counter.value(&latest);
+                        let baseline = acks
+                            .get(&(id, counter))
+                            .copied()
+                            .unwrap_or_else(|| counter.value(&first));
+                        if value > baseline {
+                            out.push(Token {
+                                text: format!("{name} {}", counter.label()),
+                                ack: Some(((id, counter), value)),
+                            });
+                        }
+                    }
                 }
                 out
             }
@@ -151,7 +236,7 @@ impl AlertLine<'_> {
                 .system
                 .last_message::<SysStatus>()
                 .ok()
-                .map(|s| sensor_lists(&s).0)
+                .map(|s| sensor_lists(&s).0.into_iter().map(Token::from).collect())
                 .unwrap_or_default(),
         }
     }
@@ -194,7 +279,9 @@ impl egui::Widget for AlertLine<'_> {
             },
             ui.visuals(),
         );
-        let tokens = self.tokens();
+        let acks_id = egui::Id::new(("alert_acks", self.system.system_id));
+        let acks: Acks = ui.data(|d| d.get_temp(acks_id).unwrap_or_default());
+        let tokens = self.tokens(&acks);
 
         let lit = blink_on(ui.input(|i| i.time));
 
@@ -220,7 +307,32 @@ impl egui::Widget for AlertLine<'_> {
                     egui::Frame::new()
                         .fill(fill)
                         .inner_margin(egui::Margin::symmetric(3, 0))
-                        .show(ui, |ui| small_text(ui, token, ink));
+                        .show(ui, |ui| {
+                            let Some((key, value)) = token.ack else {
+                                small_text(ui, &token.text, ink);
+                                return;
+                            };
+                            let clicked = ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::new(&token.text)
+                                            .monospace()
+                                            .size(TEXT_SIZE)
+                                            .color(ink),
+                                    )
+                                    .sense(egui::Sense::click())
+                                    .wrap_mode(egui::TextWrapMode::Truncate),
+                                )
+                                .on_hover_text("Click to acknowledge")
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked();
+                            if clicked {
+                                ui.data_mut(|d| {
+                                    d.get_temp_mut_or_default::<Acks>(acks_id)
+                                        .insert(key, value);
+                                });
+                            }
+                        });
                 }
             })
             .response;

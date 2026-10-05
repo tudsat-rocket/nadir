@@ -163,6 +163,13 @@ impl System {
         self.db.last_message(self.system_id, component_id)
     }
 
+    pub fn first_message_from<M: MessageExt + Default>(&self, component_id: u8) -> Option<M> {
+        self.db
+            .messages_since(self.system_id, component_id, None, Some(1))
+            .pop()
+            .map(|(_, m)| m)
+    }
+
     pub fn components(&self) -> Vec<(u8, DateTime<Utc>)> {
         self.db.components(self.system_id)
     }
