@@ -1117,7 +1117,9 @@ fn draw_valve_mode_toggle(
             .corner_radius(CornerRadius::same(3))
             .selected(false)
     };
+    let bounds = square.intersect(ui.clip_rect());
     let stack = |ui: &mut egui::Ui| {
+        ui.set_clip_rect(bounds);
         ui.spacing_mut().item_spacing.y = 2.0;
         // A button's margins follow its state's expansion and stroke width even
         // with both overridden, so hovering would resize it and shift the stack.
@@ -1129,53 +1131,60 @@ fn draw_valve_mode_toggle(
         }
     };
 
-    Area::new(Id::new("valve_mode_toggle"))
-        .order(Order::Foreground)
-        .fade_in(false)
-        .pivot(Align2::LEFT_BOTTOM)
-        .fixed_pos(square.left_bottom() + Vec2::new(6.0, -6.0))
-        .show(ui.ctx(), |ui| {
-            stack(ui);
+    let modes = [
+        (ValveInteractionMode::Pulse, "PLSE"),
+        (ValveInteractionMode::Open, "OPEN"),
+        (ValveInteractionMode::Close, "CLSE"),
+    ];
+    let mode_size = size(&modes.map(|(_, label)| label));
+    let labels = pulse_durations.map(|secs| format!("{secs}s"));
+    let pulse_size = size(&labels.each_ref().map(String::as_str));
 
-            let modes = [
-                (ValveInteractionMode::Pulse, "PLSE"),
-                (ValveInteractionMode::Open, "OPEN"),
-                (ValveInteractionMode::Close, "CLSE"),
-            ];
-            let button_size = size(&modes.map(|(_, label)| label));
-            for (m, label) in modes {
-                if ui
-                    .add_sized(button_size, outline(*mode == m, label))
-                    .clicked()
-                {
-                    *mode = m;
+    // Both stacks are three buttons tall; the pulse stack goes first when space runs out.
+    let inset = 6.0;
+    let fits_height = bounds.height() >= 3.0 * mode_size.y + 2.0 * 2.0 + 2.0 * inset;
+    let show_mode = fits_height && bounds.width() >= mode_size.x + 2.0 * inset;
+    let show_pulse = show_mode
+        && *mode == ValveInteractionMode::Pulse
+        && bounds.width() >= mode_size.x + pulse_size.x + 3.0 * inset;
+
+    if show_mode {
+        Area::new(Id::new("valve_mode_toggle"))
+            .order(Order::Foreground)
+            .fade_in(false)
+            .pivot(Align2::LEFT_BOTTOM)
+            .fixed_pos(bounds.left_bottom() + Vec2::new(inset, -inset))
+            .show(ui.ctx(), |ui| {
+                stack(ui);
+                for (m, label) in modes {
+                    if ui
+                        .add_sized(mode_size, outline(*mode == m, label))
+                        .clicked()
+                    {
+                        *mode = m;
+                    }
                 }
-            }
-        });
-
-    if *mode != ValveInteractionMode::Pulse {
-        return;
+            });
     }
 
-    Area::new(Id::new("valve_pulse_duration"))
-        .order(Order::Foreground)
-        .fade_in(false)
-        .pivot(Align2::RIGHT_BOTTOM)
-        .fixed_pos(square.right_bottom() + Vec2::new(-6.0, -6.0))
-        .show(ui.ctx(), |ui| {
-            stack(ui);
-
-            let labels = pulse_durations.map(|secs| format!("{secs}s"));
-            let button_size = size(&labels.each_ref().map(String::as_str));
-            for (i, label) in labels.iter().enumerate().rev() {
-                if ui
-                    .add_sized(button_size, outline(*pulse == i, label))
-                    .clicked()
-                {
-                    *pulse = i;
+    if show_pulse {
+        Area::new(Id::new("valve_pulse_duration"))
+            .order(Order::Foreground)
+            .fade_in(false)
+            .pivot(Align2::RIGHT_BOTTOM)
+            .fixed_pos(bounds.right_bottom() + Vec2::new(-inset, -inset))
+            .show(ui.ctx(), |ui| {
+                stack(ui);
+                for (i, label) in labels.iter().enumerate().rev() {
+                    if ui
+                        .add_sized(pulse_size, outline(*pulse == i, label))
+                        .clicked()
+                    {
+                        *pulse = i;
+                    }
                 }
-            }
-        });
+            });
+    }
 }
 
 fn pressure_coverage(pressure_bar: f32, max_bar: f32) -> f32 {

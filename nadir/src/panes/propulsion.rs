@@ -376,7 +376,10 @@ impl PaneUi for PropulsionPane {
                     // The floating scroll bar allocates no width but covers the last column.
                     let scroll = &ui.spacing().scroll;
                     let bar = scroll.bar_inner_margin + scroll.bar_width + scroll.bar_outer_margin;
-                    let plan = valves::Plan::best(Vec2::new(ui.available_width() - bar, budget));
+                    let plan = valves::Plan::best(Vec2::new(
+                        (ui.available_width() - bar).max(0.0),
+                        budget,
+                    ));
                     let grid_h = plan.height(budget);
                     let history_h = (avail - VALVES_HEADER_H - grid_h) / 3.5;
 
