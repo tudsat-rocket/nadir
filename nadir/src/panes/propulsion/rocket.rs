@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use nadir_core::System;
 
 use egui::epaint::{PathShape, PathStroke};
@@ -10,10 +12,10 @@ use rapid_dialect::rapid::messages::{PressureVessel, Valve};
 
 use super::ValveInteractionMode;
 use crate::colors::{
-    COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_ink,
-    schematic_line, schematic_void, schematic_wash,
+    COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, blink_on, dim, readable, schematic_box_stroke,
+    schematic_ink, schematic_line, schematic_void, schematic_wash,
 };
-use crate::widgets::{BatteryIndicator, Hazard, MeasurementIndicator, Readout};
+use crate::widgets::{BatteryIndicator, Hazard, MeasurementIndicator, MeasurementSection, Readout};
 
 const TANK_BULKHEAD_RATIO: f32 = 0.15;
 const TANK_BULKHEAD_STEPS: usize = 32;
@@ -28,6 +30,18 @@ const MIN_HATCH_WIDTH: f32 = 0.35;
 // A valve's bow-tie is `half` long along its axis and this much of `half` across it.
 const VALVE_GLYPH_BASE_RATIO: f32 = 0.65;
 const LABEL_GAP: f32 = 3.0;
+
+// Pane height the fixed-size text and strokes were drawn for; taller panes scale them up to
+// MAX_SCALE.
+const DESIGN_HEIGHT: f32 = 420.0;
+const MAX_SCALE: f32 = 1.6;
+// Width over height of the schematic strip, and the wider strip that makes room for the valve
+// boxes in panes at least DETAILED_MIN_HEIGHT tall.
+const BASE_ASPECT: f32 = 0.438;
+const DETAILED_ASPECT: f32 = 0.55;
+const DETAILED_MIN_HEIGHT: f32 = 640.0;
+// Room the valve grid and plots beside the schematic keep before it widens.
+const DETAILED_MIN_REST_W: f32 = 300.0;
 
 const N2_MAX_PRESSURE_BAR: f32 = 300.0;
 const N2O_MAX_PRESSURE_BAR: f32 = 100.0;
@@ -93,6 +107,57 @@ pub(super) fn valve_state(system: &System, id: ValveId) -> Option<f32> {
     valve_reading(system, id).and_then(|r| r.state)
 }
 
+// Firmware reports an unavailable sensor as the type's max value.
+fn temperature_c(t: i16) -> Option<f32> {
+    (t != i16::MAX).then(|| f32::from(t) / 100.0)
+}
+
+#[derive(Copy, Clone)]
+struct ValveSensors {
+    temperature: Option<f32>,
+    drive_current_ma: Option<f32>,
+    // `None` for a valve without a heater.
+    heater: Option<bool>,
+}
+
+impl ValveSensors {
+    fn read(system: &System, id: ValveId) -> Option<Self> {
+        let v = system
+            .last_instance_message::<Valve>(i64::from(id.value()))
+            .ok()?;
+        Some(Self {
+            temperature: temperature_c(v.temperature),
+            drive_current_ma: (v.drive_current != u16::MAX).then(|| f32::from(v.drive_current)),
+            heater: v
+                .flags
+                .contains(ValveFlag::HEATED)
+                .then(|| v.flags.contains(ValveFlag::HEATER_ON)),
+        })
+    }
+
+    // A heated valve has a temperature sensor even while it reads unknown.
+    fn has_temperature(&self) -> bool {
+        self.temperature.is_some() || self.heater.is_some()
+    }
+}
+
+#[derive(Copy, Clone)]
+enum Side {
+    Above,
+    Below,
+    Left,
+    Right,
+}
+
+pub(super) fn strip_width(size: Vec2) -> f32 {
+    let detailed = size.y * DETAILED_ASPECT;
+    if size.y >= DETAILED_MIN_HEIGHT && size.x - detailed >= DETAILED_MIN_REST_W {
+        detailed
+    } else {
+        (size.y * BASE_ASPECT).min(size.x)
+    }
+}
+
 // An unknown (NaN) reported state is treated as a fault for now. Otherwise a
 // mismatch is a known reported state disagreeing with a known command; an unknown
 // command alone is not a warning.
@@ -147,14 +212,21 @@ pub fn draw_hybrid(
     // external tanks and fill valves; the flight plant is drawn in the remainder.
     // Shadowing `square` insets every downstream computation without touching it.
     let strip = square;
+    let n = strip.height();
+    let k = (n / DESIGN_HEIGHT).clamp(1.0, MAX_SCALE);
+    let gap = LABEL_GAP * k;
+    // `strip_width` only hands out width beyond the base aspect to a pane tall enough for the
+    // valve boxes. The plant takes enough of it to fit a box between the pressure readouts and
+    // the centre line, the ground lane the rest for the external valves' boxes.
+    let extra_w = (strip.width() - BASE_ASPECT * n).max(0.0);
+    let detailed = extra_w > 1.0;
     // The external tanks stack above their fill valves and hug the boundary, so the
     // lane only needs to be a tank plus its P-tag wide (sized in height units to match
     // the rest of the layout).
-    let ground_lane_w = 0.112 * strip.height();
+    let ground_lane_w = 0.112 * n + extra_w - extra_w.min(0.065 * n);
     let square = Rect::from_min_max(pos2(strip.left() + ground_lane_w, strip.top()), strip.max);
 
     let center_x = square.center().x;
-    let n = square.height();
 
     let tank_w = 0.11 * n;
 
@@ -192,7 +264,10 @@ pub fn draw_hybrid(
     let valve_half = 0.022 * n;
     let valve_bot_cy = f32::midpoint(tank_rect.bottom(), cc_top);
 
-    let batteries = super::battery_indicators(system, true);
+    // Readouts and tags placed so far, for the valve boxes to steer around.
+    let obstacles = RefCell::new(Vec::<Rect>::new());
+
+    let batteries = super::battery_indicators(system, Some(k));
     let battery_count = batteries.len() as f32;
     let battery_band = Rangef::new(square.top() + 0.005 * n, top_tank_rect.top() - 0.035 * n);
     let battery_size = BatteryIndicator::compact_size(
@@ -204,6 +279,7 @@ pub fn draw_hybrid(
             ),
             battery_band.span(),
         ),
+        k,
     );
     let battery_gap = f32::min(
         (square.width() - battery_count * battery_size.x) / (battery_count + 1.0),
@@ -216,13 +292,24 @@ pub fn draw_hybrid(
             pos2(left, battery_band.center() - battery_size.y / 2.0),
             battery_size,
         );
+        obstacles.borrow_mut().push(battery_rect);
         ui.place(battery_rect, indicator);
     }
 
     let tank_left = center_x - tank_w / 2.0;
-    let tank_right = center_x + tank_w / 2.0;
+    let vent_end_x = square.right();
+    let vent_valve_cx = (center_x + tank_w * 0.35 + vent_end_x) / 2.0;
+    let bot_vent_valve_cx = 2.0 * center_x - vent_valve_cx;
+    let lane_right = square.left();
+    let ext_tank_w = 0.075 * n;
+    // Tanks hug the boundary; the fill valve rides the vertical riser directly
+    // below each tank.
+    let ext_cx = lane_right - ext_tank_w / 2.0 - 0.006 * n;
+    // Dashed skin: everything left of it is off-vehicle (ground support). Centered
+    // between the external and onboard oxidizer-fill valves, and stopped short of
+    // the bottom so it clears the mode toggle in the corner.
+    let skin_x = f32::midpoint(ext_cx, bot_vent_valve_cx);
     let pressure_cx = f32::midpoint(square.left(), tank_left);
-    let temp_cx = f32::midpoint(tank_right, square.right());
 
     let pressurant = system.last_instance_message::<PressureVessel>(0).ok();
     let oxidizer = system.last_instance_message::<PressureVessel>(1).ok();
@@ -233,9 +320,7 @@ pub fn draw_hybrid(
     let ext_pressurant = system.last_instance_message::<PressureVessel>(4).ok();
     let ext_oxidizer = system.last_instance_message::<PressureVessel>(5).ok();
 
-    // Firmware reports an unavailable sensor as the type's max value.
     let pressure_bar = |p: u16| (p != u16::MAX).then(|| f32::from(p) / 100.0);
-    let temperature_c = |t: i16| (t != i16::MAX).then(|| f32::from(t) / 100.0);
 
     let reg_pressure1_bar = regulated.as_ref().and_then(|p| pressure_bar(p.pressure1));
     let reg_pressure2_bar = regulated.as_ref().and_then(|p| pressure_bar(p.pressure2));
@@ -272,91 +357,298 @@ pub fn draw_hybrid(
         .as_ref()
         .and_then(|p| (p.level != u16::MAX).then(|| f32::from(p.level) / 10000.0));
 
-    for (cy, color, values, warn) in [
+    let ink = schematic_ink(&visuals);
+    let bar = |values: Vec<Option<f32>>, color: Color32| MeasurementSection {
+        values,
+        unit: "bar",
+        color,
+        decimals: None,
+    };
+    let oxidizer_sections = || {
+        let level = MeasurementSection {
+            values: vec![tank_fill_level.map(|l| l * 100.0)],
+            unit: "%",
+            color: ink,
+            decimals: Some(0),
+        };
+        let temperature = MeasurementSection {
+            values: vec![n2o_temp1, n2o_temp2],
+            unit: "\u{00b0}C",
+            color: ink,
+            decimals: Some(0),
+        };
+        vec![level, temperature]
+    };
+    // Warn on an overpressure flag or a missing reading.
+    let readout = |id: u8, color: Color32, sections: Vec<MeasurementSection>, warn: bool| {
+        MeasurementIndicator {
+            label: Some((format!("P{id}"), color)),
+            blink: warn || sections.iter().flat_map(|s| &s.values).any(Option::is_none),
+            sections,
+            scale: k,
+        }
+    };
+
+    let pressure_readouts = vec![
         (
             top_tank_rect.center().y,
-            n2_color,
-            vec![n2_pressure_bar],
-            vessel_warn(pressurant.as_ref()),
+            readout(
+                0,
+                n2_color,
+                vec![bar(vec![n2_pressure_bar], n2_color)],
+                vessel_warn(pressurant.as_ref()),
+            ),
         ),
         (
             junction_cy,
-            node_color,
-            vec![reg_pressure1_bar, reg_pressure2_bar],
-            vessel_warn(regulated.as_ref()),
+            readout(
+                3,
+                node_color,
+                vec![bar(vec![reg_pressure1_bar, reg_pressure2_bar], node_color)],
+                vessel_warn(regulated.as_ref()),
+            ),
         ),
         (
             tank_rect.center().y,
-            n2o_color,
-            vec![n2o_pressure1_bar, n2o_pressure2_bar],
-            vessel_warn(oxidizer.as_ref()),
+            readout(
+                1,
+                n2o_color,
+                vec![bar(vec![n2o_pressure1_bar, n2o_pressure2_bar], n2o_color)],
+                vessel_warn(oxidizer.as_ref()),
+            ),
         ),
         (
             cc_cy,
-            cc_color,
-            vec![cc_pressure_bar],
-            vessel_warn(chamber.as_ref()),
+            readout(
+                2,
+                cc_color,
+                vec![bar(vec![cc_pressure_bar], cc_color)],
+                vessel_warn(chamber.as_ref()),
+            ),
         ),
-    ] {
-        // Warn on an overpressure flag or a missing reading.
-        let blink = warn || values.iter().any(Option::is_none);
-        let indicator = MeasurementIndicator {
-            values,
-            unit: "bar",
-            color,
-            decimals: None,
-            blink,
-        };
-        let size = indicator.intrinsic_size(ui.ctx());
-        ui.place(
-            Rect::from_center_size(pos2(pressure_cx, cy), size),
-            indicator,
-        );
+    ];
+    let pressure_readouts: Vec<_> = pressure_readouts
+        .into_iter()
+        .map(|(cy, indicator)| (cy, indicator.intrinsic_size(ui.ctx()), indicator))
+        .collect();
+    // Detailed, the column hugs the skin to leave room for a valve box beside the centre line.
+    let pressure_cx = if detailed {
+        let widest = pressure_readouts
+            .iter()
+            .map(|(_, size, _)| size.x)
+            .fold(0.0, f32::max);
+        skin_x + gap + widest / 2.0
+    } else {
+        pressure_cx
+    };
+    for (cy, size, indicator) in pressure_readouts {
+        let rect = Rect::from_center_size(pos2(pressure_cx, cy), size);
+        obstacles.borrow_mut().push(rect);
+        ui.place(rect, indicator);
     }
 
     let stroke_col = schematic_line(&visuals);
-    let stroke = Stroke::new(1.5_f32, stroke_col);
+    let stroke = Stroke::new(1.5 * k, stroke_col);
     let fill = schematic_void(&visuals);
     let painter = ui.painter().clone();
     let hatch_stride = (0.012 * n).max(4.0);
 
     // Instance-ID tags next to each vessel and valve, so a reading can be cross-referenced against
     // the raw MAVLink logs (PressureVessel instance / ValveId).
-    let label_font = egui::FontId::monospace(9.5);
+    let label_font = egui::FontId::monospace(9.5 * k);
     let label_color = schematic_line(&visuals);
-    // Off the top-left corner, not inside: a capsule's widest point is `bulkhead_h` below the top
-    // of its bounding rect, so the corner itself is empty.
-    let draw_tank_label = |rect: Rect, id: i64, color: Color32| {
-        let galley = painter.layout_no_wrap(format!("P{id}"), label_font.clone(), color);
-        let pos = rect.left_top() - galley.size() + Vec2::splat(LABEL_GAP);
-        painter.galley(pos.max(strip.left_top()), galley, color);
-    };
-    let draw_valve_label = |center: Pos2, half: f32, horizontal: bool, id: ValveId, muted: bool| {
-        let color = readable(super::Valve::color(id), &visuals);
-        let color = if muted {
-            dim(color, gse_muted_opacity(&visuals))
-        } else {
-            color
+    let temp_font = egui::FontId::monospace(12.0 * k);
+    // In a detailed schematic, each valve gets a box around its glyph, with its tag and readings
+    // on `side`, and the mismatch blink on its outline. Otherwise the tag alone sits beside the
+    // glyph. Returns whether it drew the box.
+    let draw_valve_tag = |center: Pos2,
+                          half: f32,
+                          horizontal: bool,
+                          id: ValveId,
+                          side: Side,
+                          muted: bool,
+                          blink: bool|
+     -> bool {
+        let fade = |c: Color32| {
+            if muted {
+                dim(c, gse_muted_opacity(&visuals))
+            } else {
+                c
+            }
         };
-        // Off the glyph's own edge, not its bounding `half`, or the tag hangs out far enough
-        // to look like it labels whatever sits above.
-        let edge = half * VALVE_GLYPH_BASE_RATIO + LABEL_GAP;
-        let (pos, anchor) = if horizontal {
-            (pos2(center.x, center.y - edge), Align2::CENTER_BOTTOM)
-        } else {
-            (pos2(center.x + edge, center.y), Align2::LEFT_CENTER)
+        let color = fade(readable(super::Valve::color(id), &visuals));
+        let tag = format!("V{}", id.value());
+        let plain_tag = || {
+            // Off the glyph's own edge, not its bounding `half`, or the tag hangs out far enough
+            // to look like it labels whatever sits above.
+            let edge = half * VALVE_GLYPH_BASE_RATIO + gap;
+            let (pos, anchor) = if horizontal {
+                (pos2(center.x, center.y - edge), Align2::CENTER_BOTTOM)
+            } else {
+                (pos2(center.x + edge, center.y), Align2::LEFT_CENTER)
+            };
+            painter.text(pos, anchor, &tag, label_font.clone(), color);
+            false
         };
-        painter.text(
-            pos,
-            anchor,
-            format!("V{}", id.value()),
-            label_font.clone(),
-            color,
+        if !detailed {
+            return plain_tag();
+        }
+
+        let sensors = ValveSensors::read(system, id);
+        // Only the oxidizer vent is heated, so only its temperature is worth the room.
+        let thermal = id == ValveId::OxidizerVent && sensors.is_some_and(|s| s.has_temperature());
+        let ctx = painter.ctx();
+        let reading = |value: Option<f32>, unit: &'static str| {
+            value.map(|value| Readout {
+                value,
+                decimals: 0,
+                unit: Some(unit),
+                font: temp_font.clone(),
+                color: fade(schematic_ink(&visuals)),
+                ..Default::default()
+            })
+        };
+        let missing = painter.layout_no_wrap(
+            "--\u{00b0}C".to_owned(),
+            temp_font.clone(),
+            fade(label_color),
         );
+        let temperature =
+            thermal.then(|| reading(sensors.and_then(|s| s.temperature), "\u{00b0}C"));
+        let heater = sensors.and_then(|s| s.heater).filter(|_| thermal);
+        let current = reading(sensors.and_then(|s| s.drive_current_ma), "mA");
+        let header = painter.layout_no_wrap(tag.clone(), label_font.clone(), color);
+        let header_size = header.size();
+
+        let temp_size = temperature
+            .as_ref()
+            .map(|t| t.as_ref().map_or(missing.size(), |r| r.size(ctx)));
+        let heater_size = Vec2::new(0.8, 1.0) * temp_size.map_or(0.0, |s| s.y);
+        let temp_row_w =
+            temp_size.map_or(0.0, |s| s.x) + heater.map_or(0.0, |_| gap + heater_size.x);
+        let current_size = current.as_ref().map(|c| c.size(ctx));
+        let block_size = [
+            Some(header_size),
+            temp_size.map(|s| vec2(temp_row_w, s.y)),
+            current_size,
+        ]
+        .into_iter()
+        .flatten()
+        .fold(Vec2::ZERO, |acc, row| vec2(acc.x.max(row.x), acc.y + row.y));
+        let pad = vec2(2.0 * gap, gap);
+
+        let glyph = if horizontal {
+            Rect::from_center_size(
+                center,
+                vec2(2.0 * half, 2.0 * half * VALVE_GLYPH_BASE_RATIO),
+            )
+        } else {
+            Rect::from_center_size(
+                center,
+                vec2(2.0 * half * VALVE_GLYPH_BASE_RATIO, 2.0 * half),
+            )
+        };
+        let (dir, anchor) = match side {
+            Side::Above => (vec2(0.0, -1.0), Align2::CENTER_BOTTOM),
+            Side::Below => (vec2(0.0, 1.0), Align2::CENTER_TOP),
+            Side::Left => (vec2(-1.0, 0.0), Align2::RIGHT_CENTER),
+            Side::Right => (vec2(1.0, 0.0), Align2::LEFT_CENTER),
+        };
+        let edge = (glyph.size() / 2.0).dot(dir.abs()) + gap;
+        let block = anchor.anchor_size(center + dir * edge, block_size);
+        let frame = |block: Rect| glyph.union(block).expand2(pad);
+        let into = |lo: f32, hi: f32, min: f32, max: f32| (lo - min).max(0.0) + (hi - max).min(0.0);
+        let into_strip = |block: Rect| {
+            let box_rect = frame(block);
+            block.translate(vec2(
+                into(
+                    strip.left(),
+                    strip.right(),
+                    box_rect.left(),
+                    box_rect.right(),
+                ),
+                into(
+                    strip.top(),
+                    strip.bottom(),
+                    box_rect.top(),
+                    box_rect.bottom(),
+                ),
+            ))
+        };
+
+        // Slide the readings along the glyph past whatever is in the way, as long as they still
+        // sit beside it; failing that, fall back to the plain tag.
+        let slide = vec2(dir.y.abs(), dir.x.abs());
+        let span = |r: Rect| (r.min.to_vec2().dot(slide), r.max.to_vec2().dot(slide));
+        let (lo, hi) = span(frame(block));
+        let mut shifts = vec![0.0];
+        for (o_lo, o_hi) in obstacles.borrow().iter().map(|o| span(*o)) {
+            shifts.extend([o_hi + gap - lo, o_lo - gap - hi]);
+        }
+        shifts.sort_by(|a, b| a.abs().total_cmp(&b.abs()));
+        let clear = |r: Rect| {
+            !obstacles
+                .borrow()
+                .iter()
+                .any(|o| o.expand(gap / 2.0).intersects(r))
+        };
+        let (block_lo, block_hi) = span(block);
+        let Some(block) = shifts
+            .into_iter()
+            .filter(|s| s.abs() <= (block_hi - block_lo) / 2.0)
+            .map(|s| into_strip(block.translate(slide * s)))
+            .find(|b| clear(frame(*b)))
+        else {
+            return plain_tag();
+        };
+        let rect = frame(block);
+        obstacles.borrow_mut().push(rect);
+
+        let border = if blink && blink_on(ctx.input(|i| i.time)) {
+            Stroke::new(2.0 * k, readable(COLOR_INDICATOR_WARNING, &visuals))
+        } else {
+            let border = schematic_box_stroke(&visuals);
+            Stroke::new(border.width * k, fade(border.color))
+        };
+        painter.rect_stroke(rect, CornerRadius::ZERO, border, StrokeKind::Inside);
+        let cx = block.center().x;
+        let mut y = block.top();
+        painter.galley(pos2(cx - header_size.x / 2.0, y), header, color);
+        y += header_size.y;
+        if let (Some(temperature), Some(size)) = (temperature, temp_size) {
+            let left = cx - temp_row_w / 2.0;
+            match temperature {
+                Some(r) => {
+                    r.paint(&painter, pos2(left, y), Align2::LEFT_TOP);
+                }
+                None => painter.galley(pos2(left, y), missing, label_color),
+            }
+            if let Some(on) = heater {
+                let heater_color = if on {
+                    readable(COLOR_INDICATOR_LIMITS, &visuals)
+                } else {
+                    schematic_line(&visuals)
+                };
+                draw_heater(
+                    &painter,
+                    Rect::from_min_size(pos2(left + size.x + gap, y), heater_size),
+                    Stroke::new(1.5 * k, fade(heater_color)),
+                );
+            }
+            y += size.y;
+        }
+        if let Some(current) = current {
+            current.paint(&painter, pos2(cx, y), Align2::CENTER_TOP);
+        }
+        true
     };
 
+    let cc_interior = Rect::from_min_max(
+        pos2(center_x - cc_w / 2.0, cc_top),
+        pos2(center_x + cc_w / 2.0, cc_bottom),
+    );
+
     draw_capsule_tank(&painter, top_tank_rect, bulkhead_h, fill, stroke);
-    draw_tank_label(top_tank_rect, 0, n2_color);
     draw_hatching(
         &painter,
         &capsule_polygon(top_tank_rect, bulkhead_h),
@@ -367,7 +659,6 @@ pub fn draw_hybrid(
     );
 
     draw_capsule_tank(&painter, tank_rect, bulkhead_h, fill, stroke);
-    draw_tank_label(tank_rect, 1, n2o_color);
     draw_tank_fill(
         &painter,
         tank_rect,
@@ -379,27 +670,15 @@ pub fn draw_hybrid(
         hatch_stride,
     );
 
-    let tank_fill_indicator = MeasurementIndicator {
-        values: vec![tank_fill_level.map(|l| l * 100.0)],
-        unit: "%",
-        color: schematic_ink(&visuals),
-        decimals: Some(0),
-        blink: tank_fill_level.is_none(),
+    let level = MeasurementIndicator {
+        label: None,
+        sections: oxidizer_sections(),
+        blink: tank_fill_level.is_none() || n2o_temp1.is_none() || n2o_temp2.is_none(),
+        scale: k,
     };
-    let intrinsic = MeasurementIndicator {
-        values: vec![Some(99.0)],
-        unit: "%",
-        color: schematic_ink(&visuals),
-        decimals: Some(0),
-        blink: false,
-    }
-    .intrinsic_size(ui.ctx());
-    let pad = ui.ctx().global_style().spacing.button_padding;
-    let size = egui::vec2(intrinsic.x - 2.0 * pad.x + 6.0, intrinsic.y);
-    ui.place(
-        Rect::from_center_size(tank_rect.center(), size),
-        tank_fill_indicator,
-    );
+    let rect = Rect::from_center_size(tank_rect.center(), level.intrinsic_size(ui.ctx()));
+    obstacles.borrow_mut().push(rect);
+    ui.place(rect, level);
     let time = ui.input(|i| i.time);
     // Fill reflects the reported state; while the commanded position disagrees
     // with it, only that is drawn, as hatching, and a lasting mismatch blinks a box.
@@ -414,7 +693,7 @@ pub fn draw_hybrid(
             Some(s) if s > 0.0 && cmd(id).is_none() => color,
             _ => schematic_void(&visuals),
         };
-        (Stroke::new(1.5_f32, color), fill)
+        (Stroke::new(1.5 * k, color), fill)
     };
     let (stroke_pressurant_vent, fill_pressurant_vent) = style_for(ValveId::PressurantVent);
     let (valve_stroke_pressurization, valve_fill_pressurization) =
@@ -424,6 +703,15 @@ pub fn draw_hybrid(
     let (valve_stroke_main, valve_fill_main) = style_for(ValveId::Main);
 
     draw_pressure_regulator(&painter, pos2(center_x, reg_cy), valve_half, stroke);
+    let boxed = draw_valve_tag(
+        pos2(center_x, valve_top_cy),
+        valve_half,
+        false,
+        ValveId::Pressurization,
+        Side::Left,
+        false,
+        blink[super::Valve::index(ValveId::Pressurization)],
+    );
     draw_valve(
         &painter,
         pos2(center_x, valve_top_cy),
@@ -433,8 +721,9 @@ pub fn draw_hybrid(
         valve_stroke_pressurization,
         cmd(ValveId::Pressurization),
         hatch_stride,
-        blink[super::Valve::index(ValveId::Pressurization)],
+        blink[super::Valve::index(ValveId::Pressurization)] && !boxed,
         time,
+        k,
     );
     interact_valve(
         ui,
@@ -446,13 +735,7 @@ pub fn draw_hybrid(
         false,
         *mode,
         pulse_secs,
-    );
-    draw_valve_label(
-        pos2(center_x, valve_top_cy),
-        valve_half,
-        false,
-        ValveId::Pressurization,
-        false,
+        k,
     );
     painter.line(
         vec![
@@ -484,16 +767,16 @@ pub fn draw_hybrid(
         stroke,
     );
     painter.circle_filled(pos2(center_x, junction_cy), junction_r, node_color);
-    painter.text(
-        pos2(center_x - junction_r - LABEL_GAP, junction_cy - junction_r),
-        Align2::RIGHT_TOP,
-        "P3",
-        label_font.clone(),
-        node_color,
-    );
 
-    let vent_end_x = square.right();
-    let vent_valve_cx = (center_x + tank_w * 0.35 + vent_end_x) / 2.0;
+    let boxed = draw_valve_tag(
+        pos2(vent_valve_cx, junction_cy),
+        valve_half,
+        true,
+        ValveId::PressurantVent,
+        Side::Above,
+        false,
+        blink[super::Valve::index(ValveId::PressurantVent)],
+    );
     draw_valve(
         &painter,
         pos2(vent_valve_cx, junction_cy),
@@ -503,8 +786,9 @@ pub fn draw_hybrid(
         stroke_pressurant_vent,
         cmd(ValveId::PressurantVent),
         hatch_stride,
-        blink[super::Valve::index(ValveId::PressurantVent)],
+        blink[super::Valve::index(ValveId::PressurantVent)] && !boxed,
         time,
+        k,
     );
     interact_valve(
         ui,
@@ -516,13 +800,7 @@ pub fn draw_hybrid(
         true,
         *mode,
         pulse_secs,
-    );
-    draw_valve_label(
-        pos2(vent_valve_cx, junction_cy),
-        valve_half,
-        true,
-        ValveId::PressurantVent,
-        false,
+        k,
     );
     painter.line(
         vec![
@@ -554,6 +832,15 @@ pub fn draw_hybrid(
         ],
         stroke,
     );
+    let boxed = draw_valve_tag(
+        pos2(tank_vent_valve_cx, tank_vent_y),
+        valve_half,
+        true,
+        ValveId::OxidizerVent,
+        Side::Below,
+        false,
+        blink[super::Valve::index(ValveId::OxidizerVent)],
+    );
     draw_valve(
         &painter,
         pos2(tank_vent_valve_cx, tank_vent_y),
@@ -563,8 +850,9 @@ pub fn draw_hybrid(
         stroke_oxidizer_vent,
         cmd(ValveId::OxidizerVent),
         hatch_stride,
-        blink[super::Valve::index(ValveId::OxidizerVent)],
+        blink[super::Valve::index(ValveId::OxidizerVent)] && !boxed,
         time,
+        k,
     );
     interact_valve(
         ui,
@@ -576,13 +864,7 @@ pub fn draw_hybrid(
         true,
         *mode,
         pulse_secs,
-    );
-    draw_valve_label(
-        pos2(tank_vent_valve_cx, tank_vent_y),
-        valve_half,
-        true,
-        ValveId::OxidizerVent,
-        false,
+        k,
     );
     painter.line(
         vec![
@@ -599,79 +881,57 @@ pub fn draw_hybrid(
         stroke,
     );
 
-    let oxidizer_vent = system
-        .last_instance_message::<Valve>(i64::from(ValveId::OxidizerVent.value()))
-        .ok();
-    let oxidizer_vent_temp = oxidizer_vent
-        .as_ref()
-        .and_then(|v| temperature_c(v.temperature));
-    let heater = oxidizer_vent
-        .as_ref()
-        .filter(|v| v.flags.contains(ValveFlag::HEATED))
-        .map(|v| v.flags.contains(ValveFlag::HEATER_ON));
-    let temp_font = egui::FontId::monospace(12.0);
-    let temp_readout = oxidizer_vent_temp.map(|t| Readout {
-        value: t,
-        decimals: 0,
-        unit: Some("\u{00b0}C"),
-        font: temp_font.clone(),
-        color: schematic_ink(&visuals),
-        ..Default::default()
-    });
-    let temp_missing = painter.layout_no_wrap("--\u{00b0}C".to_owned(), temp_font, label_color);
-    let size = temp_readout
-        .as_ref()
-        .map_or(temp_missing.size(), |r| r.size(ui.ctx()));
-    let heater_size = Vec2::new(0.8, 1.0) * size.y;
-    let group_w = size.x + heater.map_or(0.0, |_| LABEL_GAP + heater_size.x);
-    let group_left =
-        (tank_vent_valve_cx + LABEL_GAP - group_w / 2.0).min(square.right() - LABEL_GAP - group_w);
-    let temp_rect = Rect::from_min_size(
-        pos2(
-            group_left,
-            tank_vent_y + valve_half * VALVE_GLYPH_BASE_RATIO + LABEL_GAP,
-        ),
-        size,
-    );
-    match temp_readout {
-        Some(r) => {
-            r.paint(&painter, temp_rect.min, Align2::LEFT_TOP);
-        }
-        None => painter.galley(temp_rect.min, temp_missing, label_color),
-    }
-    if let Some(on) = heater {
-        let color = if on {
-            readable(COLOR_INDICATOR_LIMITS, &visuals)
-        } else {
-            schematic_line(&visuals)
-        };
-        let heater_rect = Rect::from_center_size(
+    // The compact schematic has room for the oxidizer vent's readings only, as a line under it.
+    if let Some(sensors) = ValveSensors::read(system, ValveId::OxidizerVent)
+        && !detailed
+        && sensors.has_temperature()
+    {
+        let temp_readout = sensors.temperature.map(|t| Readout {
+            value: t,
+            decimals: 0,
+            unit: Some("\u{00b0}C"),
+            font: temp_font.clone(),
+            color: schematic_ink(&visuals),
+            ..Default::default()
+        });
+        let temp_missing =
+            painter.layout_no_wrap("--\u{00b0}C".to_owned(), temp_font.clone(), label_color);
+        let size = temp_readout
+            .as_ref()
+            .map_or(temp_missing.size(), |r| r.size(ui.ctx()));
+        let heater_size = Vec2::new(0.8, 1.0) * size.y;
+        let group_w = size.x + sensors.heater.map_or(0.0, |_| gap + heater_size.x);
+        let group_left =
+            (tank_vent_valve_cx + gap - group_w / 2.0).min(square.right() - gap - group_w);
+        let temp_rect = Rect::from_min_size(
             pos2(
-                temp_rect.right() + LABEL_GAP + heater_size.x / 2.0,
-                temp_rect.center().y,
+                group_left,
+                tank_vent_y + valve_half * VALVE_GLYPH_BASE_RATIO + gap,
             ),
-            heater_size,
+            size,
         );
-        draw_heater(&painter, heater_rect, Stroke::new(1.5_f32, color));
+        match temp_readout {
+            Some(r) => {
+                r.paint(&painter, temp_rect.min, Align2::LEFT_TOP);
+            }
+            None => painter.galley(temp_rect.min, temp_missing, label_color),
+        }
+        if let Some(on) = sensors.heater {
+            let color = if on {
+                readable(COLOR_INDICATOR_LIMITS, &visuals)
+            } else {
+                schematic_line(&visuals)
+            };
+            let heater_rect = Rect::from_center_size(
+                pos2(
+                    temp_rect.right() + gap + heater_size.x / 2.0,
+                    temp_rect.center().y,
+                ),
+                heater_size,
+            );
+            draw_heater(&painter, heater_rect, Stroke::new(1.5 * k, color));
+        }
     }
-
-    let indicator = MeasurementIndicator {
-        values: vec![n2o_temp1, n2o_temp2],
-        unit: "\u{00b0}C",
-        color: schematic_ink(&visuals),
-        decimals: Some(0),
-        // No temperature limit in the message yet; flag missing readings instead.
-        blink: n2o_temp1.is_none() || n2o_temp2.is_none(),
-    };
-    let size = indicator.intrinsic_size(ui.ctx());
-    let tank_temp_cy = tank_rect
-        .center()
-        .y
-        .max(temp_rect.bottom() + LABEL_GAP + size.y / 2.0);
-    ui.place(
-        Rect::from_center_size(pos2(temp_cx, tank_temp_cy), size),
-        indicator,
-    );
 
     let tank_vent_bot_x = center_x - tank_w * 0.35;
     let tank_vent_bot_y = tank_rect.bottom() + 0.025 * n;
@@ -681,13 +941,21 @@ pub fn draw_hybrid(
         tank_rect.bottom() - bulkhead_h * (1.0 - (1.0 - ratio * ratio).sqrt())
     };
     let bot_vent_end_x = square.left();
-    let bot_vent_valve_cx = 2.0 * center_x - vent_valve_cx;
     painter.line(
         vec![
             pos2(tank_vent_bot_x, tank_vent_bot_start_y),
             pos2(tank_vent_bot_x, tank_vent_bot_y),
         ],
         stroke,
+    );
+    let boxed = draw_valve_tag(
+        pos2(bot_vent_valve_cx, tank_vent_bot_y),
+        valve_half,
+        true,
+        ValveId::OxidizerFill,
+        Side::Below,
+        false,
+        blink[super::Valve::index(ValveId::OxidizerFill)],
     );
     draw_valve(
         &painter,
@@ -698,8 +966,9 @@ pub fn draw_hybrid(
         stroke_oxidizer_fill,
         cmd(ValveId::OxidizerFill),
         hatch_stride,
-        blink[super::Valve::index(ValveId::OxidizerFill)],
+        blink[super::Valve::index(ValveId::OxidizerFill)] && !boxed,
         time,
+        k,
     );
     interact_valve(
         ui,
@@ -711,13 +980,7 @@ pub fn draw_hybrid(
         true,
         *mode,
         pulse_secs,
-    );
-    draw_valve_label(
-        pos2(bot_vent_valve_cx, tank_vent_bot_y),
-        valve_half,
-        true,
-        ValveId::OxidizerFill,
-        false,
+        k,
     );
     painter.line(
         vec![
@@ -760,22 +1023,13 @@ pub fn draw_hybrid(
     // Each tank is entered from the bottom by its fill line (from the boundary
     // through the external fill valve) and vented from the top through its external
     // vent valve; both valves ride the tank's vertical riser.
-    let lane_right = square.left();
-    let ext_tank_w = 0.075 * n;
     let ext_tank_h = 0.13 * n;
     let ext_bulkhead_h = TANK_BULKHEAD_RATIO * ext_tank_h;
     let gse_valve_half = valve_half * 0.85;
-    // Tanks hug the boundary; the fill valve rides the vertical riser directly
-    // below each tank.
-    let ext_cx = lane_right - ext_tank_w / 2.0 - 0.006 * n;
     let gse_gap = 0.012 * n;
     // Length of each riser (fill below, vent above): a valve plus a gap either side.
     let ext_riser = 2.0 * gse_gap + 2.0 * gse_valve_half;
 
-    // Dashed skin: everything left of it is off-vehicle (ground support). Centered
-    // between the external and onboard oxidizer-fill valves, and stopped short of
-    // the bottom so it clears the mode toggle in the corner.
-    let skin_x = f32::midpoint(ext_cx, bot_vent_valve_cx);
     for shape in Shape::dashed_line(
         &[
             pos2(skin_x, strip.top() + 0.02 * n),
@@ -799,7 +1053,6 @@ pub fn draw_hybrid(
     let ext_ox_rect = ext_tank_rect(tank_vent_bot_y);
 
     draw_capsule_tank(&painter, ext_press_rect, ext_bulkhead_h, fill, stroke);
-    draw_tank_label(ext_press_rect, 4, ext_n2_color);
     draw_hatching(
         &painter,
         &capsule_polygon(ext_press_rect, ext_bulkhead_h),
@@ -810,7 +1063,6 @@ pub fn draw_hybrid(
     );
 
     draw_capsule_tank(&painter, ext_ox_rect, ext_bulkhead_h, fill, stroke);
-    draw_tank_label(ext_ox_rect, 5, ext_n2o_color);
     draw_tank_fill(
         &painter,
         ext_ox_rect,
@@ -822,14 +1074,16 @@ pub fn draw_hybrid(
         hatch_stride,
     );
 
-    for (rect, color, pressure, warn) in [
+    for (id, rect, color, pressure, warn) in [
         (
+            4,
             ext_press_rect,
             ext_n2_color,
             ext_pressurant_bar,
             vessel_warn(ext_pressurant.as_ref()),
         ),
         (
+            5,
             ext_ox_rect,
             ext_n2o_color,
             ext_oxidizer_bar,
@@ -837,16 +1091,17 @@ pub fn draw_hybrid(
         ),
     ] {
         let indicator = MeasurementIndicator {
-            values: vec![pressure],
-            unit: "bar",
-            color,
-            decimals: None,
+            label: Some((format!("P{id}"), color)),
+            sections: vec![bar(vec![pressure], color)],
             // External vessels legitimately read unavailable when disconnected, so
             // a missing value is not a fault; only a real overpressure warns.
             blink: warn,
+            scale: k,
         };
         let size = indicator.intrinsic_size(ui.ctx());
-        ui.place(Rect::from_center_size(rect.center(), size), indicator);
+        let rect = Rect::from_center_size(rect.center(), size);
+        obstacles.borrow_mut().push(rect);
+        ui.place(rect, indicator);
     }
 
     for (rect, fill_cy, fill_id, vent_id, available) in [
@@ -891,6 +1146,15 @@ pub fn draw_hybrid(
         let (fill_color, fill_stroke, fill_cmd, fill_blink) =
             valve_visual(fill_id, fill_stroke, fill_color);
         let lower_valve_cy = fill_cy - gse_gap - gse_valve_half;
+        let boxed = draw_valve_tag(
+            pos2(ext_cx, lower_valve_cy),
+            gse_valve_half,
+            false,
+            fill_id,
+            Side::Left,
+            !available,
+            fill_blink,
+        );
         draw_valve(
             &painter,
             pos2(ext_cx, lower_valve_cy),
@@ -900,8 +1164,9 @@ pub fn draw_hybrid(
             fill_stroke,
             fill_cmd,
             hatch_stride,
-            fill_blink,
+            fill_blink && !boxed,
             time,
+            k,
         );
         if available {
             interact_valve(
@@ -914,15 +1179,9 @@ pub fn draw_hybrid(
                 false,
                 *mode,
                 pulse_secs,
+                k,
             );
         }
-        draw_valve_label(
-            pos2(ext_cx, lower_valve_cy),
-            gse_valve_half,
-            false,
-            fill_id,
-            !available,
-        );
         painter.line(
             vec![pos2(lane_right, fill_cy), pos2(ext_cx, fill_cy)],
             pipe_stroke,
@@ -947,6 +1206,15 @@ pub fn draw_hybrid(
         let (vent_color, vent_stroke, vent_cmd, vent_blink) =
             valve_visual(vent_id, vent_stroke, vent_color);
         let upper_valve_cy = rect.top() - gse_gap - gse_valve_half;
+        let boxed = draw_valve_tag(
+            pos2(ext_cx, upper_valve_cy),
+            gse_valve_half,
+            false,
+            vent_id,
+            Side::Left,
+            !available,
+            vent_blink,
+        );
         draw_valve(
             &painter,
             pos2(ext_cx, upper_valve_cy),
@@ -956,8 +1224,9 @@ pub fn draw_hybrid(
             vent_stroke,
             vent_cmd,
             hatch_stride,
-            vent_blink,
+            vent_blink && !boxed,
             time,
+            k,
         );
         if available {
             interact_valve(
@@ -970,15 +1239,9 @@ pub fn draw_hybrid(
                 false,
                 *mode,
                 pulse_secs,
+                k,
             );
         }
-        draw_valve_label(
-            pos2(ext_cx, upper_valve_cy),
-            gse_valve_half,
-            false,
-            vent_id,
-            !available,
-        );
         painter.line(
             vec![
                 pos2(ext_cx, rect.top()),
@@ -995,6 +1258,15 @@ pub fn draw_hybrid(
         );
     }
 
+    let boxed = draw_valve_tag(
+        pos2(center_x, valve_bot_cy),
+        valve_half,
+        false,
+        ValveId::Main,
+        Side::Right,
+        false,
+        blink[super::Valve::index(ValveId::Main)],
+    );
     draw_valve(
         &painter,
         pos2(center_x, valve_bot_cy),
@@ -1004,8 +1276,9 @@ pub fn draw_hybrid(
         valve_stroke_main,
         cmd(ValveId::Main),
         hatch_stride,
-        blink[super::Valve::index(ValveId::Main)],
+        blink[super::Valve::index(ValveId::Main)] && !boxed,
         time,
+        k,
     );
     interact_valve(
         ui,
@@ -1017,13 +1290,7 @@ pub fn draw_hybrid(
         false,
         *mode,
         pulse_secs,
-    );
-    draw_valve_label(
-        pos2(center_x, valve_bot_cy),
-        valve_half,
-        false,
-        ValveId::Main,
-        false,
+        k,
     );
     painter.line(
         vec![
@@ -1051,10 +1318,6 @@ pub fn draw_hybrid(
         pos2(center_x - cc_w / 2.0, cc_bottom),
     ];
 
-    let cc_interior = Rect::from_min_max(
-        pos2(center_x - cc_w / 2.0, cc_top),
-        pos2(center_x + cc_w / 2.0, cc_bottom),
-    );
     let cc_polygon = vec![
         pos2(cc_interior.left(), cc_interior.top()),
         pos2(cc_interior.right(), cc_interior.top()),
@@ -1073,9 +1336,8 @@ pub fn draw_hybrid(
     draw_fuel_grain(&painter, cc_interior, fuel_port_half, stroke, fuel_color);
 
     painter.add(Shape::Path(PathShape::closed_line(chamber_path, stroke)));
-    draw_tank_label(cc_interior, 2, cc_color);
 
-    draw_valve_mode_toggle(ui, strip, mode, pulse, pulse_durations);
+    draw_valve_mode_toggle(ui, strip, mode, pulse, pulse_durations, k);
 }
 
 // Bottom-left selector that switches what a click on a valve does, bottom-right
@@ -1087,8 +1349,9 @@ fn draw_valve_mode_toggle(
     mode: &mut ValveInteractionMode,
     pulse: &mut usize,
     pulse_durations: [f32; 3],
+    k: f32,
 ) {
-    let font = FontId::proportional(12.0);
+    let font = FontId::proportional(12.0 * k);
     // Wide enough for the longest label, so a stack's buttons line up.
     let size = |labels: &[&str]| {
         let text = labels
@@ -1101,7 +1364,7 @@ fn draw_valve_mode_toggle(
                 })
             })
             .fold(0.0, f32::max);
-        Vec2::new(text + 2.0 * ui.spacing().button_padding.x, 18.0)
+        Vec2::new(text + 2.0 * k * ui.spacing().button_padding.x, 18.0 * k)
     };
     let visuals = ui.visuals().clone();
     let outline = |selected: bool, label: &str| {
@@ -1120,7 +1383,7 @@ fn draw_valve_mode_toggle(
     let bounds = square.intersect(ui.clip_rect());
     let stack = |ui: &mut egui::Ui| {
         ui.set_clip_rect(bounds);
-        ui.spacing_mut().item_spacing.y = 2.0;
+        ui.spacing_mut().item_spacing.y = 2.0 * k;
         // A button's margins follow its state's expansion and stroke width even
         // with both overridden, so hovering would resize it and shift the stack.
         let widgets = &mut ui.visuals_mut().widgets;
@@ -1141,8 +1404,8 @@ fn draw_valve_mode_toggle(
     let pulse_size = size(&labels.each_ref().map(String::as_str));
 
     // Both stacks are three buttons tall; the pulse stack goes first when space runs out.
-    let inset = 6.0;
-    let fits_height = bounds.height() >= 3.0 * mode_size.y + 2.0 * 2.0 + 2.0 * inset;
+    let inset = 6.0 * k;
+    let fits_height = bounds.height() >= 3.0 * mode_size.y + 2.0 * 2.0 * k + 2.0 * inset;
     let show_mode = fits_height && bounds.width() >= mode_size.x + 2.0 * inset;
     let show_pulse = show_mode
         && *mode == ValveInteractionMode::Pulse
@@ -1684,6 +1947,7 @@ fn draw_valve(
     hatch_stride: f32,
     blink_box: bool,
     time: f64,
+    k: f32,
 ) {
     let warning = readable(
         COLOR_INDICATOR_WARNING,
@@ -1718,10 +1982,10 @@ fn draw_valve(
             Vec2::new(half * 1.6, half * 2.0)
         };
         painter.rect(
-            Rect::from_center_size(center, size).expand(4.0),
+            Rect::from_center_size(center, size).expand(4.0 * k),
             CornerRadius::same(2),
             Color32::TRANSPARENT,
-            Stroke::new(2.0_f32, warning),
+            Stroke::new(2.0 * k, warning),
             StrokeKind::Outside,
         );
     }
@@ -1738,6 +2002,7 @@ fn interact_valve(
     horizontal: bool,
     mode: ValveInteractionMode,
     pulse_duration: f32,
+    k: f32,
 ) {
     if system.muted() {
         return;
@@ -1765,7 +2030,7 @@ fn interact_valve(
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         let visuals = ui.visuals();
         painter.rect(
-            rect.expand(2.0),
+            rect.expand(2.0 * k),
             CornerRadius::same(2),
             schematic_wash(visuals, 15),
             Stroke::new(1.0_f32, schematic_wash(visuals, 60)),

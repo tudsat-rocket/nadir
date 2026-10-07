@@ -98,7 +98,8 @@ pub struct BatteryIndicator {
     pub id: u8,
     pub reading: BatteryReading,
     /// Drops the id and consumed charge, shrinks the values below the charge, and adds temperature.
-    pub compact: bool,
+    /// Holds how far the text may grow past the schematic's other readouts at their base size.
+    pub compact: Option<f32>,
 }
 
 impl BatteryIndicator {
@@ -128,7 +129,7 @@ impl BatteryIndicator {
 
     /// Scale and inner size of the compact form in at most `max_inner`: four rows tall, wide
     /// enough for the widest current, and never larger than the schematic's other readouts.
-    fn compact_layout(ui: &egui::Ui, max_inner: Vec2) -> (f32, Vec2) {
+    fn compact_layout(ui: &egui::Ui, max_inner: Vec2, max_scale: f32) -> (f32, Vec2) {
         let ctx = ui.ctx();
         let base = egui::TextStyle::Monospace.resolve(ui.style()).size;
         let widest = Self::row(-999.0, 0, "mA", Color32::PLACEHOLDER, base * SMALL).size(ctx);
@@ -140,14 +141,14 @@ impl BatteryIndicator {
 
         let scale = (max_inner / natural)
             .min_elem()
-            .min(MeasurementIndicator::value_font().size / base);
+            .min(MeasurementIndicator::value_font().size * max_scale / base);
         (scale, natural * scale)
     }
 
     /// Outer size of the compact form placed in at most `max`.
-    pub fn compact_size(ui: &egui::Ui, max: Vec2) -> Vec2 {
+    pub fn compact_size(ui: &egui::Ui, max: Vec2, max_scale: f32) -> Vec2 {
         let margin = Self::frame(ui.style()).total_margin().sum();
-        Self::compact_layout(ui, max - margin).1 + margin
+        Self::compact_layout(ui, max - margin, max_scale).1 + margin
     }
 }
 
@@ -168,8 +169,8 @@ impl egui::Widget for BatteryIndicator {
                 ui.set_height(s.y);
 
                 let base = egui::TextStyle::Monospace.resolve(ui.style()).size;
-                let (size, small, bar_w) = if self.compact {
-                    let (scale, _) = Self::compact_layout(ui, s);
+                let (size, small, bar_w) = if let Some(max_scale) = self.compact {
+                    let (scale, _) = Self::compact_layout(ui, s, max_scale);
                     ui.spacing_mut().item_spacing = Vec2::new(COMPACT_BAR_GAP * scale, 0.0);
                     (base * scale, base * scale * SMALL, COMPACT_BAR_W * scale)
                 } else {
@@ -191,7 +192,7 @@ impl egui::Widget for BatteryIndicator {
                     painter.rect_filled(fill_rect, CornerRadius::ZERO, color);
 
                     ui.with_layout(Layout::top_down(Align::RIGHT), |ui| {
-                        if !self.compact {
+                        if self.compact.is_none() {
                             ui.weak(format!("#{}", self.id));
                             ui.add_space(5.0);
                         }
@@ -215,21 +216,21 @@ impl egui::Widget for BatteryIndicator {
                                 f32::min(i_log, 1.0),
                             );
                             // Sub-amp avionics draws would otherwise all read as "0.xA".
-                            ui.add(if self.compact && i.abs() < 1.0 {
+                            ui.add(if self.compact.is_some() && i.abs() < 1.0 {
                                 Self::row(i * 1000.0, 0, "mA", color, small)
                             } else {
                                 Self::row(i, 1, "A", color, small)
                             });
                         }
 
-                        if self.compact
+                        if self.compact.is_some()
                             && let Some(t) = reading.temperature
                         {
                             let color = ui.visuals().text_color();
                             ui.add(Self::row(t, 0, "\u{00b0}C", color, small));
                         }
 
-                        if !self.compact
+                        if self.compact.is_none()
                             && let Some(cap) = reading.consumed
                         {
                             ui.add_space(5.0);

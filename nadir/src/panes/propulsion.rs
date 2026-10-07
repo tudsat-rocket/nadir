@@ -170,7 +170,7 @@ fn debounce_blink(since: &mut Option<f64>, mismatch: bool, now: f64) -> bool {
     }
 }
 
-pub(super) fn battery_indicators(system: &System, compact: bool) -> Vec<BatteryIndicator> {
+pub(super) fn battery_indicators(system: &System, compact: Option<f32>) -> Vec<BatteryIndicator> {
     BatteryReading::all(system)
         .into_iter()
         .map(|(id, reading)| BatteryIndicator {
@@ -205,7 +205,7 @@ impl PropulsionPane {
 
     fn draw_battery(&mut self, ui: &mut egui::Ui, system: &System, pos: Pos2) {
         let battery_rect = Rect::from_center_size(pos, Vec2::new(60.0, 120.0));
-        if let Some(indicator) = battery_indicators(system, false).into_iter().next() {
+        if let Some(indicator) = battery_indicators(system, None).into_iter().next() {
             ui.place(battery_rect, indicator);
         }
     }
@@ -360,7 +360,7 @@ impl PaneUi for PropulsionPane {
             let h = rect.height();
             // Wider than the flight plant alone: the left slice is a ground-support
             // lane for the external tanks and fill valves (see rocket::draw_hybrid).
-            let w = h * 0.438;
+            let w = rocket::strip_width(rect.size());
             ui.horizontal_top(|ui| {
                 let now = ui.input(|i| i.time);
                 let blink = self.update_valve_blink(&system, now);
