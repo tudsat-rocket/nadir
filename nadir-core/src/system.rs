@@ -412,7 +412,7 @@ impl System {
         self.send_message(&cmd);
     }
 
-    /// `instance` is 1-based, a negative `length` winds the line in.
+    /// `instance` is 1-based.
     pub fn do_winch_relative(&self, instance: u8, length: f32) {
         let cmd = CommandLong {
             target_system: self.system_id,

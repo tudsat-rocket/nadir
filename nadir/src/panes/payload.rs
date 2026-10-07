@@ -10,7 +10,8 @@ pub struct PayloadPane {
 }
 
 impl PayloadPane {
-    const INSTANCES: [u8; 2] = [1, 2];
+    /// Indexed by 0-based gripper/winch instance.
+    const QUICK_DISCONNECTS: [&str; 2] = ["Pressurant", "Oxidizer"];
 
     pub fn new(_ctx: &egui::Context) -> Self {
         Self { winch_step: 1.0 }
@@ -39,8 +40,8 @@ impl PaneUi for PayloadPane {
         });
 
         egui::Grid::new("payload").striped(true).show(ui, |ui| {
-            for instance in Self::INSTANCES {
-                ui.label(format!("QD {instance}"));
+            for (instance, name) in (1..).zip(Self::QUICK_DISCONNECTS) {
+                ui.label(name);
                 if Self::button(ui, &system, "Grip") {
                     system.do_gripper(instance, true);
                 }
