@@ -103,6 +103,14 @@ pub(super) fn valve_reading(system: &System, id: ValveId) -> Option<ValveReading
         })
 }
 
+// A valve that has not reported yet counts as commandable.
+pub(super) fn valve_commandable(system: &System, id: ValveId) -> bool {
+    system
+        .last_instance_message::<Valve>(i64::from(id.value()))
+        .ok()
+        .is_none_or(|v| v.flags.contains(ValveFlag::COMMANDABLE))
+}
+
 pub(super) fn valve_state(system: &System, id: ValveId) -> Option<f32> {
     valve_reading(system, id).and_then(|r| r.state)
 }
@@ -2009,7 +2017,7 @@ fn interact_valve(
     pulse_duration: f32,
     k: f32,
 ) {
-    if system.muted() {
+    if system.muted() || !valve_commandable(system, id) {
         return;
     }
 

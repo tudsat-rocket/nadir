@@ -52,6 +52,8 @@ const GAUGE_SWEEP: f32 = 1.5 * PI;
 const STATE_FONT_RATIO: f32 = 0.62;
 const STATE_FONT_MIN: f32 = 7.0;
 
+const ONBOARD_HINT: &str = "Controlled onboard";
+
 // Knob grid layout, buttons beside the knob (wide) or below it (tall). Every size above is
 // multiplied by `scale`.
 #[derive(Copy, Clone)]
@@ -214,7 +216,6 @@ fn knob(
         Rect::from_min_max(rect.min, close.left_bottom()),
         s,
     );
-    close_button(ui, system, id, commanded, close, s);
 
     let body = rect.top() + (NAME_H + GAP) * s;
     let group = Plan::group(s);
@@ -238,14 +239,19 @@ fn knob(
 
     let font = FontId::monospace((plan.gauge * GAUGE_FONT_RATIO).max(GAUGE_FONT_MIN * s));
     gauge(ui, dial, reading, blink, time);
+    if kind != ValveKind::Servo {
+        reported(ui, dial, &font, reading, s);
+    }
+
+    if !rocket::valve_commandable(system, id) {
+        ui.disable();
+    }
+    close_button(ui, system, id, commanded, close, s);
     if kind == ValveKind::Servo {
         target_drag(ui, hub(dial, s), font, system, commanded, pending, |v| {
             system.do_set_valve(id, v);
         });
-    } else {
-        reported(ui, dial, &font, reading, s);
     }
-
     open_group(ui, system, id, commanded, pulse_durations, group, s);
 }
 
@@ -284,7 +290,7 @@ fn close_button(
     let latched = matches!(commanded, Some(c) if c <= VALVE_LATCH_EPS);
     let close = label_button(text, BTN_FONT * scale, rect.size()).selected(latched);
 
-    let close = ui.put(rect, close);
+    let close = ui.put(rect, close).on_disabled_hover_text(ONBOARD_HINT);
     if Hazard::confirm(ui, &close, system) {
         system.do_set_valve(id, 0.0);
     }
@@ -316,7 +322,7 @@ fn open_group(
         open = open.fill(fill);
         ui.style_mut().visuals.override_text_color = Some(text_on(fill));
     }
-    let open = ui.put(open_rect, open);
+    let open = ui.put(open_rect, open).on_disabled_hover_text(ONBOARD_HINT);
     if Hazard::confirm(ui, &open, system) {
         system.do_set_valve(id, 1.0);
     }
@@ -330,7 +336,9 @@ fn open_group(
         );
         let text = format!("{secs}s");
         let button = label_button(&text, PULSE_FONT * scale, size);
-        let button = ui.put(Rect::from_min_size(min, size), button);
+        let button = ui
+            .put(Rect::from_min_size(min, size), button)
+            .on_disabled_hover_text(ONBOARD_HINT);
         if Hazard::confirm(ui, &button, system) {
             system.do_pulse_valve(id, secs);
         }
@@ -359,6 +367,11 @@ fn target_drag(
     send: impl FnOnce(f32),
 ) {
     let mut value = pending.unwrap_or(commanded.unwrap_or(0.0) * 100.0);
+    let hint = if ui.is_enabled() {
+        "Set HOT to drag"
+    } else {
+        ONBOARD_HINT
+    };
     let resp = ui
         .scope(|ui| {
             // Unframed until hovered, except in high contrast.
@@ -375,7 +388,7 @@ fn target_drag(
                 .suffix("%");
             ui.add_enabled_ui(system.hot(), |ui| ui.put(hub, drag))
                 .inner
-                .on_disabled_hover_text("Set HOT to drag")
+                .on_disabled_hover_text(hint)
         })
         .inner;
 
