@@ -376,12 +376,15 @@ impl PaneUi for PropulsionPane {
                     // The floating scroll bar allocates no width but covers the last column.
                     let scroll = &ui.spacing().scroll;
                     let bar = scroll.bar_inner_margin + scroll.bar_width + scroll.bar_outer_margin;
-                    let plan = valves::Plan::best(Vec2::new(
-                        (ui.available_width() - bar).max(0.0),
-                        budget,
-                    ));
+                    // Grows far slower than the schematic: the controls are already at a usable size.
+                    let plan = valves::Plan::best(
+                        Vec2::new((ui.available_width() - bar).max(0.0), budget),
+                        1.0 + (rocket::scale(h) - 1.0) / 2.0,
+                    );
+                    let scale = plan.scale();
+                    let header_h = VALVES_HEADER_H * scale;
                     let grid_h = plan.height(budget);
-                    let history_h = (avail - VALVES_HEADER_H - grid_h) / 3.5;
+                    let history_h = (avail - header_h - grid_h) / 3.5;
 
                     let header_id = egui::Id::new(("propulsion_valves_header", system_id));
                     let header = CollapsingState::load_with_default_open(ui.ctx(), header_id, true);
@@ -391,13 +394,16 @@ impl PaneUi for PropulsionPane {
                         .resizable(false)
                         .show_separator_line(false)
                         .frame(egui::Frame::new())
-                        .exact_size(VALVES_HEADER_H + body_h)
+                        .exact_size(header_h + body_h)
                         .show(ui, |ui| {
                             ui.separator();
                             header
                                 .show_header(ui, |ui| {
-                                    let label = Label::new(RichText::new("🚰 Valves").weak())
-                                        .sense(Sense::click());
+                                    let size = egui::TextStyle::Body.resolve(ui.style()).size;
+                                    let label = Label::new(
+                                        RichText::new("🚰 Valves").weak().size(size * scale),
+                                    )
+                                    .sense(Sense::click());
                                     label_clicked = ui.add(label).clicked();
                                     Hazard::tick(ui, ui.max_rect(), &system);
                                 })

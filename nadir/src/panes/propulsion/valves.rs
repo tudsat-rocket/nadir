@@ -36,8 +36,6 @@ const SERVO_DRAG_W: f32 = 44.0;
 const PULSE_W: f32 = 22.0;
 const PULSE_H: f32 = 18.0;
 const OUTLINE_PAD: f32 = 4.0;
-const GROUP_W: f32 = 3.0 * PULSE_W + 2.0 * GAP + 2.0 * OUTLINE_PAD;
-const GROUP_H: f32 = OPEN_H + GAP + PULSE_H + 2.0 * OUTLINE_PAD;
 
 const GAUGE_MIN: f32 = 36.0;
 const GAUGE_MAX: f32 = 52.0;
@@ -54,16 +52,11 @@ const GAUGE_SWEEP: f32 = 1.5 * PI;
 const STATE_FONT_RATIO: f32 = 0.62;
 const STATE_FONT_MIN: f32 = 7.0;
 
-const WIDE_CHROME: f32 = NAME_H + GAP;
-const TALL_CHROME: f32 = NAME_H + 2.0 * GAP + GROUP_H;
-const WIDE_KNOB_MIN: f32 = GROUP_H;
-
-const WIDE_MIN_W: f32 = GROUP_H + GAP + GROUP_W;
-const TALL_MIN_W: f32 = GROUP_W;
-
-// Knob grid layout, buttons beside the knob (wide) or below it (tall).
+// Knob grid layout, buttons beside the knob (wide) or below it (tall). Every size above is
+// multiplied by `scale`.
 #[derive(Copy, Clone)]
 pub(super) struct Plan {
+    scale: f32,
     wide: bool,
     cols: usize,
     cell: Vec2,
@@ -72,21 +65,34 @@ pub(super) struct Plan {
 }
 
 impl Plan {
-    fn new(wide: bool, avail: Vec2) -> Self {
-        let gap = CELL_GAP;
-        let (min_w, chrome, knob_min) = if wide {
-            (WIDE_MIN_W, WIDE_CHROME, WIDE_KNOB_MIN)
-        } else {
-            (TALL_MIN_W, TALL_CHROME, GAUGE_MIN)
+    fn new(wide: bool, avail: Vec2, scale: f32) -> Self {
+        // (minimum cell width, height besides the knob, minimum knob)
+        let dims = |scale: f32| {
+            let group = Self::group(scale);
+            let (name_h, gap) = (NAME_H * scale, GAP * scale);
+            if wide {
+                (group.y + gap + group.x, name_h + gap, group.y)
+            } else {
+                (group.x, name_h + 2.0 * gap + group.y, GAUGE_MIN * scale)
+            }
         };
 
-        let fit = (((avail.x + gap.x) / (min_w + gap.x)).floor() as usize).clamp(1, CELL_COUNT);
+        let (base_w, ..) = dims(1.0);
+        let fit = (((avail.x + CELL_GAP.x) / (base_w + CELL_GAP.x)).floor() as usize)
+            .clamp(1, CELL_COUNT);
         // Spread the cells evenly over the rows they already need.
         let cols = CELL_COUNT.div_ceil(CELL_COUNT.div_ceil(fit));
+        // Growing never costs a column, since that would take more room than it gives.
+        let needed = cols as f32 * base_w + (cols - 1) as f32 * CELL_GAP.x;
+        let scale = scale.min(avail.x / needed).max(1.0);
+        let gap = CELL_GAP * scale;
+        let (min_w, chrome, knob_min) = dims(scale);
         let rows = CELL_COUNT.div_ceil(cols);
 
         let spare = (avail.y - (rows - 1) as f32 * gap.y).max(0.0) / rows as f32;
-        let gauge = (spare - chrome).clamp(GAUGE_MIN, GAUGE_MAX).max(knob_min);
+        let gauge = (spare - chrome)
+            .clamp(GAUGE_MIN * scale, GAUGE_MAX * scale)
+            .max(knob_min);
         let cell = Vec2::new(
             ((avail.x - (cols - 1) as f32 * gap.x) / cols as f32)
                 .max(min_w)
@@ -95,6 +101,7 @@ impl Plan {
         );
 
         Self {
+            scale,
             wide,
             cols,
             cell,
@@ -104,8 +111,11 @@ impl Plan {
     }
 
     // Biggest knob that fits; failing that, the lowest grid.
-    pub(super) fn best(avail: Vec2) -> Self {
-        let (wide, tall) = (Self::new(true, avail), Self::new(false, avail));
+    pub(super) fn best(avail: Vec2, scale: f32) -> Self {
+        let (wide, tall) = (
+            Self::new(true, avail, scale),
+            Self::new(false, avail, scale),
+        );
         let pick = |take_wide: bool| if take_wide { wide } else { tall };
         match (wide.height <= avail.y, tall.height <= avail.y) {
             (true, true) => pick(wide.gauge >= tall.gauge),
@@ -117,8 +127,20 @@ impl Plan {
 
     // A bottom panel sizes itself to its content, and a scroll area reports its
     // collapsed minimum, so the panel has to be told how tall the grid will be.
+    pub(super) fn scale(&self) -> f32 {
+        self.scale
+    }
+
     pub(super) fn height(&self, budget: f32) -> f32 {
         self.height.min(budget)
+    }
+
+    /// Size of the OPEN button above the pulse buttons, outline included.
+    fn group(scale: f32) -> Vec2 {
+        Vec2::new(
+            3.0 * PULSE_W + 2.0 * GAP + 2.0 * OUTLINE_PAD,
+            OPEN_H + GAP + PULSE_H + 2.0 * OUTLINE_PAD,
+        ) * scale
     }
 }
 
@@ -136,7 +158,7 @@ pub(super) fn grid(
         .show(ui, |ui| {
             egui::Grid::new("propulsion_valves")
                 .num_columns(plan.cols)
-                .spacing(CELL_GAP)
+                .spacing(CELL_GAP * plan.scale)
                 .show(ui, |ui| {
                     let (valves, servo_pending) = pending.split_at_mut(VALVE_COUNT);
                     for (i, blink) in blink.into_iter().enumerate() {
@@ -172,34 +194,34 @@ fn knob(
     let commanded = reading.and_then(|r| r.commanded);
     let time = ui.input(|i| i.time);
 
+    let s = plan.scale;
     // Placed by hand: egui's nested layouts add item spacing the plan cannot see.
     let (rect, _) = ui.allocate_exact_size(plan.cell, Sense::hover());
     let ui = &mut ui.new_child(UiBuilder::new().max_rect(rect));
 
-    let close_w = CLOSE_W.min(rect.width() / 2.0);
+    let close_w = (CLOSE_W * s).min(rect.width() / 2.0);
     let close = Rect::from_min_size(
         Pos2::new(
             rect.right() - close_w,
-            rect.top() + (NAME_H - CLOSE_H) / 2.0,
+            rect.top() + (NAME_H - CLOSE_H) * s / 2.0,
         ),
-        Vec2::new(close_w, CLOSE_H),
+        Vec2::new(close_w, CLOSE_H * s),
     );
     name(
         ui,
         label,
         color,
         Rect::from_min_max(rect.min, close.left_bottom()),
+        s,
     );
-    close_button(ui, system, id, commanded, close);
+    close_button(ui, system, id, commanded, close, s);
 
-    let body = rect.top() + NAME_H + GAP;
+    let body = rect.top() + (NAME_H + GAP) * s;
+    let group = Plan::group(s);
     let (dial, group) = if plan.wide {
         (
             Rect::from_min_size(Pos2::new(rect.left(), body), Vec2::splat(plan.gauge)),
-            Rect::from_min_size(
-                Pos2::new(rect.right() - GROUP_W, body),
-                Vec2::new(GROUP_W, GROUP_H),
-            ),
+            Rect::from_min_size(Pos2::new(rect.right() - group.x, body), group),
         )
     } else {
         (
@@ -208,26 +230,26 @@ fn knob(
                 Vec2::splat(plan.gauge),
             ),
             Rect::from_min_size(
-                Pos2::new(rect.center().x - GROUP_W / 2.0, body + plan.gauge + GAP),
-                Vec2::new(GROUP_W, GROUP_H),
+                Pos2::new(rect.center().x - group.x / 2.0, body + plan.gauge + GAP * s),
+                group,
             ),
         )
     };
 
-    let font = FontId::monospace((plan.gauge * GAUGE_FONT_RATIO).max(GAUGE_FONT_MIN));
+    let font = FontId::monospace((plan.gauge * GAUGE_FONT_RATIO).max(GAUGE_FONT_MIN * s));
     gauge(ui, dial, reading, blink, time);
     if kind == ValveKind::Servo {
-        target_drag(ui, dial, font, system, commanded, pending, |v| {
+        target_drag(ui, hub(dial, s), font, system, commanded, pending, |v| {
             system.do_set_valve(id, v);
         });
     } else {
-        reported(ui, dial, &font, reading);
+        reported(ui, dial, &font, reading, s);
     }
 
-    open_group(ui, system, id, commanded, pulse_durations, group);
+    open_group(ui, system, id, commanded, pulse_durations, group, s);
 }
 
-fn name(ui: &mut egui::Ui, label: &str, color: Color32, rect: Rect) {
+fn name(ui: &mut egui::Ui, label: &str, color: Color32, rect: Rect, scale: f32) {
     let color = readable(color, ui.visuals());
     ui.scope_builder(
         UiBuilder::new()
@@ -237,7 +259,7 @@ fn name(ui: &mut egui::Ui, label: &str, color: Color32, rect: Rect) {
             ui.add(
                 Label::new(
                     RichText::new(label.to_uppercase())
-                        .size(NAME_FONT)
+                        .size(NAME_FONT * scale)
                         .color(color),
                 )
                 .truncate()
@@ -253,13 +275,14 @@ fn close_button(
     id: ValveId,
     commanded: Option<f32>,
     rect: Rect,
+    scale: f32,
 ) {
     let (_, text) = CLOSE_LABELS
         .into_iter()
-        .find(|(needs, _)| rect.width() >= *needs)
+        .find(|(needs, _)| rect.width() >= *needs * scale)
         .unwrap_or(CLOSE_LABELS[2]);
     let latched = matches!(commanded, Some(c) if c <= VALVE_LATCH_EPS);
-    let close = label_button(text, BTN_FONT, rect.size()).selected(latched);
+    let close = label_button(text, BTN_FONT * scale, rect.size()).selected(latched);
 
     let close = ui.put(rect, close);
     if Hazard::confirm(ui, &close, system) {
@@ -274,7 +297,9 @@ fn open_group(
     commanded: Option<f32>,
     pulse_durations: [f32; 3],
     rect: Rect,
+    scale: f32,
 ) {
+    let gap = GAP * scale;
     ui.painter().add(Shape::rect_stroke(
         rect,
         CornerRadius::same(2),
@@ -282,10 +307,10 @@ fn open_group(
         StrokeKind::Inside,
     ));
 
-    let inner = rect.shrink(OUTLINE_PAD);
-    let open_rect = Rect::from_min_size(inner.min, Vec2::new(inner.width(), OPEN_H));
+    let inner = rect.shrink(OUTLINE_PAD * scale);
+    let open_rect = Rect::from_min_size(inner.min, Vec2::new(inner.width(), OPEN_H * scale));
     let active = matches!(commanded, Some(c) if c >= 1.0 - VALVE_LATCH_EPS);
-    let mut open = label_button("OPEN", BTN_FONT, open_rect.size()).selected(active);
+    let mut open = label_button("OPEN", BTN_FONT * scale, open_rect.size()).selected(active);
     if active {
         let fill = readable(COLOR_INDICATOR_WARNING, ui.visuals());
         open = open.fill(fill);
@@ -297,14 +322,14 @@ fn open_group(
     }
     ui.style_mut().visuals.override_text_color = None;
 
-    let size = Vec2::new((inner.width() - 2.0 * GAP) / 3.0, PULSE_H);
+    let size = Vec2::new((inner.width() - 2.0 * gap) / 3.0, PULSE_H * scale);
     for (i, secs) in pulse_durations.into_iter().enumerate() {
         let min = Pos2::new(
-            inner.left() + i as f32 * (size.x + GAP),
-            open_rect.bottom() + GAP,
+            inner.left() + i as f32 * (size.x + gap),
+            open_rect.bottom() + gap,
         );
         let text = format!("{secs}s");
-        let button = label_button(&text, PULSE_FONT, size);
+        let button = label_button(&text, PULSE_FONT * scale, size);
         let button = ui.put(Rect::from_min_size(min, size), button);
         if Hazard::confirm(ui, &button, system) {
             system.do_pulse_valve(id, secs);
@@ -326,7 +351,7 @@ fn label_button(text: &str, font: f32, size: Vec2) -> Button<'_> {
 // sent once, on release.
 fn target_drag(
     ui: &mut egui::Ui,
-    knob: Rect,
+    hub: Rect,
     font: FontId,
     system: &System,
     commanded: Option<f32>,
@@ -348,7 +373,7 @@ fn target_drag(
                 .speed(1.0)
                 .range(0.0..=100.0)
                 .suffix("%");
-            ui.add_enabled_ui(system.hot(), |ui| ui.put(hub(knob), drag))
+            ui.add_enabled_ui(system.hot(), |ui| ui.put(hub, drag))
                 .inner
                 .on_disabled_hover_text("Set HOT to drag")
         })
@@ -377,6 +402,7 @@ fn commit(
     }
 }
 
+// Not scaled with the plan: the longest label already fills a cell at the base size.
 fn servos(ui: &mut egui::Ui, system: &System, pending: &mut [Option<f32>], plan: &Plan) {
     let (rect, _) = ui.allocate_exact_size(plan.cell, Sense::hover());
     let ui = &mut ui.new_child(UiBuilder::new().max_rect(rect));
@@ -398,6 +424,7 @@ fn servos(ui: &mut egui::Ui, system: &System, pending: &mut [Option<f32>], plan:
             label,
             ui.visuals().text_color(),
             Rect::from_min_max(row.min, Pos2::new(drag_rect.left() - GAP, row.bottom())),
+            1.0,
         );
 
         let commanded = raw.as_ref().and_then(|raw| servo_commanded(raw, i));
@@ -446,10 +473,10 @@ fn servo_pwm(position: f32) -> u16 {
     1000 + (position.clamp(0.0, 1.0) * 1000.0).round() as u16
 }
 
-fn reported(ui: &egui::Ui, knob: Rect, font: &FontId, reading: Option<ValveReading>) {
-    let hub = hub(knob);
+fn reported(ui: &egui::Ui, knob: Rect, font: &FontId, reading: Option<ValveReading>, scale: f32) {
+    let hub = hub(knob, scale);
     let color = ui.visuals().text_color();
-    let font = FontId::proportional((font.size * STATE_FONT_RATIO).max(STATE_FONT_MIN));
+    let font = FontId::proportional((font.size * STATE_FONT_RATIO).max(STATE_FONT_MIN * scale));
 
     let text = match reading.and_then(|r| r.state) {
         None => "--",
@@ -472,10 +499,10 @@ fn reported(ui: &egui::Ui, knob: Rect, font: &FontId, reading: Option<ValveReadi
         .text(hub.center(), Align2::CENTER_CENTER, text, font, color);
 }
 
-fn hub(knob: Rect) -> Rect {
+fn hub(knob: Rect, scale: f32) -> Rect {
     Rect::from_center_size(
         knob.center(),
-        Vec2::new(knob.width() * GAUGE_VALUE_RATIO, CLOSE_H),
+        Vec2::new(knob.width() * GAUGE_VALUE_RATIO, CLOSE_H * scale),
     )
 }
 

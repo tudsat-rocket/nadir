@@ -149,6 +149,11 @@ enum Side {
     Right,
 }
 
+/// Text and stroke size multiplier for a schematic `height` px tall.
+pub(super) fn scale(height: f32) -> f32 {
+    (height / DESIGN_HEIGHT).clamp(1.0, MAX_SCALE)
+}
+
 pub(super) fn strip_width(size: Vec2) -> f32 {
     let detailed = size.y * DETAILED_ASPECT;
     if size.y >= DETAILED_MIN_HEIGHT && size.x - detailed >= DETAILED_MIN_REST_W {
@@ -213,7 +218,7 @@ pub fn draw_hybrid(
     // Shadowing `square` insets every downstream computation without touching it.
     let strip = square;
     let n = strip.height();
-    let k = (n / DESIGN_HEIGHT).clamp(1.0, MAX_SCALE);
+    let k = scale(n);
     let gap = LABEL_GAP * k;
     // `strip_width` only hands out width beyond the base aspect to a pane tall enough for the
     // valve boxes. The plant takes enough of it to fit a box between the pressure readouts and
