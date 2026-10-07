@@ -13,6 +13,7 @@ mod map;
 mod messages;
 mod navigation;
 mod params;
+mod payload;
 mod plot;
 mod preflight;
 mod propulsion;
@@ -30,6 +31,7 @@ pub use map::MapPane;
 pub use messages::MessagesPane;
 pub use navigation::NavigationPane;
 pub use params::ParamsPane;
+pub use payload::PayloadPane;
 pub use plot::PlotPane;
 pub use preflight::PreflightPane;
 #[cfg(test)]
@@ -96,6 +98,7 @@ pub enum Pane {
     Commands(CommandsPane),
     CanProbe(CanProbePane),
     Params(ParamsPane),
+    Payload(PayloadPane),
     Propulsion(PropulsionPane),
     Preflight(PreflightPane),
     Navigation(NavigationPane),
@@ -161,6 +164,7 @@ impl std::fmt::Display for Pane {
             Pane::Commands(_) => "Commands".into(),
             Pane::CanProbe(_) => "CAN Probe".into(),
             Pane::Params(_) => "Params".into(),
+            Pane::Payload(_) => "Payload".into(),
             Pane::Propulsion(_) => "Propulsion".into(),
             Pane::Preflight(_) => "Preflight".into(),
             Pane::Navigation(_) => "Navigation".into(),
@@ -229,6 +233,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::Commands(p) => p.outer_ui(ui, self),
             Pane::CanProbe(p) => p.outer_ui(ui, self),
             Pane::Params(p) => p.outer_ui(ui, self),
+            Pane::Payload(p) => p.outer_ui(ui, self),
             Pane::Propulsion(p) => p.outer_ui(ui, self),
             Pane::Preflight(p) => p.outer_ui(ui, self),
             Pane::Navigation(p) => p.outer_ui(ui, self),

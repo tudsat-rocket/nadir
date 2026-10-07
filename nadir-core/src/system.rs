@@ -398,6 +398,35 @@ impl System {
         self.send_message(&cmd);
     }
 
+    /// `instance` is 1-based.
+    pub fn do_gripper(&self, instance: u8, grab: bool) {
+        let cmd = CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: MavCmd::DoGripper,
+            param1: f32::from(instance),
+            param2: f32::from(u8::from(grab)), // GRIPPER_ACTION_RELEASE / _GRAB
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
+    /// `instance` is 1-based, a negative `length` winds the line in.
+    pub fn do_winch_relative(&self, instance: u8, length: f32) {
+        let cmd = CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            command: MavCmd::DoWinch,
+            param1: f32::from(instance),
+            param2: 1.0, // WINCH_RELATIVE_LENGTH_CONTROL
+            param3: length,
+            ..Default::default()
+        };
+
+        self.send_message(&cmd);
+    }
+
     pub fn request_can_forwarding(&self, enable: bool) {
         let cmd = CommandLong {
             target_system: self.system_id,
