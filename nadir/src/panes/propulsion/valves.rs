@@ -16,8 +16,7 @@ use crate::widgets::Hazard;
 use super::rocket::{self, ValveReading};
 use super::{SERVO_COUNT, SERVOS, VALVE_COUNT, VALVE_LATCH_EPS, VALVES, Valve, ValveKind};
 
-// Every valve, plus one cell holding all servos.
-const CELL_COUNT: usize = VALVE_COUNT + 1;
+const CELL_COUNT: usize = VALVE_COUNT + SERVO_COUNT;
 
 const GAP: f32 = 3.0;
 const CELL_GAP: Vec2 = Vec2::new(12.0, 4.0);
@@ -32,7 +31,6 @@ const CLOSE_W: f32 = 34.0;
 const CLOSE_H: f32 = 14.0;
 
 const OPEN_H: f32 = 18.0;
-const SERVO_DRAG_W: f32 = 44.0;
 const PULSE_W: f32 = 22.0;
 const PULSE_H: f32 = 18.0;
 const OUTLINE_PAD: f32 = 4.0;
@@ -144,6 +142,30 @@ impl Plan {
             OPEN_H + GAP + PULSE_H + 2.0 * OUTLINE_PAD,
         ) * scale
     }
+
+    /// The knob and button group within a cell.
+    fn body(&self, rect: Rect) -> (Rect, Rect) {
+        let s = self.scale;
+        let body = rect.top() + (NAME_H + GAP) * s;
+        let group = Self::group(s);
+        if self.wide {
+            (
+                Rect::from_min_size(Pos2::new(rect.left(), body), Vec2::splat(self.gauge)),
+                Rect::from_min_size(Pos2::new(rect.right() - group.x, body), group),
+            )
+        } else {
+            (
+                Rect::from_min_size(
+                    Pos2::new(rect.center().x - self.gauge / 2.0, body),
+                    Vec2::splat(self.gauge),
+                ),
+                Rect::from_min_size(
+                    Pos2::new(rect.center().x - group.x / 2.0, body + self.gauge + GAP * s),
+                    group,
+                ),
+            )
+        }
+    }
 }
 
 pub(super) fn grid(
@@ -169,7 +191,13 @@ pub(super) fn grid(
                             ui.end_row();
                         }
                     }
-                    servos(ui, system, servo_pending, plan);
+                    let raw = system.last_message::<ServoOutputRaw>().ok();
+                    for (i, pending) in servo_pending.iter_mut().enumerate() {
+                        servo(ui, system, raw.as_ref(), i, pending, plan);
+                        if (VALVE_COUNT + i + 1).is_multiple_of(plan.cols) {
+                            ui.end_row();
+                        }
+                    }
                     if !CELL_COUNT.is_multiple_of(plan.cols) {
                         ui.end_row();
                     }
@@ -217,25 +245,7 @@ fn knob(
         s,
     );
 
-    let body = rect.top() + (NAME_H + GAP) * s;
-    let group = Plan::group(s);
-    let (dial, group) = if plan.wide {
-        (
-            Rect::from_min_size(Pos2::new(rect.left(), body), Vec2::splat(plan.gauge)),
-            Rect::from_min_size(Pos2::new(rect.right() - group.x, body), group),
-        )
-    } else {
-        (
-            Rect::from_min_size(
-                Pos2::new(rect.center().x - plan.gauge / 2.0, body),
-                Vec2::splat(plan.gauge),
-            ),
-            Rect::from_min_size(
-                Pos2::new(rect.center().x - group.x / 2.0, body + plan.gauge + GAP * s),
-                group,
-            ),
-        )
-    };
+    let (dial, group) = plan.body(rect);
 
     let font = FontId::monospace((plan.gauge * GAUGE_FONT_RATIO).max(GAUGE_FONT_MIN * s));
     gauge(ui, dial, reading, blink, time);
@@ -306,12 +316,7 @@ fn open_group(
     scale: f32,
 ) {
     let gap = GAP * scale;
-    ui.painter().add(Shape::rect_stroke(
-        rect,
-        CornerRadius::same(2),
-        Stroke::new(1.0_f32, ui.visuals().weak_text_color()),
-        StrokeKind::Inside,
-    ));
+    outline(ui, rect);
 
     let inner = rect.shrink(OUTLINE_PAD * scale);
     let open_rect = Rect::from_min_size(inner.min, Vec2::new(inner.width(), OPEN_H * scale));
@@ -415,55 +420,72 @@ fn commit(
     }
 }
 
-// Not scaled with the plan: the longest label already fills a cell at the base size.
-fn servos(ui: &mut egui::Ui, system: &System, pending: &mut [Option<f32>], plan: &Plan) {
+fn servo(
+    ui: &mut egui::Ui,
+    system: &System,
+    raw: Option<&ServoOutputRaw>,
+    index: usize,
+    pending: &mut Option<f32>,
+    plan: &Plan,
+) {
+    let commanded = raw.and_then(|raw| servo_commanded(raw, index));
+    let instance = u8::try_from(index + 1).unwrap_or(u8::MAX);
+    let send = |v: f32| system.do_set_servo(instance, servo_pwm(v));
+
+    let s = plan.scale;
     let (rect, _) = ui.allocate_exact_size(plan.cell, Sense::hover());
     let ui = &mut ui.new_child(UiBuilder::new().max_rect(rect));
-    let raw = system.last_message::<ServoOutputRaw>().ok();
-    let row_h = rect.height() / SERVO_COUNT as f32;
+    name(
+        ui,
+        SERVOS[index],
+        ui.visuals().text_color(),
+        Rect::from_min_size(rect.min, Vec2::new(rect.width(), NAME_H * s)),
+        s,
+    );
 
-    for (i, (label, pending)) in SERVOS.into_iter().zip(pending).enumerate() {
-        let row = Rect::from_min_size(
-            Pos2::new(rect.left(), rect.top() + i as f32 * row_h),
-            Vec2::new(rect.width(), row_h),
-        );
-        let drag_w = SERVO_DRAG_W.min(row.width() / 2.0);
-        let drag_rect = Rect::from_center_size(
-            Pos2::new(row.right() - drag_w / 2.0, row.center().y),
-            Vec2::new(drag_w, (row_h - GAP).min(OPEN_H)),
-        );
-        name(
-            ui,
-            label,
-            ui.visuals().text_color(),
-            Rect::from_min_max(row.min, Pos2::new(drag_rect.left() - GAP, row.bottom())),
-            1.0,
-        );
+    let (dial, group) = plan.body(rect);
+    let reading = ValveReading {
+        state: None,
+        commanded,
+    };
+    gauge(ui, dial, Some(reading), false, 0.0);
+    let font = FontId::monospace((plan.gauge * GAUGE_FONT_RATIO).max(GAUGE_FONT_MIN * s));
+    target_drag(ui, hub(dial, s), font, system, commanded, pending, send);
+    percent_group(ui, system, commanded, group, s, send);
+}
 
-        let commanded = raw.as_ref().and_then(|raw| servo_commanded(raw, i));
-        let editing = pending.is_some();
-        let mut value = pending.unwrap_or(commanded.unwrap_or(0.0) * 100.0);
-        let resp = ui
-            .scope(|ui| {
-                ui.spacing_mut().interact_size.y = drag_rect.height();
-                ui.style_mut().override_font_id = Some(FontId::monospace(BTN_FONT));
-                let drag = DragValue::new(&mut value).speed(1.0).range(0.0..=100.0);
-                let drag = if commanded.is_none() && !editing {
-                    drag.custom_formatter(|_, _| "--".to_owned())
-                } else {
-                    drag.suffix("%")
-                };
-                ui.add_enabled_ui(system.hot(), |ui| ui.put(drag_rect, drag))
-                    .inner
-                    .on_disabled_hover_text("Set HOT to drag")
-            })
-            .inner;
-
-        let instance = u8::try_from(i + 1).unwrap_or(u8::MAX);
-        commit(&resp, value, commanded, pending, |v| {
-            system.do_set_servo(instance, servo_pwm(v));
-        });
+fn percent_group(
+    ui: &mut egui::Ui,
+    system: &System,
+    commanded: Option<f32>,
+    rect: Rect,
+    scale: f32,
+    send: impl Fn(f32),
+) {
+    outline(ui, rect);
+    let inner = rect.shrink(OUTLINE_PAD * scale);
+    let full = Rect::from_min_size(inner.min, Vec2::new(inner.width(), OPEN_H * scale));
+    let zero = Rect::from_min_size(
+        Pos2::new(inner.left(), full.bottom() + GAP * scale),
+        Vec2::new(inner.width(), PULSE_H * scale),
+    );
+    for (rect, text, target) in [(full, "100%", 1.0), (zero, "0%", 0.0)] {
+        let latched = matches!(commanded, Some(c) if (c - target).abs() <= VALVE_LATCH_EPS);
+        let button = label_button(text, BTN_FONT * scale, rect.size()).selected(latched);
+        let button = ui.put(rect, button);
+        if Hazard::confirm(ui, &button, system) {
+            send(target);
+        }
     }
+}
+
+fn outline(ui: &egui::Ui, rect: Rect) {
+    ui.painter().add(Shape::rect_stroke(
+        rect,
+        CornerRadius::same(2),
+        Stroke::new(1.0_f32, ui.visuals().weak_text_color()),
+        StrokeKind::Inside,
+    ));
 }
 
 // 0 marks a channel the firmware has never driven.
