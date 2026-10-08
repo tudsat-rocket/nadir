@@ -96,6 +96,7 @@ impl App {
             )))),
             propulsion: tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx))),
             payload: tiles.insert_pane(Pane::Payload(PayloadPane::new(ctx))),
+            qd_retraction: tiles.insert_pane(Pane::QdRetraction(QdRetractionPane::new(ctx))),
             preflight: tiles.insert_pane(Pane::Preflight(PreflightPane::new(ctx))),
             navigation: tiles.insert_pane(Pane::Navigation(NavigationPane::new(ctx))),
             mission: tiles.insert_pane(Pane::Placeholder("Mission".to_owned())),
@@ -530,6 +531,7 @@ struct PaneIds {
     map: TileId,
     propulsion: TileId,
     payload: TileId,
+    qd_retraction: TileId,
     preflight: TileId,
     navigation: TileId,
     mission: TileId,
@@ -551,6 +553,7 @@ impl PaneIds {
             map,
             propulsion,
             payload,
+            qd_retraction,
             preflight,
             navigation,
             mission,
@@ -568,7 +571,7 @@ impl PaneIds {
 
         match layout {
             Layout::Grid => {
-                let top_left = vec![propulsion, payload, params];
+                let top_left = vec![propulsion, payload, qd_retraction, params];
                 let top_right = vec![state, preflight, navigation, mission];
                 let bottom_left = vec![map, messages, commands, flight_log];
                 let bottom_right: Vec<_> = [sensors, thermals, plot, can]
@@ -582,7 +585,14 @@ impl PaneIds {
             }
             Layout::Columns => {
                 let left = vec![
-                    map, preflight, propulsion, payload, navigation, mission, flight_log,
+                    map,
+                    preflight,
+                    propulsion,
+                    payload,
+                    qd_retraction,
+                    navigation,
+                    mission,
+                    flight_log,
                 ];
                 let right: Vec<_> = [
                     state, sensors, thermals, plot, messages, commands, params, can,
@@ -596,7 +606,14 @@ impl PaneIds {
             }
             Layout::Focus => {
                 let main = tiles.insert_tab_tile(vec![
-                    propulsion, payload, map, preflight, navigation, mission, params,
+                    propulsion,
+                    payload,
+                    qd_retraction,
+                    map,
+                    preflight,
+                    navigation,
+                    mission,
+                    params,
                 ]);
                 let top = tiles.insert_tab_tile(vec![state, sensors, thermals, plot]);
                 let bottom = tiles.insert_tab_tile(
@@ -628,6 +645,7 @@ impl PaneIds {
             ("map", self.map),
             ("propulsion", self.propulsion),
             ("payload", self.payload),
+            ("qd_retraction", self.qd_retraction),
             ("preflight", self.preflight),
             ("navigation", self.navigation),
             ("mission", self.mission),

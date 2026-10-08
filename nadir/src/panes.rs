@@ -17,6 +17,7 @@ mod payload;
 mod plot;
 mod preflight;
 mod propulsion;
+mod qd_retraction;
 mod sensors;
 mod state_estimator;
 mod status;
@@ -39,6 +40,7 @@ pub(crate) use propulsion::fluid_colors as propulsion_fluid_colors;
 #[cfg(test)]
 pub(crate) use propulsion::valve_colors as propulsion_valve_colors;
 pub use propulsion::{MAX_PULSE_DURATION_SECS, PropulsionPane};
+pub use qd_retraction::QdRetractionPane;
 pub use sensors::SensorsPane;
 pub use state_estimator::StateEstimatorPane;
 pub use status::StatusPane;
@@ -100,6 +102,7 @@ pub enum Pane {
     Params(ParamsPane),
     Payload(PayloadPane),
     Propulsion(PropulsionPane),
+    QdRetraction(QdRetractionPane),
     Preflight(PreflightPane),
     Navigation(NavigationPane),
     FlightLogs(LogsPane),
@@ -166,6 +169,7 @@ impl std::fmt::Display for Pane {
             Pane::Params(_) => "Params".into(),
             Pane::Payload(_) => "Payload".into(),
             Pane::Propulsion(_) => "Propulsion".into(),
+            Pane::QdRetraction(_) => "QD Retr".into(),
             Pane::Preflight(_) => "Preflight".into(),
             Pane::Navigation(_) => "Navigation".into(),
             Pane::FlightLogs(_) => "Flight Logs".into(),
@@ -235,6 +239,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::Params(p) => p.outer_ui(ui, self),
             Pane::Payload(p) => p.outer_ui(ui, self),
             Pane::Propulsion(p) => p.outer_ui(ui, self),
+            Pane::QdRetraction(p) => p.outer_ui(ui, self),
             Pane::Preflight(p) => p.outer_ui(ui, self),
             Pane::Navigation(p) => p.outer_ui(ui, self),
             Pane::FlightLogs(p) => p.outer_ui(ui, self),
