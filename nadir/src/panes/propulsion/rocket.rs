@@ -1381,14 +1381,22 @@ fn draw_valve_mode_toggle(
     };
     let visuals = ui.visuals().clone();
     let outline = |selected: bool, label: &str| {
-        let stroke = if selected {
-            Stroke::new(1.0_f32, schematic_ink(&visuals))
-        } else {
-            Stroke::new(0.5_f32, schematic_line(&visuals))
+        let ink = schematic_ink(&visuals);
+        let mut text = RichText::new(label).font(font.clone());
+        let (stroke, fill) = match (selected, visuals.dark_mode) {
+            (false, _) => (
+                Stroke::new(0.5_f32, schematic_line(&visuals)),
+                Color32::TRANSPARENT,
+            ),
+            (true, true) => (Stroke::new(1.0_f32, ink), Color32::TRANSPARENT),
+            (true, false) => {
+                text = text.color(visuals.panel_fill);
+                (Stroke::new(1.0_f32, ink), ink)
+            }
         };
-        Button::new(RichText::new(label).font(font.clone()))
+        Button::new(text)
             .wrap_mode(egui::TextWrapMode::Extend)
-            .fill(Color32::TRANSPARENT)
+            .fill(fill)
             .stroke(stroke)
             .corner_radius(CornerRadius::same(3))
             .selected(false)
