@@ -121,6 +121,84 @@ impl ParamVal {
     }
 }
 
+/// A value zenith splits over several consecutive `u32` params, `<base>_0`, `<base>_1`, ..., which
+/// is shown and edited as one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Composite {
+    /// The `LoRa` frequency hopping seed (`*_BIND_0..1`), low word first. Derived from a binding
+    /// phrase, which is never stored.
+    HopSeed,
+    /// The `LoRa` HMAC key (`*_KEY_0..3`), little-endian words. A vehicle reads it back as zeros
+    /// over `LoRa`.
+    Key,
+}
+
+impl Composite {
+    /// The composite a param belongs to, with its base name and slot.
+    pub fn of(id: &str) -> Option<(Self, &str, usize)> {
+        let (base, slot) = id.rsplit_once('_')?;
+        let slot: usize = slot.parse().ok()?;
+        let composite = if base.ends_with("_BIND") {
+            Self::HopSeed
+        } else if base.ends_with("_KEY") {
+            Self::Key
+        } else {
+            return None;
+        };
+        (slot < composite.width()).then_some((composite, base, slot))
+    }
+
+    pub fn width(self) -> usize {
+        match self {
+            Self::HopSeed => 2,
+            Self::Key => 4,
+        }
+    }
+
+    pub fn member(base: &str, slot: usize) -> ParamId {
+        format!("{base}_{slot}")
+    }
+
+    /// The seed zenith hops with for a binding phrase: SipHash-2-4 with a zero key.
+    pub fn hop_seed(phrase: &str) -> u64 {
+        use std::hash::Hasher as _;
+
+        let mut hasher = siphasher::sip::SipHasher::new_with_key(&[0; 16]);
+        hasher.write(phrase.as_bytes());
+        hasher.finish()
+    }
+
+    pub fn seed_words(seed: u64) -> [u32; 2] {
+        [seed as u32, (seed >> 32) as u32]
+    }
+
+    pub fn seed_from_words([low, high]: [u32; 2]) -> u64 {
+        u64::from(high) << 32 | u64::from(low)
+    }
+
+    /// The key as 32 hex digits, in the byte order it is used in.
+    pub fn key_hex(words: [u32; 4]) -> String {
+        words
+            .iter()
+            .flat_map(|w| w.to_le_bytes())
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    pub fn key_from_hex(hex: &str) -> Option<[u32; 4]> {
+        let hex = hex.trim();
+        if hex.len() != 32 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let mut words = [0; 4];
+        for (word, digits) in words.iter_mut().zip(hex.as_bytes().chunks(8)) {
+            let digits = std::str::from_utf8(digits).ok()?;
+            *word = u32::from_str_radix(digits, 16).ok()?.swap_bytes();
+        }
+        Some(words)
+    }
+}
+
 #[derive(Debug)]
 pub struct Param {
     pub id: ParamId,
@@ -279,5 +357,48 @@ async fn track_changes(
             }
             param.downloaded_value = new;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The same vector zenith pins its derivation with.
+    #[test]
+    fn the_hop_seed_matches_the_vehicles() {
+        assert_eq!(Composite::hop_seed("schinken"), 0x53bd_d841_8658_7bcb);
+        let words = Composite::seed_words(0x53bd_d841_8658_7bcb);
+        assert_eq!(words, [0x8658_7bcb, 0x53bd_d841]);
+        assert_eq!(Composite::seed_from_words(words), 0x53bd_d841_8658_7bcb);
+    }
+
+    #[test]
+    fn the_key_hex_is_in_byte_order() {
+        let words = [0x0302_0100, 0x0706_0504, 0x0b0a_0908, 0x0f0e_0d0c];
+        let hex = Composite::key_hex(words);
+        assert_eq!(hex, "000102030405060708090a0b0c0d0e0f");
+        assert_eq!(Composite::key_from_hex(&hex), Some(words));
+        assert_eq!(Composite::key_from_hex("00"), None);
+        assert_eq!(Composite::key_from_hex(&"g".repeat(32)), None);
+        assert_eq!(
+            Composite::key_from_hex(&format!("+{}", "0".repeat(31))),
+            None
+        );
+    }
+
+    #[test]
+    fn members_are_recognized() {
+        assert_eq!(
+            Composite::of("LORA_KEY_3"),
+            Some((Composite::Key, "LORA_KEY", 3))
+        );
+        assert_eq!(
+            Composite::of("GCS_BIND_1"),
+            Some((Composite::HopSeed, "GCS_BIND", 1))
+        );
+        assert_eq!(Composite::of("GCS_BIND_2"), None);
+        assert_eq!(Composite::of("CAL_MAG_X"), None);
+        assert_eq!(Composite::of("SM_MAIN_ALT"), None);
     }
 }
