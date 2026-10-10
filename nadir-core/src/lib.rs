@@ -13,6 +13,7 @@ pub mod tlog;
 
 pub use links::*;
 pub use nadir_store::{MessageInstance, MessageSummary, TimeseriesArgs, format_message_label};
+pub use protocols::GatherError;
 pub use protocols::logs::types::*;
 pub use protocols::params::{Param, ParamId, ParamProgress, ParamVal};
 pub use settings::Settings;

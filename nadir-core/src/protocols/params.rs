@@ -1,5 +1,8 @@
 use std::f32;
+use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
+
+use tokio::sync::Notify;
 
 use crate::mav::ComponentId;
 use crate::time::sleep;
@@ -8,7 +11,7 @@ use mavspec::rust::{
     dialects::{
         Common,
         common::{
-            enums::{MavParamType, MavResult},
+            enums::MavParamType,
             messages::{ParamRequestList, ParamRequestRead},
         },
     },
@@ -16,7 +19,7 @@ use mavspec::rust::{
 
 use crate::{
     System,
-    protocols::{Gatherable, gather},
+    protocols::{GatherError, Gatherable, gather},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -128,14 +131,25 @@ pub struct Param {
 // TODO: rename
 pub enum ParamProgress {
     Unknown,
-    Failed(MavResult),
+    Failed(GatherError),
     Progress(usize, usize),
     Complete(HashMap<ParamId, Param>),
+}
+
+impl Param {
+    /// `PARAM_VALUE.param_id` is only NUL-terminated when shorter than 16 bytes.
+    fn id_of(value: &ParamValue) -> ParamId {
+        let end = value.param_id.iter().position(|&b| b == 0).unwrap_or(16);
+        String::from_utf8_lossy(&value.param_id[..end]).into_owned()
+    }
 }
 
 impl Gatherable for ParamValue {
     type InitialRequest = ParamRequestList;
     type SpecificRequest = ParamRequestRead;
+
+    // ArduPilot queues 20 reads, zenith's uplink 32 frames shared with other traffic.
+    const BATCH: usize = 16;
 
     fn index(&self) -> usize {
         self.param_index as usize
@@ -173,74 +187,97 @@ pub async fn download_params(
     system: System,
     component_id: ComponentId,
     mut message_rx: tokio::sync::broadcast::Receiver<Common>,
+    redownload: Arc<Notify>,
 ) {
-    // Wait for the first AUTOPILOT_VERSION message. We need the device capabilities to check for
-    // the flags which tell us how the parameter values are encoded.
-    // Also waits out a mute: unlike mode discovery, the gather below runs once and latches its
-    // failure, so a muted start would leave the system without parameters for the whole session.
-    let encoding = loop {
-        if !system.muted()
-            && let Some(encoding) = system.parameter_encoding()
-        {
-            break encoding;
-        }
-
-        sleep(Duration::from_millis(500)).await;
-    };
-
-    let params = system.params.clone();
-    let result = gather(
-        &system,
-        component_id,
-        &mut message_rx,
-        Some(Box::new(move |received, total| {
-            *params.lock().unwrap() = ParamProgress::Progress(received, total);
-        })),
-    )
-    .await;
-
-    match result {
-        Ok(params_vec) => {
-            let map: HashMap<_, _> = params_vec
-                .into_iter()
-                .map(|p: ParamValue| {
-                    let id = String::from_utf8_lossy(&p.param_id).to_string();
-                    let trimmed = id.trim_matches('\0').to_string();
-
-                    let value = ParamVal::decode(p.param_type, p.param_value, encoding);
-
-                    let param = Param {
-                        id: trimmed,
-                        value,
-                        downloaded_value: value,
-                    };
-
-                    (param.id.clone(), param)
-                })
-                .collect();
-
-            *system.params.lock().unwrap() = ParamProgress::Complete(map);
-        }
-        Err(res) => *system.params.lock().unwrap() = ParamProgress::Failed(res),
-    }
-
-    // Now we maintain the list. If a change is made from the UI, the system responds with another
-    // PARAM_VALUE message, so we listen for these from this task and keep our parameter storage
-    // updated with the downloaded (saved to the system/vehicle) values.
     loop {
-        if let Ok(Common::ParamValue(value)) = message_rx.recv().await {
-            let id = String::from_utf8_lossy(&value.param_id)
-                .trim_matches('\0')
-                .to_string();
-            let mut progress = system.params.lock().unwrap();
-            let ParamProgress::Complete(params) = &mut *progress else {
-                continue;
-            };
-
-            if let Some(param) = params.get_mut(&id) {
-                let value = ParamVal::decode(value.param_type, value.param_value, encoding);
-                param.downloaded_value = value;
+        // We need the device capabilities from AUTOPILOT_VERSION to know how parameter values are
+        // encoded. Also waits out a mute, which would make every request vanish.
+        let encoding = loop {
+            if !system.muted()
+                && let Some(encoding) = system.parameter_encoding()
+            {
+                break encoding;
             }
+
+            sleep(Duration::from_millis(500)).await;
+        };
+
+        // Unsaved edits survive a redownload.
+        let edits: HashMap<ParamId, ParamVal> = {
+            let mut progress = system.params.lock().unwrap();
+            let edits = match &*progress {
+                ParamProgress::Complete(params) => params
+                    .values()
+                    .filter(|p| p.value != p.downloaded_value)
+                    .map(|p| (p.id.clone(), p.value))
+                    .collect(),
+                _ => HashMap::new(),
+            };
+            *progress = ParamProgress::Unknown;
+            edits
+        };
+
+        let params = system.params.clone();
+        let result = gather(
+            &system,
+            component_id,
+            &mut message_rx,
+            Some(Box::new(move |received, total| {
+                *params.lock().unwrap() = ParamProgress::Progress(received, total);
+            })),
+        )
+        .await;
+
+        *system.params.lock().unwrap() = match result {
+            Ok(values) => ParamProgress::Complete(
+                values
+                    .iter()
+                    .map(|p| {
+                        let id = Param::id_of(p);
+                        let downloaded_value =
+                            ParamVal::decode(p.param_type, p.param_value, encoding);
+                        let param = Param {
+                            value: edits.get(&id).copied().unwrap_or(downloaded_value),
+                            id: id.clone(),
+                            downloaded_value,
+                        };
+                        (id, param)
+                    })
+                    .collect(),
+            ),
+            Err(e) => ParamProgress::Failed(e),
+        };
+
+        tokio::select! {
+            () = redownload.notified() => {}
+            () = track_changes(&system, &mut message_rx, encoding) => {}
+        }
+    }
+}
+
+/// Every write, ours or anyone else's, is answered with a `PARAM_VALUE`. Applies those to the
+/// downloaded values, and to the shown value too unless the user is editing it.
+async fn track_changes(
+    system: &System,
+    message_rx: &mut tokio::sync::broadcast::Receiver<Common>,
+    encoding: ParamEncoding,
+) {
+    loop {
+        let Ok(Common::ParamValue(value)) = message_rx.recv().await else {
+            continue;
+        };
+
+        let mut progress = system.params.lock().unwrap();
+        let ParamProgress::Complete(params) = &mut *progress else {
+            continue;
+        };
+
+        if let Some(param) = params.get_mut(&Param::id_of(&value)) {
+            let new = ParamVal::decode(value.param_type, value.param_value, encoding);
+            if param.value == param.downloaded_value {
+                param.value = new;
+            }
+            param.downloaded_value = new;
         }
     }
 }

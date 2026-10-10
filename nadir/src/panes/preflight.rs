@@ -269,10 +269,10 @@ impl PaneUi for PreflightPane {
                                         .text(format!("{i}/{count}"));
                                     ui.add(pb);
                                 }
-                                ParamProgress::Failed(res) => {
+                                ParamProgress::Failed(e) => {
                                     ui.colored_label(
                                         readable(COLOR_INDICATOR_WARNING, ui.visuals()),
-                                        format!("⚠ Failed: {res:?}"),
+                                        format!("⚠ Failed: {e}"),
                                     );
                                 }
                                 ParamProgress::Complete(params) => {

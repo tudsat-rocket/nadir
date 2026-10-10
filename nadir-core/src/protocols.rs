@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::mav::{ComponentId, Message};
 use crate::time::timeout;
-use mavspec::rust::dialects::{Common, common::enums::MavResult};
+use mavspec::rust::dialects::Common;
 use nadir_store::MessageExt;
 
 use crate::System;
@@ -34,6 +34,10 @@ pub trait Gatherable: Message + MessageExt + Sized {
     type InitialRequest: Message + MessageExt + Debug;
     type SpecificRequest: Message + MessageExt + Debug;
 
+    /// How many specific requests may be in flight at once. Most responders keep a single slot
+    /// that each request overwrites (`ArduPilot` and PX4 for `AVAILABLE_MODES` and log lists).
+    const BATCH: usize = 1;
+
     /// Index of itself in the complete collection.
     fn index(&self) -> usize;
 
@@ -52,6 +56,76 @@ pub trait Gatherable: Message + MessageExt + Sized {
     fn specific_request(system_id: u8, component_id: u8, index: usize) -> Self::SpecificRequest;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GatherError {
+    NoResponse,
+    Incomplete { received: usize, total: usize },
+}
+
+impl std::fmt::Display for GatherError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoResponse => write!(f, "No response"),
+            Self::Incomplete { received, total } => {
+                write!(f, "Missing {} of {total}", total - received)
+            }
+        }
+    }
+}
+
+/// The items of a collection received so far, by index.
+struct Gathered<M> {
+    items: Vec<Option<M>>,
+    received: usize,
+}
+
+impl<M: Gatherable + Debug + Clone + Default> Gathered<M> {
+    /// Sizes the collection from the first item. Later items of a different size are dropped,
+    /// since the broadcast carries no component id to tell their senders apart.
+    fn accept(&mut self, item: M) {
+        if self.items.is_empty() {
+            self.items = vec![None; item.count()];
+        }
+
+        if item.count() != self.items.len() {
+            return;
+        }
+
+        if let Some(slot) = self.items.get_mut(item.index()) {
+            if slot.is_none() {
+                self.received += 1;
+            }
+            *slot = Some(item);
+        }
+    }
+
+    fn missing(&self) -> Vec<usize> {
+        (0..self.items.len())
+            .filter(|&i| self.items[i].is_none())
+            .collect()
+    }
+
+    /// Accepts items of any index until `done` holds or the link has been quiet for a while.
+    async fn receive_until(
+        &mut self,
+        message_rx: &mut tokio::sync::broadcast::Receiver<Common>,
+        progress_cb: Option<&(dyn Fn(usize, usize) + Send + Sync)>,
+        done: impl Fn(&Self) -> bool,
+    ) {
+        const IDLE_TIMEOUT: Duration = Duration::from_secs(1);
+
+        while !done(self)
+            && let Ok(item) = timeout(IDLE_TIMEOUT, recv_item::<M>(message_rx)).await
+        {
+            self.accept(item);
+
+            if let Some(cb) = progress_cb {
+                cb(self.received, self.items.len());
+            }
+        }
+    }
+}
+
 /// Gathers a message implementing the Gatherable trait.
 #[tracing::instrument(
     name = "gather",
@@ -62,10 +136,9 @@ pub(crate) async fn gather<M: Gatherable + Debug + Clone + Default>(
     system: &System,
     component_id: ComponentId,
     message_rx: &mut tokio::sync::broadcast::Receiver<Common>,
-    progress_cb: Option<Box<dyn Fn(usize, usize) + Send>>,
-) -> Result<Vec<M>, MavResult> {
+    progress_cb: Option<Box<dyn Fn(usize, usize) + Send + Sync>>,
+) -> Result<Vec<M>, GatherError> {
     const MAX_RETRIES: usize = 3;
-    const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
     let message_id = M::default().id();
     let protocol = mavspec::definitions::protocol();
@@ -79,101 +152,71 @@ pub(crate) async fn gather<M: Gatherable + Debug + Clone + Default>(
     tracing::Span::current().record("component_id", component_id);
     tracing::Span::current().record("message_name", message_name);
 
-    // First, we send our initial request, to which the system should response with all items.
-    // We find out how many items there are in total with the first item received.
-    // We stop when we haven't received anything in a while and move on the next phase.
-    tracing::debug!("Sending initial request.");
-    let initial_request = M::initial_request(system.system_id, component_id);
-    system.send_message(&initial_request);
+    let progress_cb = progress_cb.as_deref();
+    let mut gathered = Gathered::<M> {
+        items: Vec::new(),
+        received: 0,
+    };
 
-    let mut number_items: Option<usize> = None;
-    let mut items: Vec<Option<M>> = Vec::new();
-    let mut received: usize = 0;
+    // The system should respond to the initial request with all items, the first of which tells
+    // us how many there are. Retry only if nothing arrives at all, the request may have been lost.
+    for attempt in 0..MAX_RETRIES {
+        tracing::debug!("Sending initial request.");
+        system.send_message(&M::initial_request(system_id, component_id));
 
-    // We retry the initial request a couple of times, but only if we received no response at all.
-    for i in 0..MAX_RETRIES {
-        received = 0;
+        gathered
+            .receive_until(message_rx, progress_cb, |g| {
+                !g.items.is_empty() && g.received == g.items.len()
+            })
+            .await;
 
-        while let Ok(item) = timeout(REQUEST_TIMEOUT, recv_item::<M>(message_rx)).await {
-            let count = item.count();
-
-            // This is our first message, populate our item vec with empty slots.
-            if number_items.is_none() {
-                number_items = Some(count);
-                items = vec![None; count];
-            }
-
-            if let Some(opt) = items.get_mut(item.index()) {
-                // If we get the same param multiple times for some reason, don't increment.
-                if opt.is_none() {
-                    received += 1;
-                }
-
-                *opt = Some(item);
-            }
-
-            if let Some(cb) = progress_cb.as_ref() {
-                cb(received, count);
-            }
-
-            // If we're full, we don't need to wait for the timeout.
-            if number_items.is_some_and(|num| num == received) {
-                break;
-            }
-        }
-
-        // If we got a single message at all, we are done in this phase. If not, we retry.
-        // Maybe our command was lost.
-        if number_items.is_some() {
+        if !gathered.items.is_empty() {
             break;
-        } else if i < MAX_RETRIES - 1 {
+        } else if attempt < MAX_RETRIES - 1 {
             tracing::debug!("No items received, retrying.");
         }
     }
 
-    // Despite our retries, we got nothing at all, abort.
-    let Some(num_items) = number_items else {
+    if gathered.items.is_empty() {
         tracing::error!("No response to request.");
-        return Err(MavResult::Failed);
-    };
+        return Err(GatherError::NoResponse);
+    }
 
-    tracing::debug!("Got {}/{} in discovery phase.", received, num_items);
+    let total = gathered.items.len();
+    tracing::debug!("Got {}/{total} in discovery phase.", gathered.received);
 
-    // We know have an exact list of items we don't have. For each missing item we request that
-    // exact item.
-    let missing = items
-        .iter_mut()
-        .enumerate()
-        .filter(|(_i, item)| item.is_none());
-    'outer: for (i, missing_item) in missing {
-        for _retry in 0..MAX_RETRIES {
-            tracing::debug!("Rerequesting {}/{}.", i, num_items);
+    // Request the missing items in batches. The initial stream may still be arriving, so every
+    // item counts, not just the requested ones. Give up only once rounds stop making progress.
+    let mut fruitless_rounds = 0;
+    while gathered.received < total && fruitless_rounds < MAX_RETRIES {
+        let received_before = gathered.received;
+        let requested: Vec<_> = gathered.missing().into_iter().take(M::BATCH).collect();
 
-            let request = M::specific_request(system_id, component_id, i);
-            system.send_message(&request);
+        tracing::debug!("Rerequesting {requested:?} of {total}.");
+        for &index in &requested {
+            system.send_message(&M::specific_request(system_id, component_id, index));
+        }
 
-            if let Ok(item) = timeout(REQUEST_TIMEOUT, recv_item::<M>(message_rx)).await
-                && item.index() == i
-            {
-                received += 1;
-                *missing_item = Some(item);
+        gathered
+            .receive_until(message_rx, progress_cb, |g| {
+                requested.iter().all(|&i| g.items[i].is_some())
+            })
+            .await;
 
-                if let Some(cb) = progress_cb.as_ref() {
-                    cb(received, num_items);
-                }
-
-                continue 'outer;
-            }
+        if gathered.received == received_before {
+            fruitless_rounds += 1;
+        } else {
+            fruitless_rounds = 0;
         }
     }
 
-    if num_items == received {
-        tracing::info!("Successfully gathered all {} items.", num_items);
-        Ok(items.into_iter().map(|opt| opt.unwrap()).collect())
+    if gathered.received == total {
+        tracing::info!("Successfully gathered all {total} items.");
+        Ok(gathered.items.into_iter().flatten().collect())
     } else {
-        let missing = num_items - received;
-        tracing::error!("Failed to gather all items (missing {}).", missing);
-        Err(MavResult::Failed)
+        let received = gathered.received;
+        tracing::error!("Failed to gather all items (missing {}).", total - received);
+        Err(GatherError::Incomplete { received, total })
     }
 }
 

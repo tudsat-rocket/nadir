@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{
-    Button, CollapsingHeader, DragValue, Grid, ProgressBar, RichText, ScrollArea, TextEdit,
-    TextStyle, Vec2,
+    Align, Button, CollapsingHeader, DragValue, Grid, Layout, ProgressBar, RichText, ScrollArea,
+    TextEdit, TextStyle, Vec2,
 };
 
 use nadir_core::{ParamProgress, ParamVal, System};
@@ -19,6 +19,15 @@ impl ParamsPane {
         Self {
             search: String::new(),
             filter_changed: false,
+        }
+    }
+
+    fn redownload_button(ui: &mut egui::Ui, system: &System) {
+        let response = ui
+            .add_enabled(!system.muted(), Button::new("⟳ Redownload"))
+            .on_disabled_hover_text(MUTED_HINT);
+        if response.clicked() {
+            system.redownload_params();
         }
     }
 }
@@ -43,7 +52,7 @@ impl PaneUi for ParamsPane {
         let mut params = system.params.lock().unwrap();
         match &mut *params {
             ParamProgress::Unknown => {
-                ui.label("");
+                ui.centered_and_justified(|ui| ui.weak("Waiting for parameters"));
             }
             ParamProgress::Progress(i, count) => {
                 ui.centered_and_justified(|ui| {
@@ -61,6 +70,10 @@ impl PaneUi for ParamsPane {
                     ui.weak("Filter");
                     ui.add(TextEdit::singleline(&mut self.search));
                     ui.checkbox(&mut self.filter_changed, "Only Show Changed");
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add_space(5.0);
+                        Self::redownload_button(ui, &system);
+                    });
                 });
 
                 ui.separator();
@@ -157,8 +170,12 @@ impl PaneUi for ParamsPane {
                     }
                 });
             }
-            ParamProgress::Failed(_e) => {
-                ui.label("failed");
+            ParamProgress::Failed(e) => {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(format!("Parameter download failed: {e}"));
+                    Self::redownload_button(ui, &system);
+                });
             }
         }
     }

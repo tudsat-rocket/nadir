@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Notify, broadcast, mpsc};
 
 use crate::mav::{
     Callback, CallbackApi as _, ChannelId, ChannelInfo, Endpoint, Frame, MavLinkId, Message,
@@ -49,6 +49,7 @@ pub struct System {
     hot: Arc<AtomicBool>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
+    params_redownload: Arc<Notify>,
     pub logs: Arc<Mutex<FlightLogUiState>>,
     pub log_cmd_tx: Arc<Mutex<mpsc::Sender<LogDlCommand>>>,
 }
@@ -98,6 +99,7 @@ impl System {
             hot: Arc::new(AtomicBool::new(false)),
             available_modes,
             params,
+            params_redownload: Arc::new(Notify::new()),
             logs,
             log_cmd_tx: Arc::new(Mutex::new(log_cmd_tx)),
         };
@@ -118,6 +120,7 @@ impl System {
             system.clone(),
             0x01,
             receiver3,
+            system.params_redownload.clone(),
         )));
 
         std::mem::drop(tokio::spawn(crate::protocols::logs::run_log_worker(
@@ -437,6 +440,10 @@ impl System {
         };
 
         self.send_message(&cmd);
+    }
+
+    pub fn redownload_params(&self) {
+        self.params_redownload.notify_one();
     }
 
     pub fn set_param(&self, param_id: &str, value: ParamVal) {
