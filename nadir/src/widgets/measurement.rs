@@ -14,6 +14,8 @@ pub struct MeasurementSection {
     pub unit: &'static str,
     pub color: Color32,
     pub decimals: Option<u8>,
+    /// Monospace cells the value column is sized for, so the box keeps its size as digits change.
+    pub width_chars: usize,
 }
 
 pub struct MeasurementIndicator {
@@ -65,16 +67,16 @@ impl MeasurementIndicator {
         3.0 * self.scale
     }
 
-    fn value_width(&self, ctx: &Context, section: &MeasurementSection, value: Option<f32>) -> f32 {
+    fn column_width(&self, ctx: &Context, section: &MeasurementSection) -> f32 {
         let font = self.scaled_value_font();
-        match value {
-            Some(value) => section.readout(value, font).size(ctx).x,
-            None => ctx.fonts_mut(|f| {
-                f.layout_no_wrap(NO_VALUE.to_owned(), font, section.color)
-                    .size()
-                    .x
-            }),
-        }
+        let reserved = Self::text_width(ctx, &"0".repeat(section.width_chars), font.clone());
+        let no_value = Self::text_width(ctx, NO_VALUE, font.clone());
+        section
+            .values
+            .iter()
+            .flatten()
+            .map(|v| section.readout(*v, font.clone()).size(ctx).x)
+            .fold(reserved.max(no_value), f32::max)
     }
 
     fn text_width(ctx: &Context, text: &str, font: FontId) -> f32 {
@@ -113,11 +115,10 @@ impl MeasurementIndicator {
             .sections
             .iter()
             .flat_map(|section| {
-                section
-                    .values
-                    .iter()
-                    .map(|v| self.value_width(ctx, section, *v))
-                    .chain([Self::text_width(ctx, section.unit, self.unit_font())])
+                [
+                    self.column_width(ctx, section),
+                    Self::text_width(ctx, section.unit, self.unit_font()),
+                ]
             })
             .chain(
                 self.label
@@ -172,18 +173,17 @@ impl egui::Widget for MeasurementIndicator {
                 y += self.section_gap();
             }
             for v in &section.values {
-                let pos = pos2(cx, y);
                 match v {
                     Some(v) => {
                         section.readout(*v, value_font.clone()).paint(
                             painter,
-                            pos,
+                            pos2(cx, y),
                             Align2::CENTER_TOP,
                         );
                     }
                     None => {
                         painter.text(
-                            pos,
+                            pos2(cx, y),
                             Align2::CENTER_TOP,
                             NO_VALUE,
                             value_font.clone(),

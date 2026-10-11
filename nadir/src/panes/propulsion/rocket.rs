@@ -40,7 +40,7 @@ const MAX_SCALE: f32 = 1.6;
 // boxes in panes at least DETAILED_MIN_HEIGHT tall.
 const BASE_ASPECT: f32 = 0.438;
 const DETAILED_ASPECT: f32 = 0.55;
-const DETAILED_MIN_HEIGHT: f32 = 640.0;
+const DETAILED_MIN_HEIGHT: f32 = 700.0;
 // Room the valve grid and plots beside the schematic keep before it widens.
 const DETAILED_MIN_REST_W: f32 = 300.0;
 
@@ -377,6 +377,7 @@ pub fn draw_hybrid(
         unit: "bar",
         color,
         decimals: None,
+        width_chars: 4,
     };
     let oxidizer_sections = || {
         let level = MeasurementSection {
@@ -384,12 +385,14 @@ pub fn draw_hybrid(
             unit: "%",
             color: ink,
             decimals: Some(0),
+            width_chars: 3,
         };
         let temperature = MeasurementSection {
             values: vec![n2o_temp1, n2o_temp2],
             unit: "\u{00b0}C",
             color: ink,
             decimals: Some(0),
+            width_chars: 3,
         };
         vec![level, temperature]
     };
@@ -445,21 +448,6 @@ pub fn draw_hybrid(
         .into_iter()
         .map(|(cy, indicator)| (cy, indicator.intrinsic_size(ui.ctx()), indicator))
         .collect();
-    // Detailed, the column hugs the skin to leave room for a valve box beside the centre line.
-    let pressure_cx = if detailed {
-        let widest = pressure_readouts
-            .iter()
-            .map(|(_, size, _)| size.x)
-            .fold(0.0, f32::max);
-        skin_x + gap + widest / 2.0
-    } else {
-        pressure_cx
-    };
-    for (cy, size, indicator) in pressure_readouts {
-        let rect = Rect::from_center_size(pos2(pressure_cx, cy), size);
-        obstacles.borrow_mut().push(rect);
-        ui.place(rect, indicator);
-    }
 
     let stroke_col = schematic_line(&visuals);
     let stroke = Stroke::new(1.5 * k, stroke_col);
@@ -474,7 +462,7 @@ pub fn draw_hybrid(
     let temp_font = egui::FontId::monospace(12.0 * k);
     // In a detailed schematic, each valve gets a box around its glyph, with its tag and readings
     // on `side`, and the mismatch blink on its outline. Otherwise the tag alone sits beside the
-    // glyph. Returns whether it drew the box.
+    // glyph. Returns the box, if it drew one.
     let draw_valve_tag = |center: Pos2,
                           half: f32,
                           horizontal: bool,
@@ -482,7 +470,7 @@ pub fn draw_hybrid(
                           side: Side,
                           muted: bool,
                           blink: bool|
-     -> bool {
+     -> Option<Rect> {
         let fade = |c: Color32| {
             if muted {
                 dim(c, gse_muted_opacity(&visuals))
@@ -502,7 +490,7 @@ pub fn draw_hybrid(
                 (pos2(center.x + edge, center.y), Align2::LEFT_CENTER)
             };
             painter.text(pos, anchor, &tag, label_font.clone(), color);
-            false
+            None
         };
         if !detailed {
             return plain_tag();
@@ -512,10 +500,11 @@ pub fn draw_hybrid(
         // Only the oxidizer vent is heated, so only its temperature is worth the room.
         let thermal = id == ValveId::OxidizerVent && sensors.is_some_and(|s| s.has_temperature());
         let ctx = painter.ctx();
-        let reading = |value: Option<f32>, unit: &'static str| {
+        let reading = |value: Option<f32>, width_chars: usize, unit: &'static str| {
             value.map(|value| Readout {
                 value,
                 decimals: 0,
+                width_chars,
                 unit: Some(unit),
                 font: temp_font.clone(),
                 color: fade(schematic_ink(&visuals)),
@@ -528,15 +517,16 @@ pub fn draw_hybrid(
             fade(label_color),
         );
         let temperature =
-            thermal.then(|| reading(sensors.and_then(|s| s.temperature), "\u{00b0}C"));
+            thermal.then(|| reading(sensors.and_then(|s| s.temperature), 3, "\u{00b0}C"));
         let heater = sensors.and_then(|s| s.heater).filter(|_| thermal);
-        let current = reading(sensors.and_then(|s| s.drive_current_ma), "mA");
+        let current = reading(sensors.and_then(|s| s.drive_current_ma), 4, "mA");
         let header = painter.layout_no_wrap(tag.clone(), label_font.clone(), color);
         let header_size = header.size();
 
-        let temp_size = temperature
-            .as_ref()
-            .map(|t| t.as_ref().map_or(missing.size(), |r| r.size(ctx)));
+        let temp_size = temperature.as_ref().map(|t| {
+            t.as_ref()
+                .map_or(missing.size(), |r| r.size(ctx).max(missing.size()))
+        });
         let heater_size = Vec2::new(0.8, 1.0) * temp_size.map_or(0.0, |s| s.y);
         let temp_row_w =
             temp_size.map_or(0.0, |s| s.x) + heater.map_or(0.0, |_| gap + heater_size.x);
@@ -549,7 +539,7 @@ pub fn draw_hybrid(
         .into_iter()
         .flatten()
         .fold(Vec2::ZERO, |acc, row| vec2(acc.x.max(row.x), acc.y + row.y));
-        let pad = vec2(2.0 * gap, gap);
+        let text_pad = vec2(2.0 * gap, gap);
 
         let glyph = if horizontal {
             Rect::from_center_size(
@@ -570,7 +560,7 @@ pub fn draw_hybrid(
         };
         let edge = (glyph.size() / 2.0).dot(dir.abs()) + gap;
         let block = anchor.anchor_size(center + dir * edge, block_size);
-        let frame = |block: Rect| glyph.union(block).expand2(pad);
+        let frame = |block: Rect| glyph.expand(2.0 * gap).union(block.expand2(text_pad));
         let into = |lo: f32, hi: f32, min: f32, max: f32| (lo - min).max(0.0) + (hi - max).min(0.0);
         let into_strip = |block: Rect| {
             let box_rect = frame(block);
@@ -654,7 +644,7 @@ pub fn draw_hybrid(
         if let Some(current) = current {
             current.paint(&painter, pos2(cx, y), Align2::CENTER_TOP);
         }
-        true
+        Some(rect)
     };
 
     let cc_interior = Rect::from_min_max(
@@ -726,6 +716,26 @@ pub fn draw_hybrid(
         false,
         blink[super::Valve::index(ValveId::Pressurization)],
     );
+    // Detailed, the column is centred between the skin and the plant, which reaches out to the
+    // pressurization valve's box beside the centre line.
+    let pressure_cx = if detailed {
+        let widest = pressure_readouts
+            .iter()
+            .map(|(_, size, _)| size.x)
+            .fold(0.0, f32::max);
+        let plant_left = boxed.map_or(tank_left, |b| b.left().min(tank_left));
+        f32::max(
+            skin_x + gap + widest / 2.0,
+            f32::midpoint(skin_x, plant_left),
+        )
+    } else {
+        pressure_cx
+    };
+    for (cy, size, indicator) in pressure_readouts {
+        let rect = Rect::from_center_size(pos2(pressure_cx, cy), size);
+        obstacles.borrow_mut().push(rect);
+        ui.place(rect, indicator);
+    }
     draw_valve(
         &painter,
         pos2(center_x, valve_top_cy),
@@ -735,7 +745,7 @@ pub fn draw_hybrid(
         valve_stroke_pressurization,
         cmd(ValveId::Pressurization),
         hatch_stride,
-        blink[super::Valve::index(ValveId::Pressurization)] && !boxed,
+        blink[super::Valve::index(ValveId::Pressurization)] && boxed.is_none(),
         time,
         k,
     );
@@ -800,7 +810,7 @@ pub fn draw_hybrid(
         stroke_pressurant_vent,
         cmd(ValveId::PressurantVent),
         hatch_stride,
-        blink[super::Valve::index(ValveId::PressurantVent)] && !boxed,
+        blink[super::Valve::index(ValveId::PressurantVent)] && boxed.is_none(),
         time,
         k,
     );
@@ -864,7 +874,7 @@ pub fn draw_hybrid(
         stroke_oxidizer_vent,
         cmd(ValveId::OxidizerVent),
         hatch_stride,
-        blink[super::Valve::index(ValveId::OxidizerVent)] && !boxed,
+        blink[super::Valve::index(ValveId::OxidizerVent)] && boxed.is_none(),
         time,
         k,
     );
@@ -903,6 +913,7 @@ pub fn draw_hybrid(
         let temp_readout = sensors.temperature.map(|t| Readout {
             value: t,
             decimals: 0,
+            width_chars: 3,
             unit: Some("\u{00b0}C"),
             font: temp_font.clone(),
             color: schematic_ink(&visuals),
@@ -910,9 +921,9 @@ pub fn draw_hybrid(
         });
         let temp_missing =
             painter.layout_no_wrap("--\u{00b0}C".to_owned(), temp_font.clone(), label_color);
-        let size = temp_readout
-            .as_ref()
-            .map_or(temp_missing.size(), |r| r.size(ui.ctx()));
+        let size = temp_readout.as_ref().map_or(temp_missing.size(), |r| {
+            r.size(ui.ctx()).max(temp_missing.size())
+        });
         let heater_size = Vec2::new(0.8, 1.0) * size.y;
         let group_w = size.x + sensors.heater.map_or(0.0, |_| gap + heater_size.x);
         let group_left =
@@ -980,7 +991,7 @@ pub fn draw_hybrid(
         stroke_oxidizer_fill,
         cmd(ValveId::OxidizerFill),
         hatch_stride,
-        blink[super::Valve::index(ValveId::OxidizerFill)] && !boxed,
+        blink[super::Valve::index(ValveId::OxidizerFill)] && boxed.is_none(),
         time,
         k,
     );
@@ -1178,7 +1189,7 @@ pub fn draw_hybrid(
             fill_stroke,
             fill_cmd,
             hatch_stride,
-            fill_blink && !boxed,
+            fill_blink && boxed.is_none(),
             time,
             k,
         );
@@ -1238,7 +1249,7 @@ pub fn draw_hybrid(
             vent_stroke,
             vent_cmd,
             hatch_stride,
-            vent_blink && !boxed,
+            vent_blink && boxed.is_none(),
             time,
             k,
         );
@@ -1290,7 +1301,7 @@ pub fn draw_hybrid(
         valve_stroke_main,
         cmd(ValveId::Main),
         hatch_stride,
-        blink[super::Valve::index(ValveId::Main)] && !boxed,
+        blink[super::Valve::index(ValveId::Main)] && boxed.is_none(),
         time,
         k,
     );
