@@ -1,4 +1,6 @@
 use eframe::egui;
+use mavspec::rust::dialects::common::enums::MavType;
+use mavspec::rust::dialects::common::messages::Heartbeat;
 use nadir_core::mav::SystemId;
 
 use crate::{
@@ -7,11 +9,19 @@ use crate::{
     widgets::{Plot, PlotLine},
 };
 
-pub struct SensorsPane {}
+mod calibration;
+
+use calibration::Calibration;
+
+pub struct SensorsPane {
+    calibration: Calibration,
+}
 
 impl SensorsPane {
     pub fn new(_ctx: &egui::Context) -> Self {
-        Self {}
+        Self {
+            calibration: Calibration::new(),
+        }
     }
 
     fn sensor_plot_lines(
@@ -54,6 +64,16 @@ impl PaneUi for SensorsPane {
         let View::System { system_id, .. } = behavior.active_view else {
             return;
         };
+
+        if let Some(system) = behavior.source.system(system_id)
+            && system
+                .last_message::<Heartbeat>()
+                .is_ok_and(|hb| hb.type_ == MavType::Rocket)
+        {
+            egui::CollapsingHeader::new("Calibration")
+                .default_open(false)
+                .show(ui, |ui| self.calibration.show(ui, &system));
+        }
 
         let size = egui::Vec2::new(ui.available_width(), ui.available_height() * 0.25);
 
