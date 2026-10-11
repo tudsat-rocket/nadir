@@ -57,6 +57,14 @@ impl SharedPlotState {
     }
 }
 
+/// A plot's y range: follows the data until locked, then holds `min..=max`.
+#[derive(Clone, Copy, Default)]
+pub struct YBounds {
+    pub locked: bool,
+    pub min: f64,
+    pub max: f64,
+}
+
 #[allow(dead_code)]
 pub struct PlotLine {
     pub system_id: SystemId,
@@ -78,6 +86,7 @@ pub struct Plot<'a> {
     source: &'a nadir_core::Source,
     shared: &'a mut SharedPlotState,
     ylimits: (Option<f32>, Option<f32>),
+    y_bounds: Option<&'a mut YBounds>,
     legend: bool,
 }
 
@@ -93,8 +102,15 @@ impl<'a> Plot<'a> {
             source,
             shared,
             ylimits,
+            y_bounds: None,
             legend: true,
         }
+    }
+
+    /// Reports the shown y range into `y_bounds`, or applies it once locked.
+    pub fn y_bounds(mut self, y_bounds: &'a mut YBounds) -> Self {
+        self.y_bounds = Some(y_bounds);
+        self
     }
 
     pub fn without_legend(mut self) -> Self {
@@ -165,7 +181,7 @@ impl<'a> Plot<'a> {
 }
 
 impl egui::Widget for Plot<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         #[cfg(feature = "profiling")]
         puffin::profile_function!();
 
@@ -236,9 +252,20 @@ impl egui::Widget for Plot<'_> {
 
         let visuals = ui.visuals().clone();
         let line_width = self.shared.line_width;
+        let locked_y = self
+            .y_bounds
+            .as_deref()
+            .map(|b| (b.locked && b.min < b.max).then_some(b.min..=b.max));
         let ir = plot.show(ui, move |plot_ui| {
             #[cfg(feature = "profiling")]
             puffin::profile_scope!("plot_data");
+
+            match locked_y {
+                Some(Some(range)) => plot_ui.set_plot_bounds_y(range),
+                // Locking turned y auto-bounds off, and nothing else turns them back on.
+                Some(None) => plot_ui.set_auto_bounds([plot_ui.auto_bounds().x, true]),
+                None => {}
+            }
 
             let last_bounds = plot_ui.plot_bounds();
             let min_x = *last_bounds.range_x().start();
@@ -337,6 +364,14 @@ impl egui::Widget for Plot<'_> {
 
         if ir.response.double_clicked_by(PointerButton::Primary) {
             self.shared.attached_to_edge = true;
+        }
+
+        if let Some(y_bounds) = self.y_bounds.as_deref_mut()
+            && !y_bounds.locked
+        {
+            let range = ir.transform.bounds().range_y();
+            y_bounds.min = *range.start();
+            y_bounds.max = *range.end();
         }
 
         self.shared
