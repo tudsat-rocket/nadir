@@ -3254,6 +3254,7 @@ dependencies = [
  "chrono",
  "console_error_panic_hook",
  "convert_case",
+ "directories",
  "eframe",
  "egui",
  "egui-notify",

@@ -10,6 +10,15 @@ use nadir_core::settings::Theme;
 
 use crate::colors;
 
+/// For things floating over content, like toasts and map controls. egui's window shadow is cast
+/// for whole windows and lands far below anything this small.
+pub const OVERLAY_SHADOW: egui::Shadow = egui::Shadow {
+    offset: [0, 3],
+    blur: 10,
+    spread: 0,
+    color: Color32::from_black_alpha(160),
+};
+
 const SURFACE: Color32 = Color32::WHITE;
 const SURFACE_INSET: Color32 = Color32::from_gray(237);
 const SURFACE_STRIPE: Color32 = Color32::from_gray(232);

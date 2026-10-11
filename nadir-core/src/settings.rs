@@ -104,11 +104,57 @@ pub enum LayoutNode {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MapSettings {
-    /// Enables the satellite layer, which needs a Mapbox account.
+    /// Enables the Mapbox layer, which needs a Mapbox account.
     pub mapbox_access_token: Option<String>,
+    pub mapbox_style: MapboxStyle,
+    pub show_gcs: bool,
+    pub gcs_position: GeoPosition,
+}
+
+impl Default for MapSettings {
+    fn default() -> Self {
+        Self {
+            mapbox_access_token: None,
+            mapbox_style: MapboxStyle::default(),
+            show_gcs: true,
+            gcs_position: GeoPosition {
+                lat: 49.855_982,
+                lon: 8.592_405,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GeoPosition {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MapboxStyle {
+    #[default]
+    Satellite,
+    SatelliteStreets,
+    Streets,
+    Outdoors,
+    Light,
+    Dark,
+}
+
+impl MapboxStyle {
+    pub const ALL: [Self; 6] = [
+        Self::Satellite,
+        Self::SatelliteStreets,
+        Self::Streets,
+        Self::Outdoors,
+        Self::Light,
+        Self::Dark,
+    ];
 }
 
 #[derive(Debug, thiserror::Error)]

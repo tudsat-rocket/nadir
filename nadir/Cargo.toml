@@ -50,6 +50,7 @@ eframe = { workspace = true, features = ["wgpu", "android-native-activity", "def
 wgpu = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+directories = { workspace = true }
 tokio = { workspace = true }
 maviola = { workspace = true }
 egui-wgpu = { workspace = true }

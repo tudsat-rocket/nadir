@@ -2,13 +2,17 @@
 
 use std::path::PathBuf;
 
-use nadir_core::settings::{Layout, LayoutNode, LayoutRef, SavedLayout, Theme};
+use nadir_core::settings::{
+    GeoPosition, Layout, LayoutNode, LayoutRef, MapboxStyle, SavedLayout, Theme,
+};
 use nadir_core::{LinkId, Settings};
 
 use eframe::egui;
 
 use crate::colors::{COLOR_INDICATOR_LIMITS, readable};
-use crate::panes::MAX_PULSE_DURATION_SECS;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::panes::map_tiles;
+use crate::panes::{MAX_PULSE_DURATION_SECS, MapPane};
 use crate::widgets::column_header;
 
 pub const LAYOUT_TEMPLATES: [(Layout, &str); 3] = [
@@ -102,6 +106,18 @@ pub struct SettingsView {
     layout_name: String,
     /// What came of the last save, kept on screen until the next one.
     status: Option<Result<PathBuf, String>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    offline: OfflineArea,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct OfflineArea {
+    center: GeoPosition,
+    radius_km: f64,
+    max_zoom: u8,
+    prefetch: Option<map_tiles::Prefetch>,
+    /// Bytes on disk, measured again after anything that changes it.
+    cache_size: Option<u64>,
 }
 
 impl SettingsView {
@@ -113,6 +129,14 @@ impl SettingsView {
             saved: settings.clone(),
             layout_name: String::new(),
             status: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            offline: OfflineArea {
+                center: settings.map.gcs_position,
+                radius_km: 2.0,
+                max_zoom: 17,
+                prefetch: None,
+                cache_size: None,
+            },
         }
     }
 
@@ -137,7 +161,11 @@ impl SettingsView {
         crate::theme::apply(ctx, theme);
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<LayoutAction> {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        map_center: Option<GeoPosition>,
+    ) -> Option<LayoutAction> {
         let mut action = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -146,7 +174,7 @@ impl SettingsView {
                 let links = self.links_ui(ui);
 
                 ui.add_space(15.0);
-                self.map_ui(ui);
+                self.map_ui(ui, map_center);
 
                 ui.add_space(15.0);
                 self.appearance_ui(ui);
@@ -246,7 +274,7 @@ impl SettingsView {
         built
     }
 
-    fn map_ui(&mut self, ui: &mut egui::Ui) {
+    fn map_ui(&mut self, ui: &mut egui::Ui, map_center: Option<GeoPosition>) {
         column_header(ui, "🗺 MAP");
 
         ui.horizontal(|ui| {
@@ -256,8 +284,183 @@ impl SettingsView {
                 egui::TextEdit::singleline(&mut self.mapbox_access_token)
                     .desired_width(260.0)
                     .password(true)
-                    .hint_text("none: satellite view is off"),
+                    .hint_text("none: only OpenStreetMap"),
             );
+        });
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Mapbox style");
+            ui.add_enabled_ui(!self.mapbox_access_token.is_empty(), |ui| {
+                let style = &mut self.settings.map.mapbox_style;
+                egui::ComboBox::from_id_salt("mapbox style")
+                    .selected_text(MapPane::style_label(*style))
+                    .show_ui(ui, |ui| {
+                        for option in MapboxStyle::ALL {
+                            ui.selectable_value(style, option, MapPane::style_label(option));
+                        }
+                    });
+            });
+        });
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.checkbox(&mut self.settings.map.show_gcs, "Ground station at");
+            ui.add_enabled_ui(self.settings.map.show_gcs, |ui| {
+                Self::position_ui(ui, &mut self.settings.map.gcs_position, map_center);
+            });
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        self.offline_ui(ui, map_center);
+    }
+
+    fn position_ui(ui: &mut egui::Ui, position: &mut GeoPosition, map_center: Option<GeoPosition>) {
+        ui.add(
+            egui::DragValue::new(&mut position.lat)
+                .range(-90.0..=90.0)
+                .speed(0.0001)
+                .max_decimals(6)
+                .suffix("° N"),
+        );
+        ui.add(
+            egui::DragValue::new(&mut position.lon)
+                .range(-180.0..=180.0)
+                .speed(0.0001)
+                .max_decimals(6)
+                .suffix("° E"),
+        );
+        if ui
+            .add_enabled(map_center.is_some(), egui::Button::new("Use map center"))
+            .on_disabled_hover_text("Open the map first")
+            .clicked()
+            && let Some(center) = map_center
+        {
+            *position = center;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn offline_ui(&mut self, ui: &mut egui::Ui, map_center: Option<GeoPosition>) {
+        let area = &mut self.offline;
+
+        let token = (!self.mapbox_access_token.is_empty())
+            .then(|| self.mapbox_access_token.clone())
+            .or(option_env!("MAPBOX_ACCESS_TOKEN").map(str::to_owned));
+        let style = self.settings.map.mapbox_style;
+
+        ui.add_space(5.0);
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label(egui::RichText::new("Offline tiles").strong());
+            if token.is_none() {
+                ui.weak("need a Mapbox access token");
+            }
+        });
+
+        ui.add_enabled_ui(token.is_some() && area.prefetch.is_none(), |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(5.0);
+                ui.label("Around");
+                Self::position_ui(ui, &mut area.center, map_center);
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(5.0);
+                ui.label("Radius");
+                ui.add(
+                    egui::DragValue::new(&mut area.radius_km)
+                        .range(0.1..=50.0)
+                        .speed(0.05)
+                        .max_decimals(1)
+                        .suffix(" km"),
+                );
+                ui.label("down to zoom");
+                ui.add(egui::DragValue::new(&mut area.max_zoom).range(1..=19));
+            });
+        });
+
+        if let Some(token) = token {
+            Self::download_ui(ui, area, &map_tiles::Store::mapbox(style, token), style);
+        }
+
+        Self::cache_ui(ui, area);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn download_ui(
+        ui: &mut egui::Ui,
+        area: &mut OfflineArea,
+        store: &map_tiles::Store,
+        style: MapboxStyle,
+    ) {
+        let target = map_tiles::Area {
+            center: walkers::Position::new(area.center.lon, area.center.lat),
+            radius_m: area.radius_km * 1000.0,
+            max_zoom: area.max_zoom,
+        };
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+
+            if let Some(prefetch) = &area.prefetch {
+                let (done, failed) = (prefetch.done(), prefetch.failed());
+                let finished = prefetch.finished();
+                ui.add(
+                    egui::ProgressBar::new(done as f32 / prefetch.total.max(1) as f32)
+                        .desired_width(260.0)
+                        .text(format!("{done} / {} tiles", prefetch.total)),
+                );
+                if failed > 0 {
+                    let label = ui.colored_label(
+                        readable(COLOR_INDICATOR_LIMITS, ui.visuals()),
+                        format!("{failed} failed"),
+                    );
+                    if let Some(e) = prefetch.last_error() {
+                        label.on_hover_text(e);
+                    }
+                }
+                if ui
+                    .button(if finished { "Done" } else { "Cancel" })
+                    .clicked()
+                {
+                    area.prefetch = None;
+                    area.cache_size = None;
+                }
+            } else {
+                let count = target.count(store);
+                if ui
+                    .button(format!(
+                        "⬇ Download {count} {} tiles",
+                        MapPane::style_label(style)
+                    ))
+                    .on_hover_text("Mapbox bills per tile")
+                    .clicked()
+                {
+                    area.prefetch = Some(map_tiles::Prefetch::start(store, target, ui.ctx()));
+                }
+            }
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn cache_ui(ui: &mut egui::Ui, area: &mut OfflineArea) {
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            let root = map_tiles::cache_root();
+            let size = *area
+                .cache_size
+                .get_or_insert_with(|| root.as_deref().map_or(0, map_tiles::disk_usage));
+            ui.weak(format!("Tile cache: {:.1} MB", size as f64 / 1e6));
+            if ui.small_button("Clear").clicked()
+                && let Some(root) = root
+            {
+                if let Err(e) = std::fs::remove_dir_all(&root)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::error!("Failed to clear {}: {e}", root.display());
+                }
+                area.cache_size = None;
+            }
         });
     }
 
@@ -445,7 +648,7 @@ impl SettingsView {
         ui.horizontal(|ui| {
             ui.add_space(5.0);
             // Honest rather than tidy: there is no way to retire a link once `Core` has spawned it.
-            ui.weak("Links and the map token are read at startup. Restart to apply them.");
+            ui.weak("Links are read at startup. Restart to apply them.");
         });
     }
 }

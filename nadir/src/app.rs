@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use egui::{Color32, Key, Margin, Modifiers};
+use egui::{Key, Margin, Modifiers};
 use egui_tiles::{Container, Grid, GridLayout, Linear, LinearDir, Tabs, Tile, TileId, Tiles};
 use nadir_core::mav::{Event, V2};
-use nadir_core::settings::{Layout, LayoutNode, LayoutRef, SavedLayout};
+use nadir_core::settings::{GeoPosition, Layout, LayoutNode, LayoutRef, SavedLayout};
 use rapid_dialect::Rapid;
 use rapid_dialect::rapid::enums::{MavCmd, MavResult};
 
@@ -90,10 +90,7 @@ impl App {
         let mut tiles = egui_tiles::Tiles::default();
 
         let panes = PaneIds {
-            map: tiles.insert_pane(Pane::Map(Box::new(MapPane::new(
-                ctx,
-                settings.map.mapbox_access_token.clone(),
-            )))),
+            map: tiles.insert_pane(Pane::Map(Box::new(MapPane::new(ctx)))),
             propulsion: tiles.insert_pane(Pane::Propulsion(PropulsionPane::new(ctx))),
             payload: tiles.insert_pane(Pane::Payload(PayloadPane::new(ctx))),
             qd_retraction: tiles.insert_pane(Pane::QdRetraction(QdRetractionPane::new(ctx))),
@@ -127,12 +124,7 @@ impl App {
             log_collector,
             toasts: egui_notify::Toasts::default()
                 .with_anchor(egui_notify::Anchor::TopRight)
-                .with_shadow(egui::epaint::Shadow {
-                    offset: [0, 3],
-                    blur: 10,
-                    spread: 0,
-                    color: Color32::from_black_alpha(160),
-                }),
+                .with_shadow(crate::theme::OVERLAY_SHADOW),
             tiles_tree,
             panes,
             logs: BTreeMap::new(),
@@ -424,6 +416,7 @@ impl eframe::App for App {
             pulse_durations: settings
                 .pulse_durations
                 .map(|secs| secs.clamp(0.0, MAX_PULSE_DURATION_SECS)),
+            map: settings.map.clone(),
         };
 
         if let View::System { system_id, .. } = self.active_view
@@ -482,7 +475,15 @@ impl eframe::App for App {
                     to_open = self.overview.ui(ui, &links, &self.logs);
                 }
                 View::Settings => {
-                    layout_action = self.settings.ui(ui);
+                    let map_center = match self.tiles_tree.tiles.get(self.panes.map) {
+                        Some(Tile::Pane(Pane::Map(map))) => map.center(),
+                        _ => None,
+                    }
+                    .map(|center| GeoPosition {
+                        lat: center.y(),
+                        lon: center.x(),
+                    });
+                    layout_action = self.settings.ui(ui, map_center);
                 }
                 View::System { .. } => {
                     self.tiles_tree.ui(&mut behavior, ui);

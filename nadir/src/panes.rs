@@ -29,6 +29,8 @@ pub use horizon::{HorizonPane, VelocityMode};
 pub use links::LinksPane;
 pub use logs::LogsPane;
 pub use map::MapPane;
+#[cfg(not(target_arch = "wasm32"))]
+pub use map::tiles as map_tiles;
 pub use messages::MessagesPane;
 pub use navigation::NavigationPane;
 pub use params::ParamsPane;
@@ -86,6 +88,7 @@ pub struct TreeBehavior<'a> {
     pub shared_plot_state: &'a mut SharedPlotState,
     pub position_source: &'a mut PositionSource,
     pub pulse_durations: [f32; 3],
+    pub map: nadir_core::settings::MapSettings,
 }
 
 // Links, Horizon and Status are not Pane variants: they live in the fixed status bar (see app.rs)
