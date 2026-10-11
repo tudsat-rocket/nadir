@@ -13,6 +13,9 @@ mod calibration;
 
 use calibration::Calibration;
 
+/// zenith's `mavlink.rs` converts with the standard gravity, not the local one.
+const G: f32 = 9.80665;
+
 pub struct SensorsPane {
     calibration: Calibration,
 }
@@ -28,6 +31,8 @@ impl SensorsPane {
         system_id: SystemId,
         msg_prefix: &str,
         field_suffix: &str,
+        unit: &str,
+        scale: f64,
     ) -> Vec<PlotLine> {
         let mut lines = Vec::new();
         for msg in [
@@ -47,9 +52,9 @@ impl SensorsPane {
                     instance: None,
                     field_name: field,
                     alias: None,
-                    unit: None,
+                    unit: Some(unit.to_owned()),
                     color: None,
-                    scale: None,
+                    scale: Some(scale),
                     sentinel: None,
                 });
             }
@@ -77,7 +82,13 @@ impl PaneUi for SensorsPane {
 
         let size = egui::Vec2::new(ui.available_width(), ui.available_height() * 0.25);
 
-        let acc_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "acc");
+        let acc_lines = Self::sensor_plot_lines(
+            system_id,
+            "SCALED_IMU",
+            "acc",
+            "m/s^2",
+            f64::from(G) / 1000.0,
+        );
         let acc_plot = Plot::new(
             &acc_lines,
             &behavior.source,
@@ -86,7 +97,13 @@ impl PaneUi for SensorsPane {
         );
         ui.add_sized(size, acc_plot);
 
-        let gyro_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "gyro");
+        let gyro_lines = Self::sensor_plot_lines(
+            system_id,
+            "SCALED_IMU",
+            "gyro",
+            "\u{00b0}/s",
+            1e-3_f64.to_degrees(),
+        );
         let gyro_plot = Plot::new(
             &gyro_lines,
             &behavior.source,
@@ -95,7 +112,7 @@ impl PaneUi for SensorsPane {
         );
         ui.add_sized(size, gyro_plot);
 
-        let mag_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "mag");
+        let mag_lines = Self::sensor_plot_lines(system_id, "SCALED_IMU", "mag", "\u{00b5}T", 0.1);
         let mag_plot = Plot::new(
             &mag_lines,
             &behavior.source,
@@ -112,7 +129,7 @@ impl PaneUi for SensorsPane {
                 instance: None,
                 field_name: "press_abs".to_owned(),
                 alias: None,
-                unit: None,
+                unit: Some("hPa".to_owned()),
                 color: None,
                 scale: None,
                 sentinel: None,
@@ -124,7 +141,7 @@ impl PaneUi for SensorsPane {
                 instance: None,
                 field_name: "press_abs".to_owned(),
                 alias: None,
-                unit: None,
+                unit: Some("hPa".to_owned()),
                 color: None,
                 scale: None,
                 sentinel: None,
@@ -136,7 +153,7 @@ impl PaneUi for SensorsPane {
                 instance: None,
                 field_name: "press_abs".to_owned(),
                 alias: None,
-                unit: None,
+                unit: Some("hPa".to_owned()),
                 color: None,
                 scale: None,
                 sentinel: None,

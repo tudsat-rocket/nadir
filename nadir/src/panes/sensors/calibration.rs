@@ -7,11 +7,10 @@ use mavspec::rust::dialects::common::messages::{ScaledImu, ScaledImu2, ScaledImu
 
 use nadir_core::{ParamProgress, ParamVal, System};
 
+use super::G;
 use crate::panes::MUTED_HINT;
 use crate::widgets::Hazard;
 
-/// zenith's `mavlink.rs` converts with the standard gravity, not the local one.
-const G: f32 = 9.80665;
 const STATIC_DURATION: Duration = Duration::from_secs(10);
 const MIN_SAMPLES: usize = 20;
 const AXES: [&str; 3] = ["X", "Y", "Z"];
