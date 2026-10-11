@@ -27,6 +27,10 @@ const VALVE_MISMATCH_DEBOUNCE_SECS: f64 = 0.5;
 
 const VALVES_HEIGHT_SHARE: f32 = 0.6;
 const VALVES_HEADER_H: f32 = 30.0;
+// egui_plot's default minimum size: a plot handed less grows to it and pushes the valve grid down.
+const PLOT_MIN_H: f32 = 64.0;
+// Below this the pressure plot's six-line legend covers most of the plot.
+const PRESSURE_LEGEND_MIN_H: f32 = 160.0;
 
 // Commanded position within this of fully closed/open latches the CLOSE/OPEN button.
 pub(super) const VALVE_LATCH_EPS: f32 = 0.02;
@@ -357,34 +361,46 @@ impl PaneUi for PropulsionPane {
         let rect = ui.clip_rect();
 
         if heartbeat.type_ == MavType::Rocket {
-            let h = rect.height();
+            // The frame's margin and stroke sit outside the strip.
+            let margin = schematic_frame(ui.style()).total_margin().sum();
+            let h = rect.height() - margin.y;
             // Wider than the flight plant alone: the left slice is a ground-support
             // lane for the external tanks and fill valves (see rocket::draw_hybrid).
-            let w = rocket::strip_width(rect.size());
+            let w = rocket::strip_width(Vec2::new(rect.width() - margin.x, h));
+            // The floating scroll bar allocates no width but covers the last column.
+            let scroll = &ui.spacing().scroll;
+            let bar = scroll.bar_inner_margin + scroll.bar_width + scroll.bar_outer_margin;
+            let grid_w = rect.width() - w - margin.x - ui.spacing().item_spacing.x - bar;
+            let alone = grid_w < valves::Plan::MIN_WIDTH;
             ui.horizontal_top(|ui| {
+                if alone {
+                    ui.add_space((rect.width() - w - margin.x) / 2.0);
+                }
                 let now = ui.input(|i| i.time);
                 let blink = self.update_valve_blink(&system, now);
                 let cursor = ui.cursor().min;
                 let square = Rect::from_min_size(cursor, Vec2::new(w, h));
                 self.draw_frame(ui, &system, square, blink, behavior.pulse_durations);
+                if alone {
+                    return;
+                }
 
                 ui.vertical(|ui| {
                     // Measured before the panel resolves: inside it, available height
                     // is already the panel's own.
                     let avail = ui.available_height();
                     let budget = avail * VALVES_HEIGHT_SHARE;
-                    // The floating scroll bar allocates no width but covers the last column.
-                    let scroll = &ui.spacing().scroll;
-                    let bar = scroll.bar_inner_margin + scroll.bar_width + scroll.bar_outer_margin;
                     // Grows far slower than the schematic: the controls are already at a usable size.
                     let plan = valves::Plan::best(
-                        Vec2::new((ui.available_width() - bar).max(0.0), budget),
+                        Vec2::new(grid_w, budget),
                         1.0 + (rocket::scale(h) - 1.0) / 2.0,
                     );
                     let scale = plan.scale();
                     let header_h = VALVES_HEADER_H * scale;
                     let grid_h = plan.height(budget);
-                    let history_h = (avail - header_h - grid_h) / 3.5;
+                    let history_h = Some((avail - header_h - grid_h) / 3.5)
+                        .filter(|h| *h >= PLOT_MIN_H)
+                        .unwrap_or(0.0);
 
                     let header_id = egui::Id::new(("propulsion_valves_header", system_id));
                     let header = CollapsingState::load_with_default_open(ui.ctx(), header_id, true);
@@ -408,24 +424,26 @@ impl PaneUi for PropulsionPane {
                                     Hazard::tick(ui, ui.max_rect(), &system);
                                 })
                                 .body_unindented(|ui| {
-                                    let vs_lines = valve_state_lines(system_id);
-                                    let valve_states_plot = Plot::new(
-                                        &vs_lines,
-                                        &behavior.source,
-                                        behavior.shared_plot_state,
-                                        (Some(0.0), Some(3.0)),
-                                    )
-                                    .without_legend();
-                                    // Absorbs any error in the header estimate, so the
-                                    // grid gets exactly its planned height.
-                                    let h = (ui.available_height()
-                                        - grid_h
-                                        - ui.spacing().item_spacing.y)
-                                        .max(0.0);
-                                    ui.add_sized(
-                                        Vec2::new(ui.available_width(), h),
-                                        valve_states_plot,
-                                    );
+                                    if history_h > 0.0 {
+                                        let vs_lines = valve_state_lines(system_id);
+                                        let valve_states_plot = Plot::new(
+                                            &vs_lines,
+                                            &behavior.source,
+                                            behavior.shared_plot_state,
+                                            (Some(0.0), Some(3.0)),
+                                        )
+                                        .without_legend();
+                                        // Absorbs any error in the header estimate, so the
+                                        // grid gets exactly its planned height.
+                                        let h = (ui.available_height()
+                                            - grid_h
+                                            - ui.spacing().item_spacing.y)
+                                            .max(0.0);
+                                        ui.add_sized(
+                                            Vec2::new(ui.available_width(), h),
+                                            valve_states_plot,
+                                        );
+                                    }
 
                                     if system.muted() {
                                         ui.disable();
@@ -453,12 +471,15 @@ impl PaneUi for PropulsionPane {
                         });
 
                     let p_lines = pressure_lines(system_id);
-                    let pressure_plot = Plot::new(
+                    let mut pressure_plot = Plot::new(
                         &p_lines,
                         &behavior.source,
                         behavior.shared_plot_state,
                         (Some(0.0), None),
                     );
+                    if ui.available_height() < PRESSURE_LEGEND_MIN_H {
+                        pressure_plot = pressure_plot.without_legend();
+                    }
                     ui.add_sized(
                         Vec2::new(ui.available_width(), ui.available_height()),
                         pressure_plot,

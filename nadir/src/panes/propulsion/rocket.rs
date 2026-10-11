@@ -31,9 +31,10 @@ const MIN_HATCH_WIDTH: f32 = 0.35;
 const VALVE_GLYPH_BASE_RATIO: f32 = 0.65;
 const LABEL_GAP: f32 = 3.0;
 
-// Pane height the fixed-size text and strokes were drawn for; taller panes scale them up to
-// MAX_SCALE.
+// Pane height the fixed-size text and strokes were drawn for; other heights scale them down to
+// MIN_SCALE or up to MAX_SCALE.
 const DESIGN_HEIGHT: f32 = 420.0;
+const MIN_SCALE: f32 = 0.7;
 const MAX_SCALE: f32 = 1.6;
 // Width over height of the schematic strip, and the wider strip that makes room for the valve
 // boxes in panes at least DETAILED_MIN_HEIGHT tall.
@@ -159,7 +160,7 @@ enum Side {
 
 /// Text and stroke size multiplier for a schematic `height` px tall.
 pub(super) fn scale(height: f32) -> f32 {
-    (height / DESIGN_HEIGHT).clamp(1.0, MAX_SCALE)
+    (height / DESIGN_HEIGHT).clamp(MIN_SCALE, MAX_SCALE)
 }
 
 pub(super) fn strip_width(size: Vec2) -> f32 {

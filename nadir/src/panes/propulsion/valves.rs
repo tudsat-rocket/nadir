@@ -65,10 +65,19 @@ pub(super) struct Plan {
 }
 
 impl Plan {
+    /// The OPEN button above the pulse buttons, outline included.
+    const GROUP: Vec2 = Vec2::new(
+        3.0 * PULSE_W + 2.0 * GAP + 2.0 * OUTLINE_PAD,
+        OPEN_H + GAP + PULSE_H + 2.0 * OUTLINE_PAD,
+    );
+
+    /// A single wide cell, below which knob and buttons overlap.
+    pub(super) const MIN_WIDTH: f32 = Self::GROUP.y + GAP + Self::GROUP.x;
+
     fn new(wide: bool, avail: Vec2, scale: f32) -> Self {
         // (minimum cell width, height besides the knob, minimum knob)
         let dims = |scale: f32| {
-            let group = Self::group(scale);
+            let group = Self::GROUP * scale;
             let (name_h, gap) = (NAME_H * scale, GAP * scale);
             if wide {
                 (group.y + gap + group.x, name_h + gap, group.y)
@@ -135,19 +144,11 @@ impl Plan {
         self.height.min(budget)
     }
 
-    /// Size of the OPEN button above the pulse buttons, outline included.
-    fn group(scale: f32) -> Vec2 {
-        Vec2::new(
-            3.0 * PULSE_W + 2.0 * GAP + 2.0 * OUTLINE_PAD,
-            OPEN_H + GAP + PULSE_H + 2.0 * OUTLINE_PAD,
-        ) * scale
-    }
-
     /// The knob and button group within a cell.
     fn body(&self, rect: Rect) -> (Rect, Rect) {
         let s = self.scale;
         let body = rect.top() + (NAME_H + GAP) * s;
-        let group = Self::group(s);
+        let group = Self::GROUP * s;
         if self.wide {
             (
                 Rect::from_min_size(Pos2::new(rect.left(), body), Vec2::splat(self.gauge)),
