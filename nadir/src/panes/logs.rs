@@ -20,9 +20,6 @@ const ROW_HEIGHT: f32 = 20.0;
 
 const BUSY_HINT: &str = "Wait for the current transfer to finish";
 
-/// Below this share of free space the storage bar turns to a warning.
-const STORAGE_WARN_FREE: f32 = 0.1;
-
 /// For downloading and saving flight logs from vehicle.
 pub struct LogsPane {
     state: FlightLogUiState,
@@ -34,6 +31,8 @@ pub struct LogsPane {
 
 impl LogsPane {
     const ERASE_CONFIRM_SECS: f64 = 3.0;
+    /// Below this share of free space the storage readouts turn to a warning.
+    pub const STORAGE_WARN_FREE: f32 = 0.1;
 
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {
@@ -76,7 +75,7 @@ impl LogsPane {
             0.0
         };
         let mut bar = ProgressBar::new(fraction).text(text);
-        if 1.0 - fraction < STORAGE_WARN_FREE {
+        if 1.0 - fraction < Self::STORAGE_WARN_FREE {
             bar = bar.fill(readable(COLOR_INDICATOR_WARNING, ui.visuals()));
         }
         ui.add(bar);

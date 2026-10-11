@@ -1,12 +1,19 @@
 use nadir_core::{System, mav_type_icon};
 
 use eframe::egui;
-use egui::{Align, Color32, FontId, Layout, RichText, Vec2};
-use mavspec::rust::dialects::common::messages::{GpsRawInt, Heartbeat, LocalPositionNed};
+use eframe::emath::GuiRounding as _;
+use egui::{
+    Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, StrokeKind, Vec2, pos2,
+};
+use mavspec::rust::dialects::common::enums::{GpsFixType, MavSysStatusSensor, StorageStatus};
+use mavspec::rust::dialects::common::messages::{
+    GpsRawInt, Heartbeat, LocalPositionNed, StorageInformation, SysStatus,
+};
 
 use crate::colors::{
     COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, dim, readable,
 };
+use crate::panes::LogsPane;
 use crate::widgets::{
     ArmedBadge, AutopilotLogo, BatteryReading, Readout, STALE_AFTER, TEXT_SIZE, column_header,
     link_quality, small_text, soc_color,
@@ -25,20 +32,33 @@ fn current_color(ui: &egui::Ui, amps: f32) -> Color32 {
         .lerp_to_gamma(ui.visuals().strong_text_color(), f32::min(ramp, 1.0))
 }
 
-/// One piece of a value cell. The rows mix prose ("9 sat", the "--" placeholder) with numbers that
+/// One piece of a value cell. The rows mix icons and prose (the "--" placeholder) with numbers that
 /// want the readout's tucked decimals and small units, so they cannot all be one string.
 enum Segment {
     Text(String, Color32),
+    Caption(&'static str),
     Value(Readout),
     /// Narrower than a monospace space.
     Gap(f32),
+    /// Fixed width, so the values after it line up across rows.
+    Icon(&'static str),
+    Battery(Option<f32>, Color32),
 }
 
 impl Segment {
-    fn value(value: f32, decimals: usize, unit: Option<&'static str>, color: Color32) -> Self {
+    const ICON_WIDTH: f32 = 20.0;
+
+    fn value(
+        value: f32,
+        decimals: usize,
+        width_chars: usize,
+        unit: Option<&'static str>,
+        color: Color32,
+    ) -> Self {
         Self::Value(Readout {
             value,
             decimals,
+            width_chars,
             unit,
             font: FontId::monospace(TEXT_SIZE),
             color,
@@ -49,10 +69,50 @@ impl Segment {
     fn show(self, ui: &mut egui::Ui) {
         match self {
             Self::Text(text, color) => small_text(ui, &text, color),
+            Self::Caption(text) => {
+                ui.add(
+                    egui::Label::new(RichText::new(text).size(TEXT_SIZE * 0.8).weak())
+                        .wrap_mode(egui::TextWrapMode::Extend),
+                );
+            }
             Self::Value(readout) => {
                 ui.add(readout);
             }
             Self::Gap(width) => ui.add_space(width),
+            Self::Icon(glyph) => {
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(Self::ICON_WIDTH, TEXT_SIZE), Sense::hover());
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    glyph,
+                    FontId::proportional(TEXT_SIZE),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+            Self::Battery(soc, color) => {
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::new(Self::ICON_WIDTH, TEXT_SIZE), Sense::hover());
+                let weak = ui.visuals().weak_text_color();
+                let painter = ui.painter();
+
+                // Snapped, since at this size a half-pixel offset smears the outline into the fill.
+                let body = Rect::from_center_size(rect.center() - Vec2::X, Vec2::new(15.0, 8.0))
+                    .round_to_pixels(ui.pixels_per_point());
+                let nub = Rect::from_min_max(
+                    pos2(body.right(), body.center().y - 2.0),
+                    pos2(body.right() + 2.0, body.center().y + 2.0),
+                );
+                painter.rect_filled(nub, 0.0, weak);
+                painter.rect_stroke(body, 1.0, Stroke::new(1.0, weak), StrokeKind::Inside);
+
+                if let Some(soc) = soc {
+                    let mut level = body.shrink(2.0);
+                    level.set_right(level.left() + soc.clamp(0.0, 1.0) * level.width());
+                    painter.rect_filled(level, 0.0, color);
+                    response.on_hover_text(format!("{:.0}%", soc * 100.0));
+                }
+            }
         }
     }
 }
@@ -65,9 +125,9 @@ pub struct Vitals<'a> {
     pub compact: bool,
 }
 
-/// Width the consumables rows need before their widest value (battery: charge, voltage and current,
-/// e.g. "87%, 12.2V, -200mA" beside its label) starts truncating.
-const CONSUMABLES_MIN_WIDTH: f32 = 225.0;
+/// Width the consumables rows need before their widest value (battery: voltage and current, e.g.
+/// "12.2V, -200mA" beside its label and icon) starts truncating.
+const CONSUMABLES_MIN_WIDTH: f32 = 180.0 + Segment::ICON_WIDTH;
 /// Share of the zone the consumables column takes. Its rows are label-plus-value and of known
 /// length, while the component list wraps into further sub-columns, so the larger share goes there.
 const CONSUMABLES_SHARE: f32 = 0.45;
@@ -116,9 +176,9 @@ impl Vitals<'_> {
             }
         });
 
-        // Charge and voltage share the state-of-charge color; the current is a separate segment so
-        // it can carry the battery widget's brightness ramp instead. Several packs leave room for
-        // charge and voltage only.
+        // The voltage shares the state-of-charge color of the glyph; the current is a separate
+        // segment so it can carry the battery widget's brightness ramp instead. Several packs leave
+        // room for the voltage only.
         let batteries = BatteryReading::all(system);
         let mut battery_cell = Vec::new();
         for (pack, (_, reading)) in batteries.iter().enumerate() {
@@ -127,23 +187,13 @@ impl Vitals<'_> {
                 .soc
                 .map_or(normal, |soc| soc_color(soc, ui.visuals()));
             if pack > 0 {
-                battery_cell.extend([
-                    Segment::Gap(3.0),
-                    Segment::Text("/".into(), weak),
-                    Segment::Gap(3.0),
-                ]);
+                battery_cell.push(Segment::Gap(6.0));
             }
+            battery_cell.push(Segment::Battery(reading.soc, charge_color));
 
-            let separator = if batteries.len() > 1 { " " } else { ", " };
             let mut cell = Vec::new();
-            if let Some(soc) = reading.soc {
-                cell.push(Segment::value(soc * 100.0, 0, Some("%"), charge_color));
-            }
             if let Some(u) = reading.voltage {
-                if !cell.is_empty() {
-                    cell.push(Segment::Text(separator.into(), charge_color));
-                }
-                cell.push(Segment::value(u, 1, Some("V"), charge_color));
+                cell.push(Segment::value(u, 1, 4, Some("V"), charge_color));
             }
             if batteries.len() == 1
                 && let Some(i) = reading.current
@@ -155,44 +205,83 @@ impl Vitals<'_> {
                 // Sub-amp draws are the norm on an avionics bus, where "0.0A" would hide the
                 // reading.
                 cell.push(if i.abs() < 1.0 {
-                    Segment::value(i * 1000.0, 0, Some("mA"), color)
+                    Segment::value(i * 1000.0, 0, 0, Some("mA"), color)
                 } else {
-                    Segment::value(i, 1, Some("A"), color)
+                    Segment::value(i, 1, 0, Some("A"), color)
                 });
             }
-            if cell.is_empty() {
+            if cell.is_empty() && reading.soc.is_none() {
                 cell.push(Segment::Text("--".into(), nodata));
             }
             battery_cell.extend(cell);
         }
         if battery_cell.is_empty() {
-            battery_cell.push(Segment::Text("--".into(), nodata));
+            battery_cell.extend([
+                Segment::Battery(None, nodata),
+                Segment::Text("--".into(), nodata),
+            ]);
         }
 
-        let gps = system.last_message::<GpsRawInt>().ok();
-        let gps_cell = match gps {
-            Some(g) if g.satellites_visible != u8::MAX => {
-                let color = if g.satellites_visible >= 6 {
-                    good
-                } else {
+        let flash_cell = match system.last_message::<StorageInformation>() {
+            Ok(info)
+                if matches!(info.status, StorageStatus::Ready | StorageStatus::Empty)
+                    && info.total_capacity > 0.0 =>
+            {
+                let used = (info.used_capacity / info.total_capacity).clamp(0.0, 1.0);
+                let color = if 1.0 - used < LogsPane::STORAGE_WARN_FREE {
                     warning
+                } else {
+                    normal
                 };
-                let mut cell = vec![Segment::Text(
-                    format!("{} sat ", g.satellites_visible),
-                    color,
-                )];
-                if g.eph != u16::MAX {
-                    cell.push(Segment::value(f32::from(g.eph) / 100.0, 1, None, color));
-                }
-                cell
+                vec![
+                    Segment::value(used * 100.0, 0, 3, Some("%"), color),
+                    Segment::Text(" (".into(), weak),
+                    Segment::value(info.used_capacity, 1, 0, None, weak),
+                    Segment::Text("/".into(), weak),
+                    Segment::value(info.total_capacity, 1, 0, Some("MiB"), weak),
+                    Segment::Text(")".into(), weak),
+                ]
+            }
+            Ok(info) if info.status == StorageStatus::Unformatted => {
+                vec![Segment::Text("unformatted".into(), warning)]
             }
             _ => vec![Segment::Text("--".into(), nodata)],
         };
 
-        // Both directions get their own row: on narrow windows the Links pane is dropped from the
-        // status bar entirely, and these two numbers are all that is left of it.
+        let gps_healthy = system.last_message::<SysStatus>().map_or(true, |s| {
+            let sensor = MavSysStatusSensor::GPS;
+            !s.onboard_control_sensors_enabled.contains(sensor)
+                || s.onboard_control_sensors_health.contains(sensor)
+        });
+        let (satellites, hdop, gps_color) = match system.last_message::<GpsRawInt>() {
+            Ok(g)
+                if gps_healthy && !matches!(g.fix_type, GpsFixType::NoFix | GpsFixType::NoGps) =>
+            {
+                let color = if g.satellites_visible >= 6 && g.satellites_visible != u8::MAX {
+                    good
+                } else {
+                    warning
+                };
+                let satellites = match g.satellites_visible {
+                    u8::MAX => Segment::Text("--".into(), color),
+                    n => Segment::value(f32::from(n), 0, 2, None, color),
+                };
+                (satellites, g.eph.min(9999), color)
+            }
+            _ => (Segment::value(0.0, 0, 2, None, limits), 9999, limits),
+        };
+        let gps_cell = vec![
+            satellites,
+            Segment::Gap(6.0),
+            Segment::Caption("HDOP"),
+            Segment::Gap(3.0),
+            Segment::value(f32::from(hdop) / 100.0, 2, 0, None, gps_color),
+        ];
+
+        // On narrow windows the Links pane is dropped from the status bar entirely, and these two
+        // numbers are all that is left of it.
         let (downlink, uplink) = link_quality(system);
-        let link_cell = |lq: Option<f32>| match lq {
+        let link_quality_segment = |lq: Option<f32>| match lq {
             Some(lq) => {
                 let color = if lq > 0.9 {
                     good
@@ -201,15 +290,21 @@ impl Vitals<'_> {
                 } else {
                     limits
                 };
-                vec![Segment::value(100.0 * lq, 0, Some("%"), color)]
+                Segment::value(100.0 * lq, 0, 3, Some("%"), color)
             }
-            None => vec![Segment::Text("--".into(), nodata)],
+            None => Segment::Text("--".into(), nodata),
         };
+        let link_cell = vec![
+            link_quality_segment(downlink),
+            Segment::Icon("⬆"),
+            link_quality_segment(uplink),
+        ];
 
         let uptime_cell = match system.last_message::<LocalPositionNed>() {
             Ok(lp) => vec![Segment::value(
                 lp.time_boot_ms as f32 / 1000.0,
                 1,
+                0,
                 Some("s"),
                 normal,
             )],
@@ -224,13 +319,12 @@ impl Vitals<'_> {
             .spacing(Vec2::new(10.0, 2.0))
             .min_col_width(0.0)
             .show(ui, |ui| {
-                for (label, segments) in [
-                    ("🕑 Uptime", uptime_cell),
-                    ("🔋 Battery", battery_cell),
-                    ("💾 Flash", vec![Segment::Text("--".into(), nodata)]),
-                    ("📡 GPS", gps_cell),
-                    ("📶 Downlink", link_cell(downlink)),
-                    ("📶 Uplink", link_cell(uplink)),
+                for (label, icon, segments) in [
+                    ("Uptime", Some("🕑"), uptime_cell),
+                    ("Battery", None, battery_cell),
+                    ("Flash", Some("💾"), flash_cell),
+                    ("GPS", Some("📡"), gps_cell),
+                    ("Link", Some("⬇"), link_cell),
                 ] {
                     // Extend, not Truncate: inside a grid cell a truncating label shrinks to the
                     // column width it is itself defining, which collapses to an ellipsis.
@@ -244,7 +338,7 @@ impl Vitals<'_> {
                     ui.horizontal(|ui| {
                         // Segments carry their own separators, so they butt up against each other.
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        for segment in segments {
+                        for segment in icon.map(Segment::Icon).into_iter().chain(segments) {
                             segment.show(ui);
                         }
                         ui.add_space(ui.available_width().max(0.0));
