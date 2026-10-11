@@ -198,9 +198,16 @@ impl LinksPane {
         if let Some(radio) = &links.radio_status {
             ui.horizontal(|ui| {
                 ui.weak("📡");
-                ui.monospace(format!("{:>+4}", radio.remrssi as i8));
+                let rssi = |ui: &mut egui::Ui, raw: u8| {
+                    ui.label(
+                        egui::RichText::new(format!("{:>+4}", raw as i8))
+                            .monospace()
+                            .color(Self::rssi_color(ui, raw)),
+                    )
+                };
+                rssi(ui, radio.remrssi);
                 ui.weak("/");
-                ui.monospace(format!("{:>+4}", radio.rssi as i8));
+                rssi(ui, radio.rssi);
                 ui.weak("dBm");
             });
         }
@@ -217,6 +224,16 @@ impl LinksPane {
         };
 
         ui.colored_label(color, format!("{:.0}%", 100.0 * lq.unwrap_or(0.0)))
+    }
+
+    /// Warns well before the SX1262's +10 dBm absolute maximum input, since its RSSI cannot read
+    /// above 0 dBm. `u8::MAX` means unknown.
+    fn rssi_color(ui: &egui::Ui, raw: u8) -> Color32 {
+        if raw != u8::MAX && raw as i8 >= -10 {
+            readable(COLOR_INDICATOR_WARNING, ui.visuals())
+        } else {
+            ui.visuals().text_color()
+        }
     }
 }
 
@@ -401,10 +418,8 @@ impl PaneUi for LinksPane {
         if let Some(radio_status) = radio_status {
             let radio_center = rect.center().lerp(rect.right_center(), 0.5);
 
-            let uplink_rssi = radio_status.remrssi as i8;
-            let uplink_snr = uplink_rssi - (radio_status.remnoise as i8);
-            let downlink_rssi = radio_status.rssi as i8;
-            let downlink_snr = downlink_rssi - (radio_status.noise as i8);
+            let uplink_snr = (radio_status.remrssi as i8) - (radio_status.remnoise as i8);
+            let downlink_snr = (radio_status.rssi as i8) - (radio_status.noise as i8);
 
             for (sign, lq) in [
                 (-1.0, remote_uplink_quality),
@@ -416,13 +431,17 @@ impl PaneUi for LinksPane {
                 );
             }
 
-            for (sign, rssi) in [(-1.0, uplink_rssi), (1.0, downlink_rssi)] {
+            for (sign, raw) in [(-1.0, radio_status.remrssi), (1.0, radio_status.rssi)] {
                 ui.place(
                     Rect::from_center_size(radio_center + Vec2::new(0.0, off_packets * sign), s),
                     |ui: &mut egui::Ui| {
                         ui.horizontal(|ui| {
                             ui.weak("RSSI:");
-                            ui.monospace(format!("{rssi:>+3.0}"));
+                            ui.label(
+                                egui::RichText::new(format!("{:>+3.0}", raw as i8))
+                                    .monospace()
+                                    .color(Self::rssi_color(ui, raw)),
+                            );
                             ui.weak("dBm");
                         })
                         .response
