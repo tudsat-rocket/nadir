@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use nadir_core::settings::{LayoutRef, SavedLayout};
-use nadir_core::{Origin, Source};
+use nadir_core::settings::{LayoutRef, SharingSettings};
+use nadir_core::{Origin, Settings, Source};
 
 use eframe::egui;
 use egui::{Align, Button, Color32, Layout, RichText};
@@ -13,7 +13,11 @@ use crate::widgets::{
     ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
     state_of_charge,
 };
+#[cfg(not(target_arch = "wasm32"))]
+mod sessions;
 mod version;
+#[cfg(not(target_arch = "wasm32"))]
+use sessions::Sessions;
 use version::Version;
 
 const WIDTH: f32 = 300.0;
@@ -25,6 +29,8 @@ pub enum SidebarAction {
     OpenLog,
     CloseLog(SourceId),
     RestoreLayout(LayoutRef),
+    #[cfg(not(target_arch = "wasm32"))]
+    JoinSession(nadir_core::SessionAddr),
 }
 
 /// Left strip listing the known systems and the global navigation: which view is active, whether the
@@ -32,6 +38,8 @@ pub enum SidebarAction {
 pub struct Sidebar {
     collapsed: bool,
     version: Version,
+    #[cfg(not(target_arch = "wasm32"))]
+    sessions: Sessions,
 }
 
 impl Sidebar {
@@ -39,6 +47,8 @@ impl Sidebar {
         Self {
             collapsed: false,
             version: Version::check(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            sessions: Sessions::default(),
         }
     }
 
@@ -54,8 +64,9 @@ impl Sidebar {
         logs: &BTreeMap<SourceId, Source>,
         active_view: &mut View,
         logs_shown: &mut bool,
-        layouts: &[SavedLayout],
+        settings: &Settings,
     ) -> Option<SidebarAction> {
+        let sharing = &settings.sharing;
         let collapsed = self.collapsed;
         let mut action = None;
 
@@ -73,23 +84,27 @@ impl Sidebar {
                     });
                 }
 
-                self.systems(ui, LIVE, live, active_view);
+                self.systems(ui, LIVE, live, active_view, sharing);
 
                 for (id, source) in logs {
-                    let Origin::Log(progress) = &source.origin else {
-                        continue;
-                    };
-
                     ui.separator();
 
                     if !collapsed {
+                        let (icon, name, hover) = match &source.origin {
+                            Origin::Log(progress) => ("📂", progress.name(), "Close log"),
+                            Origin::Stream(progress) => {
+                                ("📡", progress.session.clone(), "Leave session")
+                            }
+                            Origin::Live => continue,
+                        };
+
                         ui.horizontal(|ui| {
-                            ui.weak("📂");
-                            ui.label(RichText::new(progress.name()).monospace().size(TEXT_SIZE));
+                            ui.weak(icon);
+                            ui.label(RichText::new(name).monospace().size(TEXT_SIZE));
 
                             ui.place(ui.available_rect_before_wrap(), |ui: &mut egui::Ui| {
                                 ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                                    if ui.small_button("✖").on_hover_text("Close log").clicked() {
+                                    if ui.small_button("✖").on_hover_text(hover).clicked() {
                                         action = Some(SidebarAction::CloseLog(*id));
                                     }
                                 })
@@ -97,14 +112,28 @@ impl Sidebar {
                             });
                         });
 
-                        if progress.done() {
-                            ui.weak(format!("{} records", progress.records()));
-                        } else {
-                            ui.add(egui::ProgressBar::new(progress.fraction()).show_percentage());
+                        match &source.origin {
+                            Origin::Log(progress) if progress.done() => {
+                                ui.weak(format!("{} records", progress.records()));
+                            }
+                            Origin::Log(progress) => {
+                                ui.add(
+                                    egui::ProgressBar::new(progress.fraction()).show_percentage(),
+                                );
+                            }
+                            Origin::Stream(progress) => {
+                                let state = if progress.connected() {
+                                    "connected"
+                                } else {
+                                    "disconnected"
+                                };
+                                ui.weak(format!("{} records, {state}", progress.records()));
+                            }
+                            Origin::Live => {}
                         }
                     }
 
-                    self.systems(ui, *id, source, active_view);
+                    self.systems(ui, *id, source, active_view, sharing);
                 }
 
                 ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -170,7 +199,7 @@ impl Sidebar {
                         let templates = LAYOUT_TEMPLATES
                             .iter()
                             .map(|(template, label)| (LayoutRef::Template(*template), *label));
-                        let saved = layouts.iter().map(|saved| {
+                        let saved = settings.layouts.iter().map(|saved| {
                             (LayoutRef::Saved(saved.name.clone()), saved.name.as_str())
                         });
 
@@ -194,6 +223,11 @@ impl Sidebar {
                     {
                         action = Some(SidebarAction::OpenLog);
                     }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(addr) = self.sessions.ui(ui, collapsed, sharing.server.as_deref()) {
+                        action = Some(SidebarAction::JoinSession(addr));
+                    }
                 });
             });
 
@@ -201,7 +235,15 @@ impl Sidebar {
     }
 
     /// The systems of one source, live or recorded.
-    fn systems(&self, ui: &mut egui::Ui, id: SourceId, source: &Source, active_view: &mut View) {
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
+    fn systems(
+        &self,
+        ui: &mut egui::Ui,
+        id: SourceId,
+        source: &Source,
+        active_view: &mut View,
+        sharing: &SharingSettings,
+    ) {
         let collapsed = self.collapsed;
         let recorded = !matches!(source.origin, Origin::Live);
 
@@ -219,10 +261,10 @@ impl Sidebar {
             if collapsed {
                 // With only an icon per row, a recording would otherwise be indistinguishable from
                 // the vehicle it was recorded from.
-                let label = if recorded {
-                    format!("📂{}", system.icon())
-                } else {
-                    system.icon().to_owned()
+                let label = match source.origin {
+                    Origin::Live => system.icon().to_owned(),
+                    Origin::Log(_) => format!("📂{}", system.icon()),
+                    Origin::Stream(_) => format!("📡{}", system.icon()),
                 };
 
                 ui.selectable_value(active_view, view, label);
@@ -277,6 +319,9 @@ impl Sidebar {
                                     system.set_muted(!muted);
                                 }
 
+                                #[cfg(not(target_arch = "wasm32"))]
+                                share_toggle(ui, &system, sharing);
+
                                 let total_data_rate = system
                                     .channels()
                                     .iter_mut()
@@ -305,6 +350,44 @@ impl Sidebar {
                 });
             }
         }
+    }
+}
+
+/// Starts or stops publishing a system to the sharing server, as a new session each time.
+#[cfg(not(target_arch = "wasm32"))]
+fn share_toggle(ui: &mut egui::Ui, system: &nadir_core::System, sharing: &SharingSettings) {
+    let shared = system.sharing();
+
+    let Some(server) = &sharing.server else {
+        ui.add_enabled(false, Button::selectable(false, "📡"))
+            .on_disabled_hover_text("Set a sharing server in Preferences");
+        return;
+    };
+
+    let hover = match &shared {
+        Some((addr, status)) => format!(
+            "Sharing as {}\n{}, {:.1} KiB sent, {:.1} KiB pending, {} dropped",
+            addr.id,
+            if status.connected() {
+                "connected"
+            } else {
+                "not connected"
+            },
+            status.acked_bytes() as f64 / 1024.0,
+            status.pending_bytes() as f64 / 1024.0,
+            status.dropped(),
+        ),
+        None => format!("Share this system's telemetry through {server}"),
+    };
+
+    if ui
+        .add(Button::selectable(shared.is_some(), "📡"))
+        .on_hover_text(hover)
+        .clicked()
+    {
+        system.set_sharing(shared.is_none().then(|| {
+            nadir_core::SessionAddr::new(server.clone(), &sharing.station, system.system_id)
+        }));
     }
 }
 

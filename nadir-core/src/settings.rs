@@ -12,6 +12,7 @@ pub struct Settings {
     pub links: Vec<LinkId>,
     pub mute_uplink_by_default: bool,
     pub map: MapSettings,
+    pub sharing: SharingSettings,
     pub theme: Theme,
     pub default_layout: LayoutRef,
     pub layouts: Vec<SavedLayout>,
@@ -26,11 +27,33 @@ impl Default for Settings {
             links: Self::default_links(),
             mute_uplink_by_default: false,
             map: MapSettings::default(),
+            sharing: SharingSettings::default(),
             theme: Theme::default(),
             default_layout: LayoutRef::Template(Layout::default()),
             layouts: Vec::new(),
             plot_line_width: 1.0,
             pulse_durations: [0.2, 1.0, 5.0],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SharingSettings {
+    /// Base URL of the `meridian` service sessions are shared through.
+    pub server: Option<String>,
+    /// Prefixes the ids of the sessions this station publishes.
+    pub station: String,
+    /// Whether every live system is shared as soon as it appears.
+    pub share_by_default: bool,
+}
+
+impl Default for SharingSettings {
+    fn default() -> Self {
+        Self {
+            server: None,
+            station: "nadir".to_owned(),
+            share_by_default: false,
         }
     }
 }

@@ -40,6 +40,8 @@ const LATEST_BOOT_RELATIVE_MICROS: i64 = 50 * 24 * 3600 * 1_000_000;
 /// Give up rather than scan an entire file that was never a telemetry log in the first place.
 const MAX_SCAN: u64 = 1024 * 1024;
 
+const READ_CHUNK: usize = 16 * 1024;
+
 struct Queued {
     system_id: SystemId,
     bytes: Vec<u8>,
@@ -192,8 +194,17 @@ impl Sink {
 }
 
 fn now_micros() -> u64 {
+    micros_of(Utc::now())
+}
+
+fn micros_of(time: DateTime<Utc>) -> u64 {
     // pymavlink stores a link index in the low two bits of the timestamp, so leave them clear.
-    u64::try_from(Utc::now().timestamp_micros()).unwrap_or(0) & !3
+    u64::try_from(time.timestamp_micros()).unwrap_or(0) & !3
+}
+
+/// Lays out one record stamped with the time the frame was received, rather than the current time.
+pub fn record(received_at: DateTime<Utc>, frame: &Frame<V2>) -> Result<Vec<u8>, FrameError> {
+    encode(micros_of(received_at), frame)
 }
 
 /// Lays out one record: timestamp, then the frame verbatim.
@@ -227,21 +238,131 @@ pub enum ReadError {
     Frame(FrameError),
 }
 
-/// Reads records back out of a telemetry log.
+/// Splits a byte stream into records, however the bytes happen to be chopped up.
 ///
 /// A log can lose its record boundary: it may have been truncated mid-record, or written by another
-/// tool. When the bytes at the cursor are not a plausible record the reader scans forward one byte
+/// tool. When the bytes at the cursor are not a plausible record the decoder scans forward one byte
 /// at a time for a position that is, as pymavlink's `scan_timestamp` does, and reports how much it
 /// skipped.
 ///
-/// Flight controllers without a wall clock stamp records since boot instead. A log whose first
+/// Flight controllers without a wall clock stamp records since boot instead. A stream whose first
 /// record has such a stamp is read as one throughout.
-pub struct Reader<R: Read> {
-    inner: R,
+///
+/// Running out of bytes part-way through a record means "not yet" here; [`Reader`] is this decoder
+/// plus a reader to pull from, for the case where it means end of data.
+pub struct Decoder {
     window: Vec<u8>,
+    /// Start of the undecoded bytes in `window`, which is only compacted once in a while.
+    start: usize,
     /// Timestamps a record boundary may carry, in unix microseconds.
     plausible: std::ops::RangeInclusive<i64>,
     consumed: u64,
+    skipped: u64,
+}
+
+impl Decoder {
+    pub fn new() -> Self {
+        Self {
+            window: Vec::new(),
+            start: 0,
+            // Clocks are not guaranteed to agree, so allow a day of slack.
+            plausible: EARLIEST_PLAUSIBLE_MICROS
+                ..=(Utc::now() + TimeDelta::days(1)).timestamp_micros(),
+            consumed: 0,
+            skipped: 0,
+        }
+    }
+
+    pub fn push(&mut self, bytes: &[u8]) {
+        if self.start > self.window.len() / 2 {
+            self.window.drain(..self.start);
+            self.start = 0;
+        }
+
+        self.window.extend_from_slice(bytes);
+    }
+
+    /// The next complete record, or `None` if more bytes are needed first.
+    pub fn pop(&mut self) -> Option<Result<Record, ReadError>> {
+        loop {
+            let pending = &self.window[self.start..];
+
+            if pending.len() < TIMESTAMP_LEN + HEADER_LEN {
+                return None;
+            }
+
+            if let Some(len) = self.boundary() {
+                if pending.len() < len {
+                    return None;
+                }
+
+                if let Ok(record) = decode(&pending[..len]) {
+                    if self.consumed == 0
+                        && record.received_at.timestamp_micros() < EARLIEST_PLAUSIBLE_MICROS
+                    {
+                        self.plausible = 0..=LATEST_BOOT_RELATIVE_MICROS;
+                    }
+                    self.take(len);
+
+                    if self.skipped > 0 {
+                        let skipped = std::mem::take(&mut self.skipped);
+                        tracing::warn!("Skipped {skipped} bytes of telemetry to resync");
+                    }
+
+                    return Some(Ok(record));
+                }
+            }
+
+            // Not a record boundary after all.
+            self.take(1);
+            self.skipped += 1;
+
+            if self.skipped >= MAX_SCAN {
+                return Some(Err(ReadError::Desynchronised(std::mem::take(
+                    &mut self.skipped,
+                ))));
+            }
+        }
+    }
+
+    /// Bytes dealt with so far: the records returned, plus anything skipped over while
+    /// resynchronising.
+    pub fn consumed(&self) -> u64 {
+        self.consumed
+    }
+
+    fn pending(&self) -> usize {
+        self.window.len() - self.start
+    }
+
+    fn take(&mut self, len: usize) {
+        self.start += len;
+        self.consumed += len as u64;
+    }
+
+    /// Length of the record at the cursor, if the bytes there look like one at all.
+    fn boundary(&self) -> Option<usize> {
+        let pending = &self.window[self.start..];
+        let micros = timestamp_of(pending)?.timestamp_micros();
+
+        let plausible = self.plausible.contains(&micros)
+            || (self.consumed == 0 && (0..=LATEST_BOOT_RELATIVE_MICROS).contains(&micros));
+
+        plausible.then(|| record_len(pending)).flatten()
+    }
+}
+
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Reads records back out of a telemetry log, resynchronising as [`Decoder`] describes.
+pub struct Reader<R: Read> {
+    inner: R,
+    decoder: Decoder,
+    chunk: Vec<u8>,
     finished: bool,
 }
 
@@ -255,62 +376,26 @@ impl<R: Read> Reader<R> {
     pub fn new(inner: R) -> Self {
         Self {
             inner,
-            window: Vec::new(),
-            // Clocks are not guaranteed to agree, so allow a day of slack.
-            plausible: EARLIEST_PLAUSIBLE_MICROS
-                ..=(Utc::now() + TimeDelta::days(1)).timestamp_micros(),
-            consumed: 0,
+            decoder: Decoder::new(),
+            chunk: vec![0; READ_CHUNK],
             finished: false,
         }
     }
 
-    /// Bytes of the log dealt with so far: the records returned, plus anything skipped over while
-    /// resynchronising.
     pub fn consumed(&self) -> u64 {
-        self.consumed
-    }
-
-    /// Reads until the window holds `want` bytes. `false` at end of file, with the window holding
-    /// whatever was left.
-    fn fill(&mut self, want: usize) -> Result<bool, std::io::Error> {
-        while self.window.len() < want {
-            let have = self.window.len();
-            self.window.resize(want, 0);
-
-            let read = self.inner.read(&mut self.window[have..]);
-            self.window
-                .truncate(have + read.as_ref().copied().unwrap_or(0));
-
-            match read {
-                Ok(0) => return Ok(false),
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(true)
-    }
-
-    /// Length of the record at the cursor, if the bytes there look like one at all.
-    fn boundary(&self) -> Option<usize> {
-        let micros = timestamp_of(&self.window)?.timestamp_micros();
-
-        let plausible = self.plausible.contains(&micros)
-            || (self.consumed == 0 && (0..=LATEST_BOOT_RELATIVE_MICROS).contains(&micros));
-
-        plausible.then(|| record_len(&self.window)).flatten()
+        self.decoder.consumed()
     }
 
     /// End of file. Leftover bytes are a partial record, which is routine rather than damage: the
     /// writer flushes on a timer, so a log from a running instance ends mid-record.
-    fn at_end(&mut self, skipped: u64) -> Option<Result<Record, ReadError>> {
+    fn at_end(&mut self) -> Option<Result<Record, ReadError>> {
         self.finished = true;
 
-        if !self.window.is_empty() {
+        if self.decoder.pending() > 0 {
             return Some(Err(ReadError::Truncated));
         }
 
+        let skipped = self.decoder.skipped;
         (skipped > 0).then_some(Err(ReadError::Desynchronised(skipped)))
     }
 }
@@ -323,53 +408,23 @@ impl<R: Read> Iterator for Reader<R> {
             return None;
         }
 
-        let mut skipped = 0u64;
-
         loop {
-            match self.fill(TIMESTAMP_LEN + HEADER_LEN) {
-                Ok(true) => {}
-                Ok(false) => return self.at_end(skipped),
+            if let Some(record) = self.decoder.pop() {
+                if matches!(record, Err(ReadError::Desynchronised(_))) {
+                    self.finished = true;
+                }
+
+                return Some(record);
+            }
+
+            match self.inner.read(&mut self.chunk) {
+                Ok(0) => return self.at_end(),
+                Ok(read) => self.decoder.push(&self.chunk[..read]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(e) => {
                     self.finished = true;
                     return Some(Err(e.into()));
                 }
-            }
-
-            if let Some(len) = self.boundary() {
-                match self.fill(len) {
-                    Ok(true) => {}
-                    Ok(false) => return self.at_end(skipped),
-                    Err(e) => {
-                        self.finished = true;
-                        return Some(Err(e.into()));
-                    }
-                }
-
-                if let Ok(record) = decode(&self.window[..len]) {
-                    if self.consumed == 0
-                        && record.received_at.timestamp_micros() < EARLIEST_PLAUSIBLE_MICROS
-                    {
-                        self.plausible = 0..=LATEST_BOOT_RELATIVE_MICROS;
-                    }
-                    self.window.drain(..len);
-                    self.consumed += len as u64;
-
-                    if skipped > 0 {
-                        tracing::warn!("Skipped {skipped} bytes of the telemetry log to resync");
-                    }
-
-                    return Some(Ok(record));
-                }
-            }
-
-            // Not a record boundary after all.
-            self.window.drain(..1);
-            self.consumed += 1;
-            skipped += 1;
-
-            if skipped >= MAX_SCAN {
-                self.finished = true;
-                return Some(Err(ReadError::Desynchronised(skipped)));
             }
         }
     }
@@ -686,6 +741,25 @@ mod tests {
         let read: Vec<Record> = Reader::new(log.as_slice()).flatten().collect();
 
         assert_eq!(read.len(), 1);
+    }
+
+    #[test]
+    fn a_decoder_reassembles_records_pushed_a_byte_at_a_time() {
+        let mut log = encode(stamp(), &frame()).unwrap();
+        log.extend_from_slice(&encode(stamp(), &frame()).unwrap());
+
+        let mut decoder = Decoder::new();
+        let mut read = 0;
+        for byte in &log {
+            decoder.push(std::slice::from_ref(byte));
+            while let Some(record) = decoder.pop() {
+                record.unwrap();
+                read += 1;
+            }
+        }
+
+        assert_eq!(read, 2);
+        assert_eq!(decoder.consumed(), log.len() as u64);
     }
 
     #[test]

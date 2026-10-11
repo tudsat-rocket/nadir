@@ -3,9 +3,13 @@ mod can_proxy;
 mod links;
 pub mod mav;
 mod protocols;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod publish;
 pub mod settings;
 mod source;
 mod stats;
+#[cfg(not(target_arch = "wasm32"))]
+mod subscribe;
 mod system;
 mod task;
 mod time;
@@ -16,8 +20,12 @@ pub use nadir_store::{MessageInstance, MessageSummary, TimeseriesArgs, format_me
 pub use protocols::GatherError;
 pub use protocols::logs::types::*;
 pub use protocols::params::{Composite, Param, ParamId, ParamMetadata, ParamProgress, ParamVal};
+#[cfg(not(target_arch = "wasm32"))]
+pub use publish::{PublishStatus, SessionAddr};
 pub use settings::Settings;
 pub use source::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use subscribe::SessionSummary;
 pub use system::*;
 
 pub const GROUND_STATION_SYSTEM_ID: u8 = 0xfe;
@@ -70,6 +78,7 @@ mod core_impl {
         pub links: Vec<LinkId>,
         pub autoconnect_usb: bool,
         pub mute_uplink: bool,
+        pub share_by_default: Option<(String, String)>,
         pub on_event: Option<EventCallback>,
     }
 
@@ -100,6 +109,12 @@ mod core_impl {
             self
         }
 
+        /// Shares every system as it appears, through `server` and named after `station`.
+        pub fn share_by_default(mut self, server: String, station: String) -> Self {
+            self.share_by_default = Some((server, station));
+            self
+        }
+
         pub fn on_event(mut self, cb: EventCallback) -> Self {
             self.on_event = Some(cb);
             self
@@ -126,7 +141,7 @@ mod core_impl {
             let core = Core {
                 event_sender: tx,
                 links: Arc::new(Mutex::new(HashMap::new())),
-                live: Source::live(self.mute_uplink, proxy),
+                live: Source::live(self.mute_uplink, self.share_by_default, proxy),
             };
 
             let c = core.clone();

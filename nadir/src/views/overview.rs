@@ -112,7 +112,7 @@ impl Overview {
             .values()
             .filter_map(|source| match &source.origin {
                 Origin::Log(progress) => Some(&progress.path),
-                Origin::Live => None,
+                Origin::Live | Origin::Stream(_) => None,
             })
             .collect();
 

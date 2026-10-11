@@ -100,6 +100,7 @@ impl From<&LinkId> for LinkDraft {
 pub struct SettingsView {
     links: Vec<LinkDraft>,
     mapbox_access_token: String,
+    sharing_server: String,
     /// Applied as edited, even while an invalid link keeps it from being saved.
     settings: Settings,
     saved: Settings,
@@ -125,6 +126,7 @@ impl SettingsView {
         Self {
             links: settings.links.iter().map(LinkDraft::from).collect(),
             mapbox_access_token: settings.map.mapbox_access_token.clone().unwrap_or_default(),
+            sharing_server: settings.sharing.server.clone().unwrap_or_default(),
             settings: settings.clone(),
             saved: settings.clone(),
             layout_name: String::new(),
@@ -175,6 +177,9 @@ impl SettingsView {
 
                 ui.add_space(15.0);
                 self.map_ui(ui, map_center);
+
+                ui.add_space(15.0);
+                self.sharing_ui(ui);
 
                 ui.add_space(15.0);
                 self.appearance_ui(ui);
@@ -272,6 +277,40 @@ impl SettingsView {
         });
 
         built
+    }
+
+    fn sharing_ui(&mut self, ui: &mut egui::Ui) {
+        column_header(ui, "📡 SHARING");
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Server");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.sharing_server)
+                    .desired_width(260.0)
+                    .hint_text("http://meridian:7654"),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.label("Station name");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.settings.sharing.station).desired_width(160.0),
+            )
+            .on_hover_text("Prefixes the names of the sessions shared from here");
+        });
+
+        ui.horizontal(|ui| {
+            ui.add_space(5.0);
+            ui.add_enabled_ui(!self.sharing_server.trim().is_empty(), |ui| {
+                ui.checkbox(
+                    &mut self.settings.sharing.share_by_default,
+                    "Share new systems automatically",
+                )
+                .on_hover_text("Takes effect at the next start");
+            });
+        });
     }
 
     fn map_ui(&mut self, ui: &mut egui::Ui, map_center: Option<GeoPosition>) {
@@ -618,6 +657,8 @@ impl SettingsView {
         self.settings.links = links;
         self.settings.map.mapbox_access_token =
             (!self.mapbox_access_token.is_empty()).then(|| self.mapbox_access_token.clone());
+        let server = self.sharing_server.trim();
+        self.settings.sharing.server = (!server.is_empty()).then(|| server.to_owned());
 
         if self.settings != self.saved {
             self.status = Some(self.settings.save().map_err(|e| e.to_string()));

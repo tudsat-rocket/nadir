@@ -166,8 +166,10 @@ impl<'a> Plot<'a> {
 
     /// Whether a plotted component has been heard recently.
     fn live(&self) -> bool {
-        if !matches!(self.source.origin, nadir_core::Origin::Live) {
-            return false;
+        match &self.source.origin {
+            nadir_core::Origin::Live => {}
+            nadir_core::Origin::Stream(progress) if progress.connected() => {}
+            nadir_core::Origin::Log(_) | nadir_core::Origin::Stream(_) => return false,
         }
         let now = self.source.now();
         self.lines.iter().any(|line| {

@@ -47,6 +47,8 @@ pub struct System {
     pub conn: Arc<Mutex<SystemConnection>>,
     muted: Arc<AtomicBool>,
     hot: Arc<AtomicBool>,
+    #[cfg(not(target_arch = "wasm32"))]
+    publisher: Arc<Mutex<Option<crate::publish::Publisher>>>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
     /// Kept apart from `params`, since it arrives after their download and outlives a redownload.
@@ -99,6 +101,8 @@ impl System {
             })),
             muted: Arc::new(AtomicBool::new(muted)),
             hot: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(target_arch = "wasm32"))]
+            publisher: Arc::new(Mutex::new(None)),
             available_modes,
             params,
             param_metadata: Arc::new(Mutex::new(HashMap::new())),
@@ -254,6 +258,24 @@ impl System {
 
     pub fn set_hot(&self, hot: bool) {
         self.hot.store(hot, Ordering::Relaxed);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn sharing(&self) -> Option<(crate::SessionAddr, Arc<crate::PublishStatus>)> {
+        let publisher = self.publisher.lock().unwrap();
+        publisher.as_ref().map(|p| (p.addr.clone(), p.status()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_sharing(&self, addr: Option<crate::SessionAddr>) {
+        *self.publisher.lock().unwrap() = addr.map(crate::publish::Publisher::spawn);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn publish(&self, received_at: DateTime<Utc>, frame: &Frame<V2>) {
+        if let Some(publisher) = self.publisher.lock().unwrap().as_ref() {
+            publisher.publish(received_at, frame);
+        }
     }
 
     pub fn send_message<M: Message + MessageExt + Debug>(&self, message: &M) {

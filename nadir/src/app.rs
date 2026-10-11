@@ -40,6 +40,8 @@ pub struct App {
     position_source: PositionSource,
     active_view: View,
     never_connected: bool,
+    /// A joined session to switch to once its first system arrives.
+    focus_on_arrival: Option<SourceId>,
     logs_shown: bool,
 }
 
@@ -68,6 +70,12 @@ impl App {
                 builder = builder.autoconnect_to_usb();
             }
             builder = builder.mute_uplink(settings.mute_uplink_by_default);
+            if let Some(server) = &settings.sharing.server
+                && settings.sharing.share_by_default
+            {
+                builder =
+                    builder.share_by_default(server.clone(), settings.sharing.station.clone());
+            }
 
             builder
                 .on_event(Box::new(move |event| {
@@ -141,6 +149,7 @@ impl App {
             position_source: PositionSource::default(),
             active_view: View::Overview,
             never_connected: true,
+            focus_on_arrival: None,
             logs_shown: false,
         };
 
@@ -179,7 +188,7 @@ impl App {
     fn add_log(&mut self, path: &Path, opened: Result<nadir_core::Source, nadir_core::LogError>) {
         let already_open = self.logs.values().any(|source| match &source.origin {
             nadir_core::Origin::Log(progress) => progress.path == path,
-            nadir_core::Origin::Live => false,
+            nadir_core::Origin::Live | nadir_core::Origin::Stream(_) => false,
         });
 
         // Only reachable by dropping a file that is already listed as open in the overview.
@@ -248,6 +257,43 @@ impl App {
         });
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn join_session(&mut self, ctx: &egui::Context, addr: &nadir_core::SessionAddr) {
+        let url = addr.url();
+        let joined = self.logs.iter().find_map(|(id, source)| {
+            matches!(&source.origin, nadir_core::Origin::Stream(progress) if progress.url == url)
+                .then_some(*id)
+        });
+
+        let id = joined.unwrap_or_else(|| {
+            let ctx = ctx.clone();
+            let source = nadir_core::Source::stream(addr, move || ctx.request_repaint());
+
+            let id = self.next_source_id;
+            self.logs.insert(id, source);
+            self.next_source_id += 1;
+            id
+        });
+
+        self.focus_on_arrival = Some(id);
+    }
+
+    fn focus_arrived(&mut self) {
+        let Some(id) = self.focus_on_arrival else {
+            return;
+        };
+        let Some(source) = self.logs.get(&id) else {
+            self.focus_on_arrival = None;
+            return;
+        };
+
+        if let Some(system_id) = source.known_system_ids().first() {
+            self.active_view = View::system(id, *system_id);
+            self.focus_on_arrival = None;
+            self.sidebar.collapse();
+        }
+    }
+
     fn restore_layout(&mut self, layout: &LayoutRef) {
         self.panes.rearrange(
             &mut self.tiles_tree,
@@ -259,8 +305,10 @@ impl App {
     fn close_log(&mut self, id: SourceId) {
         if let Some(source) = self.logs.remove(&id) {
             // The loader holds its own handle, so dropping ours does not stop it on its own.
-            if let nadir_core::Origin::Log(progress) = &source.origin {
-                progress.cancel();
+            match &source.origin {
+                nadir_core::Origin::Log(progress) => progress.cancel(),
+                nadir_core::Origin::Stream(progress) => progress.cancel(),
+                nadir_core::Origin::Live => {}
             }
         }
 
@@ -357,10 +405,12 @@ impl eframe::App for App {
 
         if self.logs.values().any(|source| match &source.origin {
             nadir_core::Origin::Log(progress) => !progress.done(),
-            nadir_core::Origin::Live => false,
+            nadir_core::Origin::Live | nadir_core::Origin::Stream(_) => false,
         }) {
             ctx.request_repaint();
         }
+
+        self.focus_arrived();
 
         let action = self.sidebar.show(
             ui,
@@ -368,12 +418,14 @@ impl eframe::App for App {
             &self.logs,
             &mut self.active_view,
             &mut self.logs_shown,
-            &self.settings.settings().layouts,
+            self.settings.settings(),
         );
         match action {
             Some(SidebarAction::OpenLog) => self.pick_log(&ctx),
             Some(SidebarAction::CloseLog(id)) => self.close_log(id),
             Some(SidebarAction::RestoreLayout(layout)) => self.restore_layout(&layout),
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(SidebarAction::JoinSession(addr)) => self.join_session(&ctx, &addr),
             None => {}
         }
 

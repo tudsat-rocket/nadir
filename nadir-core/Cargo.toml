@@ -22,6 +22,7 @@ siphasher = "1.0.3"
 directories = { workspace = true }
 tokio = { workspace = true }
 maviola = { workspace = true }
+reqwest = { workspace = true }
 tokio-serial = "5.5.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]

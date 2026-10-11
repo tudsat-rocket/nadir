@@ -21,7 +21,7 @@ use crate::system::System;
 use crate::tlog;
 
 /// Half the per-system broadcast capacity in `system.rs`.
-const INGEST_BATCH: usize = 256;
+pub(crate) const INGEST_BATCH: usize = 256;
 
 /// Where a [`Source`]'s data comes from.
 #[derive(Clone)]
@@ -30,6 +30,8 @@ pub enum Origin {
     Live,
     /// Loaded from a telemetry log on disk.
     Log(Arc<LogProgress>),
+    /// Read from a session shared through a `meridian` service.
+    Stream(Arc<StreamProgress>),
 }
 
 impl Origin {
@@ -38,6 +40,9 @@ impl Origin {
         match self {
             Self::Live => Utc::now(),
             Self::Log(progress) => progress.cursor(),
+            // The newest record rather than the wall clock, or a session that went quiet scrolls out
+            // of the plots.
+            Self::Stream(progress) => progress.cursor().unwrap_or_else(Utc::now),
         }
     }
 }
@@ -100,6 +105,52 @@ impl LogProgress {
     }
 }
 
+/// How a session read from a `meridian` service is getting on.
+pub struct StreamProgress {
+    pub session: String,
+    pub url: String,
+    /// Zero until the first record arrives.
+    pub(crate) cursor_micros: AtomicI64,
+    pub(crate) records: AtomicU64,
+    /// Stream bytes turned into records so far, which is where a reconnect resumes from.
+    pub(crate) bytes: AtomicU64,
+    pub(crate) errors: AtomicU64,
+    pub(crate) connected: AtomicBool,
+    pub(crate) cancelled: AtomicBool,
+    /// Which session under this id the bytes belong to, as the service names it. Zero until known.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) epoch: AtomicU64,
+}
+
+impl StreamProgress {
+    pub fn cursor(&self) -> Option<DateTime<Utc>> {
+        match self.cursor_micros.load(Ordering::Relaxed) {
+            0 => None,
+            micros => DateTime::from_timestamp_micros(micros),
+        }
+    }
+
+    pub fn records(&self) -> u64 {
+        self.records.load(Ordering::Relaxed)
+    }
+
+    pub fn bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn errors(&self) -> u64 {
+        self.errors.load(Ordering::Relaxed)
+    }
+
+    pub fn connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum LogError {
     #[error("Failed to open the telemetry log: {0}")]
@@ -119,13 +170,20 @@ pub struct Source {
     pub plot_origin: DateTime<Utc>,
     pub origin: Origin,
     mute_new_systems: Arc<AtomicBool>,
+    /// Server and station to share new systems through, see [`crate::SessionAddr::new`].
+    #[cfg(not(target_arch = "wasm32"))]
+    share_new_systems: Option<(String, String)>,
     can_proxy: Option<crate::CanProxy>,
 }
 
 impl Source {
     /// The source the links feed.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn live(mute_uplink: bool, can_proxy: Option<crate::CanProxy>) -> Self {
+    pub(crate) fn live(
+        mute_uplink: bool,
+        share_new_systems: Option<(String, String)>,
+        can_proxy: Option<crate::CanProxy>,
+    ) -> Self {
         Self {
             db: Db::init(),
             tlog: Some(tlog::Writer::spawn()),
@@ -133,6 +191,7 @@ impl Source {
             plot_origin: Utc::now(),
             origin: Origin::Live,
             mute_new_systems: Arc::new(AtomicBool::new(mute_uplink)),
+            share_new_systems,
             can_proxy,
         }
     }
@@ -141,15 +200,7 @@ impl Source {
     /// and no stream transport yet either, so this just gives the UI an empty store to draw.
     #[cfg(target_arch = "wasm32")]
     pub fn detached() -> Self {
-        Self {
-            db: Db::init(),
-            tlog: None,
-            systems: Arc::new(Mutex::new(HashMap::new())),
-            plot_origin: Utc::now(),
-            origin: Origin::Live,
-            mute_new_systems: Arc::new(AtomicBool::new(false)),
-            can_proxy: None,
-        }
+        Self::fed(Origin::Live, Utc::now())
     }
 
     /// Opens a telemetry log and starts loading it.
@@ -225,17 +276,25 @@ impl Source {
             cancelled: AtomicBool::new(false),
         });
 
-        let source = Self {
+        (
+            Self::fed(Origin::Log(Arc::clone(&progress)), first),
+            progress,
+        )
+    }
+
+    /// An empty source for a feed that fills it from elsewhere.
+    pub(crate) fn fed(origin: Origin, plot_origin: DateTime<Utc>) -> Self {
+        Self {
             db: Db::init(),
             tlog: None,
             systems: Arc::new(Mutex::new(HashMap::new())),
-            plot_origin: first,
-            origin: Origin::Log(Arc::clone(&progress)),
+            plot_origin,
+            origin,
             mute_new_systems: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(target_arch = "wasm32"))]
+            share_new_systems: None,
             can_proxy: None,
-        };
-
-        (source, progress)
+        }
     }
 
     /// The latest moment this source knows about: see [`Origin::now`].
@@ -339,7 +398,7 @@ impl Source {
         let mut system = match frame.system_id() {
             crate::GROUND_STATION_SYSTEM_ID | crate::OTHER_GROUND_STATION_SYSTEM_ID => None,
             system_id => Some(systems.entry(system_id).or_insert_with(|| {
-                System::new(
+                let system = System::new(
                     system_id,
                     self.db.clone(),
                     self.tlog.clone(),
@@ -347,9 +406,22 @@ impl Source {
                     callback.cloned(),
                     self.mute_new_systems(),
                     self.can_proxy.clone(),
-                )
+                );
+
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some((server, station)) = &self.share_new_systems {
+                    let addr = crate::SessionAddr::new(server.clone(), station, system_id);
+                    system.set_sharing(Some(addr));
+                }
+
+                system
             })),
         };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(system) = &system {
+            system.publish(received_at, frame);
+        }
 
         if let Ok(message) = frame.decode::<Common>() {
             if let Common::Statustext(inner) = &message {
