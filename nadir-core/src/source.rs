@@ -371,7 +371,7 @@ impl Source {
             self.write(frame, &message, received_at);
 
             if let Some(system) = &mut system {
-                system.notify_of_frame(frame, callback);
+                system.notify_of_rapid_message(&message, frame, callback);
             }
         }
     }

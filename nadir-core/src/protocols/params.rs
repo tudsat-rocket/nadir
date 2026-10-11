@@ -18,9 +18,10 @@ use mavspec::rust::{
 };
 
 use crate::{
-    System,
+    System, mode_name_string,
     protocols::{GatherError, Gatherable, gather},
 };
+use rapid_dialect::rapid::enums::ParamMetadataFlag;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ParamEncoding {
@@ -101,8 +102,26 @@ impl ParamVal {
 
     pub fn as_float(self) -> f32 {
         match self {
+            Self::Int8(i) => f32::from(i),
+            Self::Int16(i) => f32::from(i),
+            Self::Int32(i) => i as f32,
+            Self::Int64(i) => i as f32,
             Self::Float32(f) => f,
             _ => self.as_unsigned_int() as f32,
+        }
+    }
+
+    fn is_type_extreme(self) -> bool {
+        match self {
+            Self::Int8(i) => i == i8::MIN || i == i8::MAX,
+            Self::Uint8(u) => u == u8::MIN || u == u8::MAX,
+            Self::Int16(i) => i == i16::MIN || i == i16::MAX,
+            Self::Uint16(u) => u == u16::MIN || u == u16::MAX,
+            Self::Int32(i) => i == i32::MIN || i == i32::MAX,
+            Self::Uint32(u) => u == u32::MIN || u == u32::MAX,
+            Self::Int64(i) => i == i64::MIN || i == i64::MAX,
+            Self::Uint64(u) => u == u64::MIN || u == u64::MAX,
+            Self::Float32(f) => f.is_infinite() || f == f32::MIN || f == f32::MAX,
         }
     }
 
@@ -117,6 +136,22 @@ impl ParamVal {
             Self::Int64(i) => i as u64,
             Self::Uint64(u) => u,
             Self::Float32(f) => f as u64,
+        }
+    }
+}
+
+impl std::fmt::Display for ParamVal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int8(v) => v.fmt(f),
+            Self::Uint8(v) => v.fmt(f),
+            Self::Int16(v) => v.fmt(f),
+            Self::Uint16(v) => v.fmt(f),
+            Self::Int32(v) => v.fmt(f),
+            Self::Uint32(v) => v.fmt(f),
+            Self::Int64(v) => v.fmt(f),
+            Self::Uint64(v) => v.fmt(f),
+            Self::Float32(v) => v.fmt(f),
         }
     }
 }
@@ -206,6 +241,47 @@ pub struct Param {
     pub downloaded_value: ParamVal,
 }
 
+/// A param's static description from zenith's `PARAM_METADATA`. Unbounded params report the
+/// extremes of their type as `min` and `max`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParamMetadata {
+    pub default: ParamVal,
+    pub min: ParamVal,
+    pub max: ParamVal,
+    pub units: Option<String>,
+    pub description: String,
+    pub reboot_required: bool,
+}
+
+impl ParamMetadata {
+    pub fn decode(
+        message: &rapid_dialect::rapid::messages::ParamMetadata,
+        encoding: ParamEncoding,
+    ) -> Option<(ParamId, Self)> {
+        let param_type = MavParamType::try_from(message.param_type as u8).ok()?;
+        let units = mode_name_string(&message.units);
+        let metadata = Self {
+            default: ParamVal::decode(param_type, message.default_value, encoding),
+            min: ParamVal::decode(param_type, message.min_value, encoding),
+            max: ParamVal::decode(param_type, message.max_value, encoding),
+            units: (!units.is_empty()).then_some(units),
+            description: mode_name_string(&message.description),
+            reboot_required: message.flags.contains(ParamMetadataFlag::REBOOT_REQUIRED),
+        };
+        Some((mode_name_string(&message.param_id), metadata))
+    }
+
+    /// The lower bound, unless it is only the type's.
+    pub fn min_bound(&self) -> Option<ParamVal> {
+        (!self.min.is_type_extreme()).then_some(self.min)
+    }
+
+    /// The upper bound, unless it is only the type's.
+    pub fn max_bound(&self) -> Option<ParamVal> {
+        (!self.max.is_type_extreme()).then_some(self.max)
+    }
+}
+
 // TODO: rename
 pub enum ParamProgress {
     Unknown,
@@ -215,10 +291,8 @@ pub enum ParamProgress {
 }
 
 impl Param {
-    /// `PARAM_VALUE.param_id` is only NUL-terminated when shorter than 16 bytes.
     fn id_of(value: &ParamValue) -> ParamId {
-        let end = value.param_id.iter().position(|&b| b == 0).unwrap_or(16);
-        String::from_utf8_lossy(&value.param_id[..end]).into_owned()
+        mode_name_string(&value.param_id)
     }
 }
 
@@ -385,6 +459,48 @@ mod tests {
             Composite::key_from_hex(&format!("+{}", "0".repeat(31))),
             None
         );
+    }
+
+    #[test]
+    fn metadata_decodes_like_param_values() {
+        use rapid_dialect::rapid::enums::MavParamType as RapidParamType;
+
+        let mut message = rapid_dialect::rapid::messages::ParamMetadata {
+            param_id: *b"LORA_TX_PWR_HI\0\0",
+            param_type: RapidParamType::Uint32,
+            default_value: f32::from_bits(1500),
+            min_value: f32::from_bits(0),
+            max_value: f32::from_bits(u32::MAX),
+            flags: ParamMetadataFlag::REBOOT_REQUIRED,
+            units: [0; 16],
+            description: [0; 200],
+        };
+        message.description[..5].copy_from_slice(b"Power");
+
+        let (id, metadata) = ParamMetadata::decode(&message, ParamEncoding::Bytewise).unwrap();
+        assert_eq!(id, "LORA_TX_PWR_HI");
+        assert_eq!(
+            metadata,
+            ParamMetadata {
+                default: ParamVal::Uint32(1500),
+                min: ParamVal::Uint32(0),
+                max: ParamVal::Uint32(u32::MAX),
+                units: None,
+                description: "Power".into(),
+                reboot_required: true,
+            }
+        );
+
+        message.param_id = *b"SM_MAIN_ALT_LONG";
+        message.param_type = RapidParamType::Real32;
+        message.default_value = 450.0;
+        message.flags = ParamMetadataFlag::empty();
+        message.units = *b"m\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        let (id, metadata) = ParamMetadata::decode(&message, ParamEncoding::Bytewise).unwrap();
+        assert_eq!(id, "SM_MAIN_ALT_LONG");
+        assert_eq!(metadata.default, ParamVal::Float32(450.0));
+        assert_eq!(metadata.units.as_deref(), Some("m"));
+        assert!(!metadata.reboot_required);
     }
 
     #[test]

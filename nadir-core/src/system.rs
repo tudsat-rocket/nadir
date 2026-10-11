@@ -24,7 +24,7 @@ use mavspec::rust::dialects::Common;
 use nadir_store::{Db, DbError, MessageExt};
 
 use crate::protocols::logs::{FlightLogUiState, LogDlCommand};
-use crate::protocols::params::{ParamEncoding, ParamProgress, ParamVal};
+use crate::protocols::params::{ParamEncoding, ParamId, ParamMetadata, ParamProgress, ParamVal};
 use crate::source::Origin;
 use crate::stats::ChannelStats;
 use crate::{GROUND_STATION_COMPONENT_ID, GROUND_STATION_SYSTEM_ID};
@@ -49,6 +49,8 @@ pub struct System {
     hot: Arc<AtomicBool>,
     pub available_modes: Arc<Mutex<Option<Vec<AvailableModes>>>>,
     pub params: Arc<Mutex<ParamProgress>>,
+    /// Kept apart from `params`, since it arrives after their download and outlives a redownload.
+    pub param_metadata: Arc<Mutex<HashMap<ParamId, ParamMetadata>>>,
     params_redownload: Arc<Notify>,
     pub logs: Arc<Mutex<FlightLogUiState>>,
     pub log_cmd_tx: Arc<Mutex<mpsc::Sender<LogDlCommand>>>,
@@ -99,6 +101,7 @@ impl System {
             hot: Arc::new(AtomicBool::new(false)),
             available_modes,
             params,
+            param_metadata: Arc::new(Mutex::new(HashMap::new())),
             params_redownload: Arc::new(Notify::new()),
             logs,
             log_cmd_tx: Arc::new(Mutex::new(log_cmd_tx)),
@@ -475,6 +478,21 @@ impl System {
         callback: Option<&Callback<V2>>,
     ) {
         let _ = self.message_sender.send(message);
+        self.notify_of_frame(frame, callback);
+    }
+
+    pub fn notify_of_rapid_message(
+        &mut self,
+        message: &rapid_dialect::Rapid,
+        frame: &Frame<V2>,
+        callback: Option<&Callback<V2>>,
+    ) {
+        if let rapid_dialect::Rapid::ParamMetadata(message) = message
+            && let Some(encoding) = self.parameter_encoding()
+            && let Some((id, metadata)) = ParamMetadata::decode(message, encoding)
+        {
+            self.param_metadata.lock().unwrap().insert(id, metadata);
+        }
         self.notify_of_frame(frame, callback);
     }
 

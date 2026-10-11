@@ -15,7 +15,7 @@ pub use links::*;
 pub use nadir_store::{MessageInstance, MessageSummary, TimeseriesArgs, format_message_label};
 pub use protocols::GatherError;
 pub use protocols::logs::types::*;
-pub use protocols::params::{Composite, Param, ParamId, ParamProgress, ParamVal};
+pub use protocols::params::{Composite, Param, ParamId, ParamMetadata, ParamProgress, ParamVal};
 pub use settings::Settings;
 pub use source::*;
 pub use system::*;

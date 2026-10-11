@@ -2,18 +2,19 @@ use std::collections::HashMap;
 
 use eframe::egui;
 use egui::{
-    Align, Button, CollapsingHeader, DragValue, Grid, Layout, ProgressBar, RichText, ScrollArea,
-    TextEdit, TextStyle, Vec2,
+    Align, Button, CollapsingHeader, DragValue, Grid, Label, Layout, ProgressBar, RichText,
+    ScrollArea, TextEdit, TextStyle, Vec2,
 };
 
-use nadir_core::{Composite, Param, ParamId, ParamProgress, ParamVal, System};
+use nadir_core::{Composite, Param, ParamId, ParamMetadata, ParamProgress, ParamVal, System};
 
 use crate::panes::{MUTED_HINT, PaneUi};
 use crate::widgets::Hazard;
 
 pub struct ParamsPane {
     pub search: String,
-    pub filter_changed: bool,
+    pub hide_defaults: bool,
+    pub unsaved_only: bool,
     /// Text typed into a composite's field, by base name, kept while it has focus.
     drafts: HashMap<ParamId, String>,
 }
@@ -22,7 +23,8 @@ impl ParamsPane {
     pub fn new(_ctx: &egui::Context) -> Self {
         Self {
             search: String::new(),
-            filter_changed: false,
+            hide_defaults: false,
+            unsaved_only: false,
             drafts: HashMap::new(),
         }
     }
@@ -168,6 +170,38 @@ impl ParamsPane {
         }
     }
 
+    fn with_units(value: ParamVal, metadata: &ParamMetadata) -> String {
+        match &metadata.units {
+            Some(units) => format!("{value} {units}"),
+            None => value.to_string(),
+        }
+    }
+
+    /// `values` is false for composites, whose members' default and bounds are per word.
+    fn metadata_tooltip(ui: &mut egui::Ui, metadata: &ParamMetadata, values: bool) {
+        if !metadata.description.is_empty() {
+            ui.label(&metadata.description);
+        }
+        if values {
+            Grid::new("param_metadata").show(ui, |ui| {
+                for (label, value) in [
+                    ("Default", Some(metadata.default)),
+                    ("Min", metadata.min_bound()),
+                    ("Max", metadata.max_bound()),
+                ] {
+                    if let Some(value) = value {
+                        ui.weak(label);
+                        ui.monospace(Self::with_units(value, metadata));
+                        ui.end_row();
+                    }
+                }
+            });
+        }
+        if metadata.reboot_required {
+            ui.weak(format!("{REBOOT_ICON} Takes effect on the next boot"));
+        }
+    }
+
     fn redownload_button(ui: &mut egui::Ui, system: &System) {
         let response = ui
             .add_enabled(!system.muted(), Button::new("⟳ Redownload"))
@@ -177,6 +211,13 @@ impl ParamsPane {
         }
     }
 }
+
+const REBOOT_ICON: &str = "🔄";
+
+const NAME_W: f32 = 150.0;
+const VALUE_W: f32 = 140.0;
+const BUTTON_W: f32 = 80.0;
+const DESCRIPTION_MIN_W: f32 = 200.0;
 
 impl PaneUi for ParamsPane {
     fn inset(&mut self, _ui: &mut egui::Ui) -> f32 {
@@ -210,17 +251,31 @@ impl PaneUi for ParamsPane {
                 });
             }
             ParamProgress::Complete(params) => {
-                ui.horizontal(|ui| {
-                    ui.add_space(5.0);
-                    ui.set_height(25.0);
-                    ui.weak("Filter");
-                    ui.add(TextEdit::singleline(&mut self.search));
-                    ui.checkbox(&mut self.filter_changed, "Only Show Changed");
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let metadata = system.param_metadata.lock().unwrap();
+                // A composite's members share one description, take its first.
+                let metadata_of = |row: &str| {
+                    metadata
+                        .get(row)
+                        .or_else(|| metadata.get(&Composite::member(row, 0)))
+                };
+                let set_open = ui
+                    .horizontal(|ui| {
                         ui.add_space(5.0);
-                        Self::redownload_button(ui, &system);
-                    });
-                });
+                        ui.set_height(25.0);
+                        ui.weak("Filter");
+                        ui.add(TextEdit::singleline(&mut self.search).desired_width(150.0));
+                        ui.toggle_value(&mut self.hide_defaults, "Hide Defaults");
+                        ui.toggle_value(&mut self.unsaved_only, "Unsaved Only");
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.add_space(5.0);
+                            Self::redownload_button(ui, &system);
+                            let collapse = ui.button("⊟").on_hover_text("Collapse All").clicked();
+                            let expand = ui.button("⊞").on_hover_text("Expand All").clicked();
+                            (expand || collapse).then_some(expand)
+                        })
+                        .inner
+                    })
+                    .inner;
 
                 ui.separator();
 
@@ -228,16 +283,21 @@ impl PaneUi for ParamsPane {
                     let w = ui.available_width();
                     ui.set_width(w);
 
+                    let search = self.search.to_lowercase();
                     let mut param_ids: Vec<_> = params
                         .keys()
-                        .filter(|id| id.to_lowercase().contains(&self.search.to_lowercase()))
                         .filter(|id| {
-                            if self.filter_changed {
-                                let p = params.get(*id).unwrap();
-                                p.value != p.downloaded_value
-                            } else {
-                                true
-                            }
+                            id.to_lowercase().contains(&search)
+                                || metadata
+                                    .get(*id)
+                                    .is_some_and(|m| m.description.to_lowercase().contains(&search))
+                        })
+                        .filter(|id| {
+                            let p = &params[*id];
+                            let unsaved = p.value != p.downloaded_value;
+                            let default = Composite::of(id).is_none()
+                                && metadata.get(*id).is_some_and(|m| p.value == m.default);
+                            (unsaved || !self.unsaved_only) && !(default && self.hide_defaults)
                         })
                         .map(|id| Self::row_of(params, id))
                         .collect();
@@ -250,15 +310,25 @@ impl PaneUi for ParamsPane {
                         a_cat == b_cat
                     });
 
-                    let button_w = f32::max(w * 0.15, 50.0);
                     let spacing = ui.spacing().item_spacing;
-                    let col_w = f32::max(50.0, (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0);
+                    let fixed_w =
+                        ui.spacing().indent + NAME_W + VALUE_W + 2.0 * BUTTON_W + 8.0 * spacing.x;
+                    let (name_w, value_w, button_w, description_w) = if w
+                        >= fixed_w + DESCRIPTION_MIN_W
+                    {
+                        (NAME_W, VALUE_W, BUTTON_W, Some(w - fixed_w))
+                    } else {
+                        let button_w = f32::max(w * 0.15, 50.0);
+                        let col_w = f32::max(50.0, (w - 2.0 * button_w - 6.0 * spacing.x) / 2.0);
+                        (col_w, col_w, button_w, None)
+                    };
                     let col_h = 14.0;
 
                     for chunk in param_id_chunks {
                         let cat = chunk[0].split_once('_').map_or(chunk[0].as_str(), |s| s.0);
                         CollapsingHeader::new(cat)
                             .default_open(false)
+                            .open(set_open)
                             .show(ui, |ui| {
                                 Grid::new(ui.next_auto_id()).striped(true).show(ui, |ui| {
                                     for param_id in chunk {
@@ -268,44 +338,110 @@ impl PaneUi for ParamsPane {
                                                 .get(m)
                                                 .is_none_or(|p| p.value == p.downloaded_value)
                                         });
+                                        let meta = metadata_of(param_id);
+                                        let non_default = composite.is_none()
+                                            && meta.is_some_and(|m| {
+                                                params[param_id].value != m.default
+                                            });
                                         ui.vertical(|ui| {
-                                            ui.set_width(col_w);
-                                            if unchanged {
-                                                ui.monospace(param_id);
-                                            } else {
-                                                ui.monospace(RichText::new(param_id).strong());
+                                            ui.set_width(name_w);
+                                            let mut name = RichText::new(param_id).monospace();
+                                            if !unchanged {
+                                                name = name.strong();
+                                            }
+                                            if non_default {
+                                                name =
+                                                    name.color(ui.visuals().selection.stroke.color);
+                                            }
+                                            let response = ui
+                                                .horizontal(|ui| {
+                                                    let mut response = ui.label(name);
+                                                    if meta.is_some_and(|m| m.reboot_required) {
+                                                        response |= ui.weak(REBOOT_ICON);
+                                                    }
+                                                    response
+                                                })
+                                                .inner;
+                                            if let Some(meta) = meta {
+                                                response.on_hover_ui(|ui| {
+                                                    Self::metadata_tooltip(
+                                                        ui,
+                                                        meta,
+                                                        composite.is_none(),
+                                                    );
+                                                });
                                             }
                                         });
-                                        let size = Vec2::new(col_w, col_h);
+                                        let size = Vec2::new(value_w, col_h);
                                         if let Some(composite) = composite {
                                             self.composite_editor(
                                                 ui, params, param_id, composite, size,
                                             );
                                         } else {
                                             let param = params.get_mut(param_id).unwrap();
-                                            ui.add_sized(
-                                                size,
-                                                match param.value {
-                                                    ParamVal::Int8(ref mut i) => DragValue::new(i),
-                                                    ParamVal::Uint8(ref mut u) => DragValue::new(u),
-                                                    ParamVal::Int16(ref mut i) => DragValue::new(i),
-                                                    ParamVal::Uint16(ref mut u) => {
-                                                        DragValue::new(u)
+                                            let mut drag = match param.value {
+                                                ParamVal::Int8(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint8(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int16(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint16(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int32(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint32(ref mut u) => DragValue::new(u),
+                                                ParamVal::Int64(ref mut i) => DragValue::new(i),
+                                                ParamVal::Uint64(ref mut u) => DragValue::new(u),
+                                                ParamVal::Float32(ref mut f) => DragValue::new(f),
+                                            };
+                                            if let Some(meta) = meta {
+                                                drag = drag
+                                                    .range(
+                                                        f64::from(meta.min.as_float())
+                                                            ..=f64::from(meta.max.as_float()),
+                                                    )
+                                                    .clamp_existing_to_range(false);
+                                                if let Some(units) = &meta.units {
+                                                    drag = drag.suffix(format!(" {units}"));
+                                                }
+                                            }
+                                            let response = ui.add_sized(size, drag);
+                                            if let Some(meta) = meta {
+                                                response.context_menu(|ui| {
+                                                    let reset = Button::new(format!(
+                                                        "⟲ Reset to default ({})",
+                                                        Self::with_units(meta.default, meta)
+                                                    ));
+                                                    if ui.add_enabled(non_default, reset).clicked()
+                                                    {
+                                                        param.value = meta.default;
+                                                        ui.close();
                                                     }
-                                                    ParamVal::Int32(ref mut i) => DragValue::new(i),
-                                                    ParamVal::Uint32(ref mut u) => {
-                                                        DragValue::new(u)
-                                                    }
-                                                    ParamVal::Int64(ref mut i) => DragValue::new(i),
-                                                    ParamVal::Uint64(ref mut u) => {
-                                                        DragValue::new(u)
-                                                    }
-                                                    ParamVal::Float32(ref mut f) => {
-                                                        DragValue::new(f)
-                                                    }
-                                                },
-                                            );
+                                                });
+                                            }
                                         }
+                                        if let Some(description_w) = description_w {
+                                            ui.vertical(|ui| {
+                                                ui.set_width(description_w);
+                                                if let Some(meta) = meta {
+                                                    let first_line = meta
+                                                        .description
+                                                        .lines()
+                                                        .next()
+                                                        .unwrap_or("");
+                                                    ui.add(
+                                                        Label::new(
+                                                            RichText::new(first_line).weak(),
+                                                        )
+                                                        .truncate(),
+                                                    )
+                                                    .on_hover_ui(|ui| {
+                                                        Self::metadata_tooltip(
+                                                            ui,
+                                                            meta,
+                                                            composite.is_none(),
+                                                        );
+                                                    });
+                                                }
+                                            });
+                                        }
+
                                         ui.horizontal(|ui| {
                                             let size = Vec2::new(button_w, col_h);
                                             if unchanged {
