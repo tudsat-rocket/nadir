@@ -30,8 +30,12 @@ const SIGNATURE_LEN: usize = 13;
 const MAGIC_V2: u8 = 0xfd;
 const INCOMPAT_SIGNED: u8 = 0x01;
 
-/// Anything stamped before this is a lost record boundary rather than a real time.
+/// Anything stamped before this is a lost record boundary rather than a real time, unless the whole
+/// log is stamped since boot.
 const EARLIEST_PLAUSIBLE_MICROS: i64 = 946_684_800_000_000; // 2000-01-01T00:00:00Z
+
+/// Longest uptime a log stamped since boot can cover: zenith's u32 milliseconds wrap after 49.7 days.
+const LATEST_BOOT_RELATIVE_MICROS: i64 = 50 * 24 * 3600 * 1_000_000;
 
 /// Give up rather than scan an entire file that was never a telemetry log in the first place.
 const MAX_SCAN: u64 = 1024 * 1024;
@@ -229,10 +233,14 @@ pub enum ReadError {
 /// tool. When the bytes at the cursor are not a plausible record the reader scans forward one byte
 /// at a time for a position that is, as pymavlink's `scan_timestamp` does, and reports how much it
 /// skipped.
+///
+/// Flight controllers without a wall clock stamp records since boot instead. A log whose first
+/// record has such a stamp is read as one throughout.
 pub struct Reader<R: Read> {
     inner: R,
     window: Vec<u8>,
-    latest_plausible: DateTime<Utc>,
+    /// Timestamps a record boundary may carry, in unix microseconds.
+    plausible: std::ops::RangeInclusive<i64>,
     consumed: u64,
     finished: bool,
 }
@@ -249,7 +257,8 @@ impl<R: Read> Reader<R> {
             inner,
             window: Vec::new(),
             // Clocks are not guaranteed to agree, so allow a day of slack.
-            latest_plausible: Utc::now() + TimeDelta::days(1),
+            plausible: EARLIEST_PLAUSIBLE_MICROS
+                ..=(Utc::now() + TimeDelta::days(1)).timestamp_micros(),
             consumed: 0,
             finished: false,
         }
@@ -285,10 +294,10 @@ impl<R: Read> Reader<R> {
 
     /// Length of the record at the cursor, if the bytes there look like one at all.
     fn boundary(&self) -> Option<usize> {
-        let received_at = timestamp_of(&self.window)?;
+        let micros = timestamp_of(&self.window)?.timestamp_micros();
 
-        let plausible = received_at.timestamp_micros() >= EARLIEST_PLAUSIBLE_MICROS
-            && received_at <= self.latest_plausible;
+        let plausible = self.plausible.contains(&micros)
+            || (self.consumed == 0 && (0..=LATEST_BOOT_RELATIVE_MICROS).contains(&micros));
 
         plausible.then(|| record_len(&self.window)).flatten()
     }
@@ -337,6 +346,11 @@ impl<R: Read> Iterator for Reader<R> {
                 }
 
                 if let Ok(record) = decode(&self.window[..len]) {
+                    if self.consumed == 0
+                        && record.received_at.timestamp_micros() < EARLIEST_PLAUSIBLE_MICROS
+                    {
+                        self.plausible = 0..=LATEST_BOOT_RELATIVE_MICROS;
+                    }
                     self.window.drain(..len);
                     self.consumed += len as u64;
 
@@ -647,6 +661,31 @@ mod tests {
 
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].received_at.timestamp_micros(), micros as i64 & !3);
+    }
+
+    #[test]
+    fn a_log_stamped_since_boot_reads_through() {
+        let mut log = Vec::new();
+        for i in 0..3u64 {
+            log.extend_from_slice(&encode(168_000_000 + i * 4000, &frame()).unwrap());
+        }
+        log.extend_from_slice(&[0xab; 37]);
+        log.extend_from_slice(&encode(169_000_000, &frame()).unwrap());
+
+        let read: Vec<Record> = Reader::new(log.as_slice()).flatten().collect();
+
+        assert_eq!(read.len(), 4);
+        assert_eq!(read[3].received_at.timestamp_micros(), 169_000_000);
+    }
+
+    #[test]
+    fn a_stamp_since_boot_is_only_accepted_at_the_start() {
+        let mut log = encode(stamp(), &frame()).unwrap();
+        log.extend_from_slice(&encode(168_000_000, &frame()).unwrap());
+
+        let read: Vec<Record> = Reader::new(log.as_slice()).flatten().collect();
+
+        assert_eq!(read.len(), 1);
     }
 
     #[test]
