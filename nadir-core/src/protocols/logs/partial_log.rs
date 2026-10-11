@@ -166,7 +166,7 @@ impl PartialLogSlow {
     /// ``largest_offset + chunk.len()``.
     /// Parts of chunks that are already stored, will be overwritten when ingested again.
     pub fn ingest(&mut self, offset: u32, chunk: &[u8]) {
-        assert_eq!(
+        debug_assert_eq!(
             self.missing
                 .iter()
                 .fold(0, |acc, r| acc + (r.end - r.start)),

@@ -10,6 +10,7 @@ pub enum LogDlCommand {
     DownloadLog(u16),
     SaveLog { log_id: u16, path: PathBuf },
     Pause,
+    EraseAll,
 }
 #[derive(Debug, Clone)]
 pub struct LogMeta {

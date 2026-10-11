@@ -5,6 +5,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::System;
 use crate::mav::ComponentId;
 use mavspec::rust::dialects::common::Common;
+use mavspec::rust::dialects::common::messages::LogErase;
 
 pub mod download;
 pub mod fetch_list;
@@ -30,6 +31,22 @@ pub async fn run_log_worker(
         };
         match cmd {
             LogDlCommand::SaveLog { log_id, path } => save_log_to_file(&system, log_id, &path),
+            LogDlCommand::EraseAll => {
+                system.send_message(&LogErase {
+                    target_system: system.system_id,
+                    target_component: component_id,
+                });
+                system.logs.lock().unwrap().items.clear();
+                tracing::info!("Erasing all logs on system {}", system.system_id);
+                // LOG_ERASE is not acknowledged, so let the vehicle confirm the list is empty.
+                fetch_logs(
+                    system.clone(),
+                    component_id,
+                    &mut message_rx,
+                    &mut command_rx,
+                )
+                .await;
+            }
             LogDlCommand::FetchLogs => {
                 fetch_logs(
                     system.clone(),
@@ -74,8 +91,13 @@ fn save_log_to_file(system: &System, log_id: u16, path: &PathBuf) {
             tracing::info!("Saved log {log_id} to file {path:?}");
         }
         Err(e) => {
-            system.logs.lock().unwrap().dl_state =
-                GlobLogDownloadState::Idle(format!("Error saving to file: {e}").into());
+            tracing::error!("Saving log {log_id} to {path:?} failed: {e}");
+            // A transfer keeps its own state; the error only takes over an idle toolbar.
+            let mut logs = system.logs.lock().unwrap();
+            if matches!(logs.dl_state, GlobLogDownloadState::Idle(_)) {
+                logs.dl_state =
+                    GlobLogDownloadState::Idle(format!("Error saving to file: {e}").into());
+            }
         }
     }
 }

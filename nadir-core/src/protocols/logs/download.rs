@@ -119,14 +119,23 @@ async fn download_log_chunk(
     });
 
     loop {
+        // Once the vehicle streams, a pause means the rest of the range was lost, so give the
+        // caller its chance to ask for what is missing rather than waiting out the retries.
+        let quiet = if ack_received { 1 } else { 3 };
         let result = timeout(
-            std::time::Duration::from_secs(3),
+            std::time::Duration::from_secs(quiet),
             wait_for_message(message_rx, |m| matches!(m, Common::LogData(_))),
         )
         .await;
         let log_data = match result {
             Ok(Common::LogData(log_data)) => log_data,
             Ok(_) => continue, // impossible, because earlier filter
+            Err(_) if ack_received => {
+                tracing::info!(
+                    "LOG_DATA stream stopped short of {{ofs: {offset}, count: {count}}}"
+                );
+                return Err(());
+            }
             Err(_e) => {
                 tracing::info!("Timeout waiting for LOG_DATA message");
                 if ack_retries_allowed <= 0 {
@@ -143,34 +152,25 @@ async fn download_log_chunk(
                     return Err(());
                 }
 
-                if !ack_received {
-                    tracing::info!(
-                        "Timeout waiting for LOG_DATA message, resending inital LogRequestData Message"
-                    );
-                    system.send_message(&LogRequestData {
-                        target_system: system.system_id,
-                        target_component: component_id,
-                        id: log_id,
-                        ofs: offset,
-                        count: req_count,
-                    });
-                }
+                tracing::info!(
+                    "Timeout waiting for LOG_DATA message, resending inital LogRequestData Message"
+                );
+                system.send_message(&LogRequestData {
+                    target_system: system.system_id,
+                    target_component: component_id,
+                    id: log_id,
+                    ofs: offset,
+                    count: req_count,
+                });
                 ack_retries_allowed -= 1;
                 continue;
             }
         };
-        ack_received = true;
 
+        // Left over from a download of another log. Ending it here would end ours, which the
+        // vehicle already switched to.
         if log_data.id != log_id {
-            // if there is a download ongoing for other log_id, stop it (should never happen, really)
-            system.send_message(&LogRequestEnd {
-                target_system: system.system_id,
-                target_component: component_id,
-            });
-            tracing::error!(
-                "received log data with unexpected log id, this might be because of heavy packet loss"
-            );
-            return Err(());
+            continue;
         }
         if log_data.count == 0 {
             // end of message stream
@@ -183,7 +183,12 @@ async fn download_log_chunk(
             &log_data.data[..(log_data.count as usize).min(90)],
         );
 
-        if log_data.ofs + u32::from(log_data.count) >= offset + req_count {
+        // Packets of an earlier, interrupted request can still be in flight. They are valid data,
+        // but only one of our own can tell that the range is done.
+        let end = offset + req_count;
+        let ours = (offset..end).contains(&log_data.ofs);
+        ack_received |= ours;
+        if ours && log_data.ofs + u32::from(log_data.count) >= end {
             // Finished downloading chunk, although some parts may be missing
             return Ok(());
         }
@@ -252,8 +257,11 @@ pub async fn download_log_until_cancel(
                     Some(LogDlCommand::FetchLogs) => {
                         warn!("Fetching list of logs is not supported while downloading a log");
                     }
-                    Some(LogDlCommand::SaveLog{..}) => {
-                        warn!("Saving a log to file is not supported while downloading a log");
+                    Some(LogDlCommand::SaveLog { log_id, path }) => {
+                        super::save_log_to_file(system, log_id, &path);
+                    }
+                    Some(LogDlCommand::EraseAll) => {
+                        warn!("Erasing logs is not supported while downloading a log");
                     }
                     Some(LogDlCommand::DownloadLog(id)) => {
                         if log_id == id {

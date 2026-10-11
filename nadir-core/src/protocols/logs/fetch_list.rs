@@ -78,11 +78,14 @@ pub async fn fetch_logs(
                     Some(LogDlCommand::FetchLogs) => {
                         warn!("Already fetching list of Logs.");
                     }
-                    Some(LogDlCommand::SaveLog{..}) => {
-                        warn!("Saving a log to file is not supported while fetching list of logs.");
+                    Some(LogDlCommand::SaveLog { log_id, path }) => {
+                        super::save_log_to_file(&system, log_id, &path);
                     }
                     Some(LogDlCommand::DownloadLog(_)) => {
                             warn!("Wait for fetching a list of logs to finish, before downloading a log.");
+                    }
+                    Some(LogDlCommand::EraseAll) => {
+                        warn!("Wait for fetching a list of logs to finish, before erasing logs.");
                     }
                     None => (),
                 }
@@ -107,17 +110,10 @@ pub async fn fetch_logs(
                         })
                         .collect();
 
-                    // TODO: actual error reporting
-                    let info_msg: Option<String> = if new_logs.is_empty() {
-                        Some("No logs available".to_string())
-                    } else {
-                        None
-                    };
                     {
                     // NOTE: overwrite logic is sus, because making it correct would require user
                     // interaction
                         let mut logs = system.logs.lock().unwrap();
-                        logs.dl_state = GlobLogDownloadState::Idle(info_msg);
                         merge_logs(new_logs, &mut logs.items);
                     }
                     return;
