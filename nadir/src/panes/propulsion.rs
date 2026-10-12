@@ -59,19 +59,19 @@ pub(super) struct Valve {
 pub(super) const VALVES: [Valve; VALVE_COUNT] = [
     Valve {
         id: ValveId::OxidizerFill,
-        label: "Oxidizer Fill",
+        label: "Fill & Dump",
         kind: ValveKind::Servo,
         color: Color32::from_rgb(36, 149, 213),
     },
     Valve {
         id: ValveId::PressurantVent,
-        label: "Pressurant Vent",
+        label: "N2 Vent",
         kind: ValveKind::Servo,
         color: Color32::from_rgb(2, 180, 134),
     },
     Valve {
         id: ValveId::OxidizerVent,
-        label: "Oxidizer Vent",
+        label: "Ox Vent",
         kind: ValveKind::Solenoid,
         color: Color32::from_rgb(104, 187, 210),
     },
@@ -89,25 +89,25 @@ pub(super) const VALVES: [Valve; VALVE_COUNT] = [
     },
     Valve {
         id: ValveId::ExternalPressurantFill,
-        label: "Ext Press. Fill",
+        label: "Ext. N2 Fill",
         kind: ValveKind::Servo,
         color: Color32::from_rgb(235, 146, 218),
     },
     Valve {
         id: ValveId::ExternalOxidizerFill,
-        label: "Ext Oxidizer Fill",
+        label: "Ext. Ox Fill",
         kind: ValveKind::Servo,
         color: Color32::from_rgb(158, 133, 212),
     },
     Valve {
         id: ValveId::ExternalPressurantVent,
-        label: "Ext Press. Vent",
+        label: "Ext. N2 Depressure",
         kind: ValveKind::Solenoid,
         color: Color32::from_rgb(142, 143, 115),
     },
     Valve {
         id: ValveId::ExternalOxidizerVent,
-        label: "Ext Oxidizer Vent",
+        label: "Ext. Ox Depressure",
         kind: ValveKind::Solenoid,
         color: Color32::from_rgb(217, 163, 145),
     },
