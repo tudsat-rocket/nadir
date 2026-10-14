@@ -161,7 +161,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 .fields()
                 .iter()
                 .zip(var_names.iter())
-                .find(|(f, _)| f.instance())
+                .find(|(f, _)| is_instance_field(msg_spec.name(), f))
                 .map_or_else(
                     || quote! { None },
                     |(f, varname)| {
@@ -186,7 +186,7 @@ pub fn implement_message_ext_for_dialect(args: TokenStream) -> TokenStream {
                 .fields()
                 .iter()
                 .zip(row_names.iter())
-                .find(|(f, _)| f.instance())
+                .find(|(f, _)| is_instance_field(msg_spec.name(), f))
                 .and_then(|(f, row_name)| match f.r#type() {
                     MavType::Array(_, _) => None,
                     _ => Some(row_name.clone()),
@@ -283,6 +283,14 @@ fn message_type_ident(name: &str) -> syn::Ident {
         .collect();
 
     format_ident!("{}", type_name)
+}
+
+// `camera_device_id` tells autopilot-attached cameras apart, but the definitions do not flag it as
+// an instance field.
+fn is_instance_field(message: &str, f: &MessageField) -> bool {
+    f.instance()
+        || (matches!(message, "CAMERA_CAPTURE_STATUS" | "CAMERA_INFORMATION")
+            && f.name() == "camera_device_id")
 }
 
 // For some reason, the bitmask flag is not set correctly for some messages, work around that.

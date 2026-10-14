@@ -79,6 +79,7 @@ impl System {
         let receiver2 = message_sender.subscribe();
         let receiver3 = message_sender.subscribe();
         let receiver_logs = message_sender.subscribe();
+        let receiver_cameras = message_sender.subscribe();
 
         let (log_cmd_tx, log_cmd_rx) = tokio::sync::mpsc::channel::<LogDlCommand>(1);
 
@@ -121,6 +122,10 @@ impl System {
 
         std::mem::drop(tokio::spawn(
             crate::protocols::intervals::request_message_intervals(system.clone(), receiver2),
+        ));
+
+        std::mem::drop(tokio::spawn(
+            crate::protocols::cameras::request_camera_information(system.clone(), receiver_cameras),
         ));
 
         std::mem::drop(tokio::spawn(crate::protocols::params::download_params(
@@ -453,6 +458,30 @@ impl System {
         };
 
         self.send_message(&cmd);
+    }
+
+    /// `camera` is a 1-based `CAMERA_CAPTURE_STATUS.camera_device_id`, or 0 for all cameras.
+    pub fn do_video_capture(&self, camera: u8, recording: bool) {
+        let camera = f32::from(camera);
+        let cmd = if recording {
+            CommandLong {
+                command: MavCmd::VideoStartCapture,
+                param3: camera,
+                ..Default::default()
+            }
+        } else {
+            CommandLong {
+                command: MavCmd::VideoStopCapture,
+                param2: camera,
+                ..Default::default()
+            }
+        };
+
+        self.send_message(&CommandLong {
+            target_system: self.system_id,
+            target_component: 0x01,
+            ..cmd
+        });
     }
 
     pub fn request_can_forwarding(&self, enable: bool) {

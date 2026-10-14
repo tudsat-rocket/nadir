@@ -4,6 +4,7 @@ use mavspec::rust::dialects::common::messages::{LocalPositionNed, VfrHud};
 
 use nadir_core::{Source, System};
 
+mod cameras;
 mod can;
 mod commands;
 mod horizon;
@@ -23,6 +24,7 @@ mod state_estimator;
 mod status;
 mod thermals;
 
+pub use cameras::CamerasPane;
 pub use can::CanProbePane;
 pub use commands::CommandsPane;
 pub use horizon::{HorizonPane, VelocityMode};
@@ -98,6 +100,7 @@ pub enum Pane {
     StateEstimator(StateEstimatorPane),
     Sensors(SensorsPane),
     Thermals(ThermalsPane),
+    Cameras(CamerasPane),
     Plot(PlotPane),
     Messages(MessagesPane),
     Commands(CommandsPane),
@@ -165,6 +168,7 @@ impl std::fmt::Display for Pane {
             Pane::StateEstimator(_) => "State Estimator".into(),
             Pane::Sensors(_) => "Sensors".into(),
             Pane::Thermals(_) => "Thermals".into(),
+            Pane::Cameras(_) => "Cameras".into(),
             Pane::Plot(_) => "Plot".into(),
             Pane::Messages(_) => "Messages".into(),
             Pane::Commands(_) => "Commands".into(),
@@ -235,6 +239,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             Pane::StateEstimator(p) => p.outer_ui(ui, self),
             Pane::Sensors(p) => p.outer_ui(ui, self),
             Pane::Thermals(p) => p.outer_ui(ui, self),
+            Pane::Cameras(p) => p.outer_ui(ui, self),
             Pane::Plot(p) => p.outer_ui(ui, self),
             Pane::Messages(p) => p.outer_ui(ui, self),
             Pane::Commands(p) => p.outer_ui(ui, self),

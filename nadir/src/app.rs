@@ -108,6 +108,7 @@ impl App {
             state: tiles.insert_pane(Pane::StateEstimator(StateEstimatorPane::new(ctx))),
             sensors: tiles.insert_pane(Pane::Sensors(SensorsPane::new(ctx))),
             thermals: tiles.insert_pane(Pane::Thermals(ThermalsPane::new(ctx))),
+            cameras: tiles.insert_pane(Pane::Cameras(CamerasPane::new(ctx))),
             plot: tiles.insert_pane(Pane::Plot(PlotPane::new(ctx))),
             messages: tiles.insert_pane(Pane::Messages(MessagesPane::new(ctx))),
             commands: tiles.insert_pane(Pane::Commands(CommandsPane::new(ctx))),
@@ -591,6 +592,7 @@ struct PaneIds {
     state: TileId,
     sensors: TileId,
     thermals: TileId,
+    cameras: TileId,
     plot: TileId,
     messages: TileId,
     commands: TileId,
@@ -613,6 +615,7 @@ impl PaneIds {
             state,
             sensors,
             thermals,
+            cameras,
             plot,
             messages,
             commands,
@@ -627,7 +630,7 @@ impl PaneIds {
                 let top_left = vec![propulsion, payload, qd_retraction, params];
                 let top_right = vec![state, preflight, navigation, mission];
                 let bottom_left = vec![map, messages, commands, flight_log];
-                let bottom_right: Vec<_> = [sensors, thermals, plot, can]
+                let bottom_right: Vec<_> = [sensors, thermals, plot, cameras, can]
                     .into_iter()
                     .chain(profiler)
                     .collect();
@@ -648,7 +651,7 @@ impl PaneIds {
                     flight_log,
                 ];
                 let right: Vec<_> = [
-                    state, sensors, thermals, plot, messages, commands, params, can,
+                    state, sensors, thermals, plot, messages, commands, params, cameras, can,
                 ]
                 .into_iter()
                 .chain(profiler)
@@ -670,7 +673,7 @@ impl PaneIds {
                 ]);
                 let top = tiles.insert_tab_tile(vec![state, sensors, thermals, plot]);
                 let bottom = tiles.insert_tab_tile(
-                    [messages, commands, can, flight_log]
+                    [messages, commands, cameras, can, flight_log]
                         .into_iter()
                         .chain(profiler)
                         .collect(),
@@ -705,6 +708,7 @@ impl PaneIds {
             ("state_estimator", self.state),
             ("sensors", self.sensors),
             ("thermals", self.thermals),
+            ("cameras", self.cameras),
             ("plot", self.plot),
             ("messages", self.messages),
             ("commands", self.commands),

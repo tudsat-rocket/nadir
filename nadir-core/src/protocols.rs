@@ -8,6 +8,7 @@ use nadir_store::MessageExt;
 
 use crate::System;
 
+pub mod cameras;
 #[cfg(target_os = "linux")]
 pub mod can;
 pub mod heartbeat;

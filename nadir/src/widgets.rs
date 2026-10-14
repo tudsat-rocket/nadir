@@ -36,3 +36,6 @@ pub use readout::*;
 
 mod hazard;
 pub use hazard::*;
+
+mod camera;
+pub use camera::*;

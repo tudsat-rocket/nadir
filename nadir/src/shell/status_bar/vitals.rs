@@ -15,8 +15,8 @@ use crate::colors::{
 };
 use crate::panes::LogsPane;
 use crate::widgets::{
-    ArmedBadge, AutopilotLogo, BatteryReading, Readout, STALE_AFTER, TEXT_SIZE, column_header,
-    link_quality, small_text, soc_color,
+    ArmedBadge, AutopilotLogo, BatteryReading, Camera, Readout, STALE_AFTER, TEXT_SIZE,
+    column_header, link_quality, small_text, soc_color,
 };
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
@@ -43,6 +43,7 @@ enum Segment {
     /// Fixed width, so the values after it line up across rows.
     Icon(&'static str),
     Battery(Option<f32>, Color32),
+    Camera(Camera),
 }
 
 impl Segment {
@@ -112,6 +113,9 @@ impl Segment {
                     painter.rect_filled(level, 0.0, color);
                     response.on_hover_text(format!("{:.0}%", soc * 100.0));
                 }
+            }
+            Self::Camera(camera) => {
+                ui.add(camera);
             }
         }
     }
@@ -300,6 +304,17 @@ impl Vitals<'_> {
             link_quality_segment(uplink),
         ];
 
+        let mut camera_cell = Vec::new();
+        for (i, camera) in Camera::all(system).into_iter().enumerate() {
+            if i > 0 {
+                camera_cell.push(Segment::Gap(4.0));
+            }
+            camera_cell.push(Segment::Camera(camera));
+        }
+        if camera_cell.is_empty() {
+            camera_cell.push(Segment::Text("--".into(), nodata));
+        }
+
         let uptime_cell = match system.last_message::<LocalPositionNed>() {
             Ok(lp) => vec![Segment::value(
                 lp.time_boot_ms as f32 / 1000.0,
@@ -325,6 +340,7 @@ impl Vitals<'_> {
                     ("Flash", Some("💾"), flash_cell),
                     ("GPS", Some("📡"), gps_cell),
                     ("Link", Some("⬇"), link_cell),
+                    ("Cameras", Some("🎥"), camera_cell),
                 ] {
                     // Extend, not Truncate: inside a grid cell a truncating label shrinks to the
                     // column width it is itself defining, which collapses to an ellipsis.
