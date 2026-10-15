@@ -8,16 +8,13 @@ use egui::{Align, Button, Color32, Layout, RichText};
 use mavspec::rust::dialects::common::messages::Heartbeat;
 
 use crate::colors::{COLOR_INDICATOR_LIMITS, readable};
+use crate::sessions::Sessions;
 use crate::views::{LAYOUT_TEMPLATES, LIVE, SourceId, View};
 use crate::widgets::{
     ArmedIndicator, AutopilotLogo, MavStateIndicator, ModeDisplay, Readout, TEXT_SIZE, soc_color,
     state_of_charge,
 };
-#[cfg(not(target_arch = "wasm32"))]
-mod sessions;
 mod version;
-#[cfg(not(target_arch = "wasm32"))]
-use sessions::Sessions;
 use version::Version;
 
 const WIDTH: f32 = 300.0;
@@ -38,8 +35,6 @@ pub enum SidebarAction {
 pub struct Sidebar {
     collapsed: bool,
     version: Version,
-    #[cfg(not(target_arch = "wasm32"))]
-    sessions: Sessions,
 }
 
 impl Sidebar {
@@ -47,8 +42,6 @@ impl Sidebar {
         Self {
             collapsed: false,
             version: Version::check(ctx),
-            #[cfg(not(target_arch = "wasm32"))]
-            sessions: Sessions::default(),
         }
     }
 
@@ -57,6 +50,8 @@ impl Sidebar {
         self.collapsed = true;
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -65,6 +60,7 @@ impl Sidebar {
         active_view: &mut View,
         logs_shown: &mut bool,
         settings: &Settings,
+        sessions: &Sessions,
     ) -> Option<SidebarAction> {
         let sharing = &settings.sharing;
         let collapsed = self.collapsed;
@@ -225,7 +221,7 @@ impl Sidebar {
                     }
 
                     #[cfg(not(target_arch = "wasm32"))]
-                    if let Some(addr) = self.sessions.ui(ui, collapsed, sharing.server.as_deref()) {
+                    if let Some(addr) = join_menu(ui, collapsed, sessions) {
                         action = Some(SidebarAction::JoinSession(addr));
                     }
                 });
@@ -351,6 +347,37 @@ impl Sidebar {
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn join_menu(
+    ui: &mut egui::Ui,
+    collapsed: bool,
+    sessions: &Sessions,
+) -> Option<nadir_core::SessionAddr> {
+    let live = sessions.live_count();
+    let label = match (collapsed, live) {
+        (true, _) => "📡".to_owned(),
+        (false, 0) => "📡 Join Session".to_owned(),
+        (false, live) => format!("📡 Join Session ({live} live)"),
+    };
+
+    let mut picked = None;
+
+    let (response, _) = egui::containers::menu::MenuButton::from_button(Button::selectable(
+        live > 0,
+        label,
+    ))
+    .ui(ui, |ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        picked = sessions.ui(ui);
+    });
+
+    if collapsed && live > 0 {
+        response.on_hover_text(format!("{live} live"));
+    }
+
+    picked
 }
 
 /// Starts or stops publishing a system to the sharing server, as a new session each time.

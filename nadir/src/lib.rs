@@ -10,6 +10,14 @@ shadow_rs::shadow!(build);
 mod app;
 mod colors;
 mod panes;
+#[cfg(not(target_arch = "wasm32"))]
+mod sessions;
+/// Lets the shell and views take sessions as a parameter on every target.
+#[cfg(target_arch = "wasm32")]
+mod sessions {
+    #[derive(Default)]
+    pub struct Sessions;
+}
 mod shell;
 mod theme;
 mod views;

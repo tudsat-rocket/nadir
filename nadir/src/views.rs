@@ -1,6 +1,8 @@
 mod overview;
 mod settings;
 pub use overview::Overview;
+#[cfg(not(target_arch = "wasm32"))]
+pub use overview::OverviewAction;
 pub use settings::{LAYOUT_TEMPLATES, LayoutAction, SettingsView};
 
 /// Identifies one open data source: [`LIVE`] is always the links, the rest are telemetry logs.

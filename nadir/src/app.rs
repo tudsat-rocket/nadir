@@ -12,7 +12,10 @@ use rapid_dialect::rapid::enums::{MavCmd, MavResult};
 
 #[allow(clippy::wildcard_imports)]
 use crate::panes::*;
+use crate::sessions::Sessions;
 use crate::shell::{Sidebar, SidebarAction, StatusBar};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::views::OverviewAction;
 use crate::views::{LIVE, LayoutAction, Overview, SettingsView, SourceId, View};
 use crate::widgets::SharedPlotState;
 
@@ -37,6 +40,7 @@ pub struct App {
     sidebar: Sidebar,
     status_bar: StatusBar,
     overview: Overview,
+    sessions: Sessions,
     settings: SettingsView,
     shared_plot_state: SharedPlotState,
     position_source: PositionSource,
@@ -149,6 +153,7 @@ impl App {
             sidebar: Sidebar::new(ctx),
             status_bar: StatusBar::new(ctx),
             overview: Overview::new(),
+            sessions: Sessions::default(),
             settings: SettingsView::new(&settings),
             shared_plot_state: SharedPlotState::new(),
             position_source: PositionSource::default(),
@@ -418,6 +423,22 @@ impl eframe::App for App {
 
         self.focus_arrived();
 
+        #[cfg(not(target_arch = "wasm32"))]
+        for session in self.sessions.poll(
+            &ctx,
+            self.settings.settings().sharing.server.as_deref(),
+            &self.live,
+            &self.logs,
+        ) {
+            let who = match session.parts() {
+                Some((station, system_id, _)) => format!("{station} 0x{system_id:02x}"),
+                None => session.id,
+            };
+            self.toasts
+                .info(format!("📡 {who} started sharing"))
+                .duration(Some(std::time::Duration::from_secs(6)));
+        }
+
         let action = self.sidebar.show(
             ui,
             &self.live,
@@ -425,6 +446,7 @@ impl eframe::App for App {
             &mut self.active_view,
             &mut self.logs_shown,
             self.settings.settings(),
+            &self.sessions,
         );
         match action {
             Some(SidebarAction::OpenLog) => self.pick_log(&ctx),
@@ -516,7 +538,7 @@ impl eframe::App for App {
             }
         });
 
-        let mut to_open = None;
+        let mut overview_action = None;
         let mut layout_action = None;
 
         egui::CentralPanel::default()
@@ -532,7 +554,7 @@ impl eframe::App for App {
                     #[cfg(target_arch = "wasm32")]
                     let links = Vec::new();
 
-                    to_open = self.overview.ui(ui, &links, &self.logs);
+                    overview_action = self.overview.ui(ui, &links, &self.logs, &self.sessions);
                 }
                 View::Settings => {
                     let map_center = match self.tiles_tree.tiles.get(self.panes.map) {
@@ -565,10 +587,12 @@ impl eframe::App for App {
             None => {}
         }
 
-        // Only ever `Some` where there is a log directory to list, which a browser has not.
+        // A browser has neither a log directory nor sessions to list.
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = to_open {
-            self.open_log(&path);
+        match overview_action {
+            Some(OverviewAction::OpenLog(path)) => self.open_log(&path),
+            Some(OverviewAction::JoinSession(addr)) => self.join_session(&ctx, &addr),
+            None => {}
         }
 
         // egui-notify paints toast backgrounds with the global noninteractive bg_fill; push it away
