@@ -6,12 +6,15 @@ pub mod tiles;
 use nadir_core::System;
 use nadir_core::settings::{MapSettings, MapboxStyle};
 use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::sync::Arc;
 
 use chrono::{DateTime, TimeDelta, Utc};
 
 use eframe::egui;
+use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Color32, Frame, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
+    Align, Align2, Color32, FontId, Frame, Galley, Layout, Pos2, Rect, RichText, Sense, Shape,
+    Stroke, Ui, UiBuilder, Vec2,
 };
 use mavspec::rust::dialects::common::enums::GpsFixType;
 use mavspec::rust::dialects::common::messages::{
@@ -19,14 +22,14 @@ use mavspec::rust::dialects::common::messages::{
 };
 use walkers::sources::Mapbox;
 use walkers::{MapMemory, Plugin, Position, Projector, Tiles};
-use walkers_extras::{LabeledSymbol, LabeledSymbolStyle, Places, Symbol};
+use walkers_extras::{LabeledSymbol, LabeledSymbolStyle, Place, Places, Symbol};
 
 use crate::{
-    colors::mode_color,
+    colors::{mode_color, readable},
     panes::{PaneUi, TreeBehavior},
     theme::OVERLAY_SHADOW,
     views::View,
-    widgets::{STALE_AFTER, ago},
+    widgets::{Readout, STALE_AFTER, ago},
 };
 
 /// The zoom the map shows a single point at, and the closest it zooms in to fit several.
@@ -145,6 +148,162 @@ impl walkers::Plugin for LinePlugin {
         );
 
         ui.painter().add(shape);
+    }
+}
+
+/// Ground distance and bearing from the ground station, halfway along the line to the vehicle.
+struct RangePlugin {
+    gcs: Position,
+    vehicle: Position,
+}
+
+impl RangePlugin {
+    /// Haversine distance in meters and initial bearing in degrees from north.
+    fn distance_bearing(from: Position, to: Position) -> (f64, f64) {
+        const EARTH_RADIUS: f64 = 6_371_008.8;
+
+        let (lat1, lat2) = (from.y().to_radians(), to.y().to_radians());
+        let d_lat = lat2 - lat1;
+        let d_lon = (to.x() - from.x()).to_radians();
+
+        let a = (d_lat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (d_lon / 2.0).sin().powi(2);
+        let distance = 2.0 * EARTH_RADIUS * a.sqrt().asin();
+        let bearing = (d_lon.sin() * lat2.cos())
+            .atan2(lat1.cos() * lat2.sin() - lat1.sin() * lat2.cos() * d_lon.cos())
+            .to_degrees()
+            .rem_euclid(360.0);
+
+        (distance, bearing)
+    }
+}
+
+impl walkers::Plugin for RangePlugin {
+    fn run(
+        self: Box<Self>,
+        ui: &mut Ui,
+        _response: &egui::Response,
+        projector: &Projector,
+        _map_memory: &MapMemory,
+    ) {
+        let gcs = projector.project(self.gcs).to_pos2();
+        let vehicle = projector.project(self.vehicle).to_pos2();
+        // Any closer and the callout covers both markers.
+        if gcs.distance(vehicle) < 80.0 {
+            return;
+        }
+
+        let (meters, bearing) = Self::distance_bearing(self.gcs, self.vehicle);
+        let distance = match meters {
+            m if m < 1000.0 => Readout {
+                value: m as f32,
+                decimals: 0,
+                unit: Some(" m"),
+                ..Default::default()
+            },
+            m => Readout {
+                value: (m / 1000.0) as f32,
+                decimals: if m < 10_000.0 { 2 } else { 1 },
+                unit: Some(" km"),
+                ..Default::default()
+            },
+        };
+        let bearing = format!("{:03}\u{b0}", bearing.round() as u32 % 360);
+
+        Callout {
+            lines: vec![
+                CalloutLine::Value(Readout {
+                    font: Callout::FONT,
+                    color: ui.visuals().strong_text_color(),
+                    ..distance
+                }),
+                Callout::text(ui, bearing, ui.visuals().text_color()),
+            ],
+            fill: ui.visuals().window_fill(),
+        }
+        .paint(ui.painter(), gcs.lerp(vehicle, 0.5), Align2::CENTER_CENTER);
+    }
+}
+
+enum CalloutLine {
+    Text(Arc<Galley>),
+    Value(Readout),
+}
+
+impl CalloutLine {
+    fn size(&self, ctx: &egui::Context) -> Vec2 {
+        match self {
+            Self::Text(galley) => galley.size(),
+            Self::Value(readout) => readout.size(ctx),
+        }
+    }
+}
+
+/// Lines of text in a box, for vehicle labels and the range readout.
+struct Callout {
+    lines: Vec<CalloutLine>,
+    fill: Color32,
+}
+
+impl Callout {
+    const FONT: FontId = FontId::monospace(12.0);
+    const PADDING: f32 = 5.0;
+
+    fn text(ui: &Ui, text: String, color: Color32) -> CalloutLine {
+        CalloutLine::Text(ui.painter().layout_no_wrap(text, Self::FONT, color))
+    }
+
+    /// Lines are aligned horizontally the way `anchor` aligns the box.
+    fn paint(&self, painter: &egui::Painter, pos: Pos2, anchor: Align2) {
+        let sizes: Vec<Vec2> = self
+            .lines
+            .iter()
+            .map(|line| line.size(painter.ctx()))
+            .collect();
+        let content = sizes.iter().fold(Vec2::ZERO, |acc, size| {
+            Vec2::new(acc.x.max(size.x), acc.y + size.y)
+        });
+
+        let rect = anchor.anchor_size(pos, content + Vec2::splat(2.0 * Self::PADDING));
+        painter.rect_filled(rect, 10.0, self.fill);
+
+        let inner = rect.shrink(Self::PADDING);
+        let line_anchor = Align2([anchor.x(), Align::Min]);
+        let mut pos = Pos2::new(
+            inner.left() + inner.width() * anchor.x().to_factor(),
+            inner.top(),
+        );
+        for (line, size) in self.lines.iter().zip(sizes) {
+            match line {
+                CalloutLine::Text(galley) => painter.galley(
+                    line_anchor.anchor_size(pos, size).min,
+                    galley.clone(),
+                    Color32::PLACEHOLDER,
+                ),
+                CalloutLine::Value(readout) => {
+                    readout.paint(painter, pos, line_anchor);
+                }
+            }
+            pos.y += size.y;
+        }
+    }
+}
+
+/// A vehicle's symbol with our own label, since `LabeledSymbol`'s is a single string in one color.
+struct VehicleMarker {
+    symbol: LabeledSymbol,
+    label: Callout,
+}
+
+impl Place for VehicleMarker {
+    fn position(&self) -> Position {
+        self.symbol.position
+    }
+
+    fn draw(&self, ui: &Ui, projector: &Projector) {
+        let pos = projector.project(self.symbol.position).to_pos2();
+        self.label
+            .paint(ui.painter(), pos + Vec2::splat(3.0), Align2::LEFT_TOP);
+        self.symbol.draw(ui, projector);
     }
 }
 
@@ -701,30 +860,51 @@ impl PaneUi for MapPane {
         let places = vehicles
             .iter()
             .map(|(s_id, v)| {
-                let mode = v
-                    .system
-                    .current_mode_name()
-                    .map(|name| format!("\n{name}"))
-                    .unwrap_or_default();
-                let details = if let Some(gps) = &v.live {
-                    let alt = f64::from(gps.relative_alt) / 1000.0;
-                    let vz = f64::from(gps.vz) / -100.0;
-                    format!("☁ {alt:.1} m\n↕ {vz:.1} m/s")
+                let visuals = ui.visuals();
+                let mut title = LayoutJob::default();
+                title.append(
+                    &format!("0x{s_id:02x}"),
+                    0.0,
+                    TextFormat::simple(Callout::FONT, visuals.text_color()),
+                );
+                if let Some(name) = v.system.current_mode_name()
+                    && let Ok(heartbeat) = v.system.last_message::<Heartbeat>()
+                {
+                    title.append(
+                        &name,
+                        8.0,
+                        TextFormat::simple(
+                            Callout::FONT,
+                            readable(mode_color(heartbeat.custom_mode), visuals),
+                        ),
+                    );
+                }
+
+                let mut lines = vec![CalloutLine::Text(ui.painter().layout_job(title))];
+                if let Some(gps) = &v.live {
+                    let value = |prefix, value, unit| {
+                        CalloutLine::Value(Readout {
+                            value,
+                            prefix,
+                            unit: Some(unit),
+                            font: Callout::FONT,
+                            color: visuals.strong_text_color(),
+                            ..Default::default()
+                        })
+                    };
+                    lines.push(value("☁ ", gps.relative_alt as f32 / 1000.0, " m"));
+                    lines.push(value("↕ ", f32::from(gps.vz) / -100.0, " m/s"));
                 } else {
                     let secs = (v.system.now() - v.since).num_seconds().max(0);
-                    format!("lost {}:{:02} ago", secs / 60, secs % 60)
-                };
+                    lines.push(Callout::text(
+                        ui,
+                        format!("lost {}:{:02} ago", secs / 60, secs % 60),
+                        visuals.warn_fg_color,
+                    ));
+                }
 
                 let mut style = LabeledSymbolStyle {
                     symbol_size: 20.0,
-                    label_color: ui.visuals().text_color(),
-                    label_background: if Some(*s_id) == active_system_id
-                        || active_system_id.is_none()
-                    {
-                        label_background
-                    } else {
-                        label_background.gamma_multiply(0.6)
-                    },
                     ..Default::default()
                 };
                 if v.live.is_none() {
@@ -737,11 +917,21 @@ impl PaneUi for MapPane {
                     }
                 }
 
-                LabeledSymbol {
-                    position: v.position,
-                    label: format!("System 0x{s_id:02x}{mode}\n{details}"),
-                    symbol: Some(Symbol::Circle(v.system.icon().to_string())),
-                    style,
+                VehicleMarker {
+                    symbol: LabeledSymbol {
+                        position: v.position,
+                        label: String::new(),
+                        symbol: Some(Symbol::Circle(v.system.icon().to_string())),
+                        style,
+                    },
+                    label: Callout {
+                        lines,
+                        fill: if Some(*s_id) == active_system_id || active_system_id.is_none() {
+                            label_background
+                        } else {
+                            label_background.gamma_multiply(0.6)
+                        },
+                    },
                 }
             })
             .collect();
@@ -850,6 +1040,10 @@ impl PaneUi for MapPane {
                     a: gcs_pos,
                     b: vehicle.position,
                     color: Color32::BLACK,
+                });
+                map = map.with_plugin(RangePlugin {
+                    gcs: gcs_pos,
+                    vehicle: vehicle.position,
                 });
             }
 
@@ -1007,6 +1201,23 @@ mod tests {
         assert!(MapPane::position(i32::MAX, i32::MAX).is_none());
         assert!(MapPane::position(0, 0).is_none());
         assert!(MapPane::position(498_541_820, 85_924_050).is_some());
+    }
+
+    #[test]
+    fn distance_and_bearing() {
+        let origin = Position::new(0.0, 0.0);
+        let cases = [
+            (Position::new(0.0, 1.0), 111_195.0, 0.0),
+            (Position::new(1.0, 0.0), 111_195.0, 90.0),
+            (Position::new(0.0, -1.0), 111_195.0, 180.0),
+            (Position::new(-1.0, 0.0), 111_195.0, 270.0),
+        ];
+
+        for (to, meters, degrees) in cases {
+            let (distance, bearing) = RangePlugin::distance_bearing(origin, to);
+            assert!((distance - meters).abs() < 1.0, "{distance} m to {to:?}");
+            assert!((bearing - degrees).abs() < 1e-9, "{bearing} deg to {to:?}");
+        }
     }
 
     #[test]
