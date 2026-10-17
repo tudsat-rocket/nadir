@@ -144,8 +144,9 @@ impl Default for MapSettings {
             mapbox_style: MapboxStyle::default(),
             show_gcs: true,
             gcs_position: GeoPosition {
-                lat: 49.855_982,
-                lon: 8.592_405,
+                // mission control EuRoC
+                lat: 39.394_722,
+                lon: -8.292_194,
             },
         }
     }
