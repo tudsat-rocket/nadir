@@ -13,8 +13,9 @@ use eframe::egui;
 use egui::{
     Align, Color32, Frame, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
 };
+use mavspec::rust::dialects::common::enums::GpsFixType;
 use mavspec::rust::dialects::common::messages::{
-    GlobalPositionInt, Heartbeat, HomePosition, PositionTargetGlobalInt,
+    GlobalPositionInt, GpsRawInt, Heartbeat, HomePosition, PositionTargetGlobalInt,
 };
 use walkers::sources::Mapbox;
 use walkers::{MapMemory, Plugin, Position, Projector, Tiles};
@@ -25,6 +26,7 @@ use crate::{
     panes::{PaneUi, TreeBehavior},
     theme::OVERLAY_SHADOW,
     views::View,
+    widgets::STALE_AFTER,
 };
 
 /// The zoom the map shows a single point at, and the closest it zooms in to fit several.
@@ -52,6 +54,9 @@ struct SystemPath {
     custom_mode: u32,
     altitude_range: Option<(f64, f64)>,
     modes: BTreeSet<u32>,
+    last_gps_raw: Option<DateTime<Utc>>,
+    last_fix: Option<(DateTime<Utc>, GpsRawInt)>,
+    fix_lost: bool,
 }
 
 impl SystemPath {
@@ -60,6 +65,14 @@ impl SystemPath {
         self.altitude_range = None;
         self.modes.clear();
     }
+}
+
+struct Vehicle<'a> {
+    system: &'a System,
+    position: Position,
+    /// `None` once the position stopped updating, the vehicle then sits at its last known one.
+    live: Option<GlobalPositionInt>,
+    since: DateTime<Utc>,
 }
 
 struct MapboxLayer {
@@ -292,8 +305,17 @@ impl MapPane {
             let Some(system) = behavior.source.system(*s_id) else {
                 continue;
             };
-            let count = system.message_count::<GlobalPositionInt>();
             let path = self.system_paths.entry(*s_id).or_default();
+
+            for (ts, raw) in system.messages_since::<GpsRawInt>(path.last_gps_raw, None) {
+                path.last_gps_raw = Some(ts);
+                path.fix_lost = Self::fix(&raw).is_none();
+                if !path.fix_lost {
+                    path.last_fix = Some((ts, raw));
+                }
+            }
+
+            let count = system.message_count::<GlobalPositionInt>();
             if count == path.ingested {
                 continue;
             }
@@ -346,6 +368,14 @@ impl MapPane {
         let (lat, lon) = (f64::from(lat) / 10_000_000.0, f64::from(lon) / 10_000_000.0);
         let valid = lat.abs() <= 90.0 && lon.abs() <= 180.0 && (lat, lon) != (0.0, 0.0);
         valid.then(|| Position::new(lon, lat))
+    }
+
+    /// Unlike `GLOBAL_POSITION_INT`, which no autopilot marks as invalid, this says whether the
+    /// receiver actually had a position.
+    fn fix(raw: &GpsRawInt) -> Option<Position> {
+        (raw.fix_type as u8 >= GpsFixType::_2dFix as u8)
+            .then(|| Self::position(raw.lat, raw.lon))
+            .flatten()
     }
 
     /// The center and zoom that show all `points` inside `rect`.
@@ -492,6 +522,36 @@ impl MapPane {
         });
     }
 
+    fn last_fix_ui(ui: &mut Ui, (at, raw): &(DateTime<Utc>, GpsRawInt), stale: bool) {
+        let coordinates = format!(
+            "{:.7}, {:.7}",
+            f64::from(raw.lat) / 10_000_000.0,
+            f64::from(raw.lon) / 10_000_000.0
+        );
+
+        // Bottom-up, like the corner it sits in.
+        ui.horizontal(|ui| {
+            ui.monospace(&coordinates);
+            if ui.small_button("Copy").clicked() {
+                ui.ctx().copy_text(coordinates);
+            }
+        });
+        ui.horizontal(|ui| {
+            let time = RichText::new(format!("Last fix {}", at.format("%H:%M:%S UTC"))).small();
+            ui.label(if stale {
+                time.color(ui.visuals().warn_fg_color)
+            } else {
+                time
+            });
+            if raw.satellites_visible != u8::MAX {
+                ui.small(format!("{} sats", raw.satellites_visible));
+            }
+            if raw.eph != u16::MAX {
+                ui.small(format!("HDOP {:.1}", f64::from(raw.eph) / 100.0));
+            }
+        });
+    }
+
     fn legend_ui(&self, ui: &mut Ui, behavior: &TreeBehavior, altitude_range: Option<(f64, f64)>) {
         match self.visualization {
             Visualization::Altitude => {
@@ -579,11 +639,41 @@ impl PaneUi for MapPane {
             .filter_map(|id| behavior.source.system(*id))
             .collect();
 
-        let vehicles: HashMap<u8, (&System, Position, GlobalPositionInt)> = systems
+        let vehicles: HashMap<u8, Vehicle> = systems
             .iter()
-            .filter_map(|s| {
-                let gps = s.last_message::<GlobalPositionInt>().ok()?;
-                Some((s.system_id, (s, Self::position(gps.lat, gps.lon)?, gps)))
+            .filter_map(|system| {
+                let path = self.system_paths.get(&system.system_id);
+                let global = system
+                    .last_message_at::<GlobalPositionInt>()
+                    .ok()
+                    .and_then(|(ts, gps)| Some((ts, Self::position(gps.lat, gps.lon)?, gps)));
+
+                let vehicle = match global {
+                    Some((since, position, gps))
+                        if !path.is_some_and(|p| p.fix_lost)
+                            && system.now() - since <= STALE_AFTER =>
+                    {
+                        Vehicle {
+                            system,
+                            position,
+                            live: Some(gps),
+                            since,
+                        }
+                    }
+                    _ => {
+                        let (since, position) = path
+                            .and_then(|p| p.last_fix.as_ref())
+                            .and_then(|(ts, raw)| Some((*ts, Self::fix(raw)?)))
+                            .or(global.map(|(ts, position, _)| (ts, position)))?;
+                        Vehicle {
+                            system,
+                            position,
+                            live: None,
+                            since,
+                        }
+                    }
+                };
+                Some((system.system_id, vehicle))
             })
             .collect();
 
@@ -596,7 +686,7 @@ impl PaneUi for MapPane {
         if self.fit {
             let points: Vec<Position> = vehicles
                 .values()
-                .map(|(_, pos, _)| *pos)
+                .map(|v| v.position)
                 .chain(homes.iter().copied())
                 .chain(gcs_position)
                 .collect();
@@ -610,39 +700,64 @@ impl PaneUi for MapPane {
         let label_background = ui.visuals().window_fill();
         let places = vehicles
             .iter()
-            .map(|(s_id, (s, pos, gps))| {
-                let mode = s
+            .map(|(s_id, v)| {
+                let mode = v
+                    .system
                     .current_mode_name()
                     .map(|name| format!("\n{name}"))
                     .unwrap_or_default();
-                let alt = f64::from(gps.relative_alt) / 1000.0;
-                let vz = f64::from(gps.vz) / -100.0;
+                let details = if let Some(gps) = &v.live {
+                    let alt = f64::from(gps.relative_alt) / 1000.0;
+                    let vz = f64::from(gps.vz) / -100.0;
+                    format!("☁ {alt:.1} m\n↕ {vz:.1} m/s")
+                } else {
+                    let secs = (v.system.now() - v.since).num_seconds().max(0);
+                    format!("lost {}:{:02} ago", secs / 60, secs % 60)
+                };
+
+                let mut style = LabeledSymbolStyle {
+                    symbol_size: 20.0,
+                    label_color: ui.visuals().text_color(),
+                    label_background: if Some(*s_id) == active_system_id
+                        || active_system_id.is_none()
+                    {
+                        label_background
+                    } else {
+                        label_background.gamma_multiply(0.6)
+                    },
+                    ..Default::default()
+                };
+                if v.live.is_none() {
+                    for color in [
+                        &mut style.symbol_color,
+                        &mut style.symbol_background,
+                        &mut style.symbol_stroke.color,
+                    ] {
+                        *color = color.gamma_multiply(0.4);
+                    }
+                }
 
                 LabeledSymbol {
-                    position: *pos,
-                    label: format!("System 0x{s_id:02x}{mode}\n☁ {alt:.1} m\n↕ {vz:.1} m/s"),
-                    symbol: Some(Symbol::Circle(s.icon().to_string())),
-                    style: LabeledSymbolStyle {
-                        symbol_size: 20.0,
-                        label_color: ui.visuals().text_color(),
-                        label_background: if Some(*s_id) == active_system_id
-                            || active_system_id.is_none()
-                        {
-                            label_background
-                        } else {
-                            label_background.gamma_multiply(0.6)
-                        },
-                        ..Default::default()
-                    },
+                    position: v.position,
+                    label: format!("System 0x{s_id:02x}{mode}\n{details}"),
+                    symbol: Some(Symbol::Circle(v.system.icon().to_string())),
+                    style,
                 }
             })
             .collect();
 
         let headings = vehicles
             .values()
-            .filter(|(_, _, gps)| gps.hdg != u16::MAX)
-            .map(|(_, pos, gps)| (*pos, f32::from(gps.hdg).to_radians() / 100.0))
+            .filter_map(|v| Some((v.position, v.live.as_ref()?.hdg)))
+            .filter(|(_, hdg)| *hdg != u16::MAX)
+            .map(|(pos, hdg)| (pos, f32::from(hdg).to_radians() / 100.0))
             .collect();
+
+        // Keeps the age on stale markers counting once nothing arrives to trigger a repaint.
+        if vehicles.values().any(|v| v.live.is_none()) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
+        }
 
         let simple_place_style = LabeledSymbolStyle {
             symbol_size: 20.0,
@@ -728,12 +843,12 @@ impl PaneUi for MapPane {
                 system: system.clone(),
             });
 
-            if let Some((_s, pos, ..)) = vehicles.get(&system.system_id)
+            if let Some(vehicle) = vehicles.get(&system.system_id)
                 && let Some(gcs_pos) = gcs_position
             {
                 map = map.with_plugin(LinePlugin {
                     a: gcs_pos,
-                    b: *pos,
+                    b: vehicle.position,
                     color: Color32::BLACK,
                 });
             }
@@ -743,9 +858,9 @@ impl PaneUi for MapPane {
                 .ok()
                 .and_then(|target| Self::position(target.lat_int, target.lon_int))
             {
-                if let Some((_s, pos, ..)) = vehicles.get(&system.system_id) {
+                if let Some(vehicle) = vehicles.get(&system.system_id) {
                     map = map.with_plugin(LinePlugin {
-                        a: *pos,
+                        a: vehicle.position,
                         b: target_pos,
                         color: Color32::PURPLE.linear_multiply(1.5),
                     });
@@ -787,6 +902,15 @@ impl PaneUi for MapPane {
                 // Bottom-up, like the corner: the scale sits below the legend.
                 Self::scale_ui(ui, &projector, center);
                 self.legend_ui(ui, behavior, altitude_range);
+                if let Some(s_id) = active_system_id
+                    && let Some(fix) = self
+                        .system_paths
+                        .get(&s_id)
+                        .and_then(|p| p.last_fix.as_ref())
+                {
+                    let stale = vehicles.get(&s_id).is_none_or(|v| v.live.is_none());
+                    Self::last_fix_ui(ui, fix, stale);
+                }
             });
     }
 }
