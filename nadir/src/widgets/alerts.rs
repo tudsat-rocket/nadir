@@ -120,7 +120,7 @@ pub(crate) fn link_quality(system: &System) -> (Option<f32>, Option<f32>) {
 /// Which severity an [`AlertLine`] renders. The two tiers stack as separate rows in the status
 /// strip: red critical over amber caution.
 pub enum AlertTier {
-    /// Red: command rejections, RF uplink/downlink quality alarms, lost components and rising
+    /// Red: command rejections, RF uplink/downlink quality alarms, lost components and changed
     /// `SYS_STATUS` error counters - the "you may be losing the vehicle" set.
     Critical,
     /// Amber: failed onboard sensors and (once the propulsion protocol exposes them) valve error
@@ -158,14 +158,37 @@ impl Counter {
     }
 }
 
-/// Acknowledged counter values by (component, counter). Without an entry, the baseline is the
-/// counter in the first `SYS_STATUS` heard from that component.
-type Acks = HashMap<(u8, Counter), u16>;
+/// The two kinds of sticky, per-component alarm this row tracks: a `SYS_STATUS` error counter
+/// moving, or the component dropping off entirely.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Alarm {
+    Counter(Counter),
+    Lost,
+}
+
+/// Tracked state for one `(component, alarm)`. `last_value` is whatever we last polled - the
+/// counter reading, or the component's last-heard time in epoch millis for `Alarm::Lost` - purely
+/// to detect the *next* change; `pending` is the sticky, operator-visible alarm.
+///
+/// `pending` is intentionally not recomputed from `last_value` each frame: a counter alerts the
+/// moment it moves away from the value we last polled, and then stays alerted regardless of where
+/// it goes next. Some firmware packs these into a handful of bits and wraps rather than saturates,
+/// so a live counter can cycle back through an old reading while still erroring; comparing "is it
+/// different from where it was" on every frame would let the alert flicker off right then, with no
+/// operator click. Tracking "did it change, ever, since the last ack" instead is wrap-proof no
+/// matter how narrow the counter is or how it bounces around.
+#[derive(Clone, Copy, Default)]
+struct AlarmState {
+    last_value: i64,
+    pending: bool,
+}
+
+type AlarmStates = HashMap<(u8, Alarm), AlarmState>;
 
 struct Token {
     text: String,
-    /// Clicking the token stores this value as the counter's new baseline.
-    ack: Option<((u8, Counter), u16)>,
+    /// Clicking the token acknowledges this alarm, until it changes again.
+    ack: Option<(u8, Alarm)>,
 }
 
 impl From<String> for Token {
@@ -174,7 +197,7 @@ impl From<String> for Token {
     }
 }
 
-/// One severity row of the status strip: command NACKs, RF alarms, lost components and rising
+/// One severity row of the status strip: command NACKs, RF alarms, lost components and changed
 /// error counters in red (critical), failed sensors in amber (caution). Text only; a row stays dark
 /// unless something in its tier is wrong.
 pub struct AlertLine<'a> {
@@ -183,7 +206,39 @@ pub struct AlertLine<'a> {
 }
 
 impl AlertLine<'_> {
-    fn tokens(&self, acks: &Acks) -> Vec<Token> {
+    /// Polls one alarm's current reading against its tracked state, latching `pending` on any
+    /// change and always advancing `last_value` so the *next* change (even back to an old value)
+    /// is caught too. Pushes a token for `name` while the alarm is pending.
+    fn poll(
+        states: &mut AlarmStates,
+        out: &mut Vec<Token>,
+        id: u8,
+        alarm: Alarm,
+        value: i64,
+        // Whether the very first sighting of this alarm should itself alert. A pre-existing
+        // non-zero error count when we first connect isn't new news, but a component that's
+        // already lost the moment we notice it most certainly is.
+        alert_on_first_sighting: bool,
+        text: impl FnOnce() -> String,
+    ) {
+        let key = (id, alarm);
+        let entry = states.entry(key).or_insert(AlarmState {
+            last_value: value,
+            pending: alert_on_first_sighting,
+        });
+        if entry.last_value != value {
+            entry.last_value = value;
+            entry.pending = true;
+        }
+        if entry.pending {
+            out.push(Token {
+                text: text(),
+                ack: Some(key),
+            });
+        }
+    }
+
+    fn tokens(&self, states: &mut AlarmStates) -> Vec<Token> {
         match self.tier {
             AlertTier::Critical => {
                 let mut out: Vec<Token> = Vec::new();
@@ -205,28 +260,33 @@ impl AlertLine<'_> {
                     } else {
                         format!("COMP 0x{id:02x}")
                     };
+
                     if now - last > STALE_AFTER {
-                        out.push(format!("{name} LOST").into());
+                        Self::poll(
+                            states,
+                            &mut out,
+                            id,
+                            Alarm::Lost,
+                            last.timestamp_millis(),
+                            true,
+                            || format!("{name} LOST"),
+                        );
                     }
 
-                    let (Ok(latest), Some(first)) = (
-                        self.system.last_message_from::<SysStatus>(id),
-                        self.system.first_message_from::<SysStatus>(id),
-                    ) else {
+                    let Ok(latest) = self.system.last_message_from::<SysStatus>(id) else {
                         continue;
                     };
                     for counter in Counter::ALL {
                         let value = counter.value(&latest);
-                        let baseline = acks
-                            .get(&(id, counter))
-                            .copied()
-                            .unwrap_or_else(|| counter.value(&first));
-                        if value > baseline {
-                            out.push(Token {
-                                text: format!("{name} {}", counter.label()),
-                                ack: Some(((id, counter), value)),
-                            });
-                        }
+                        Self::poll(
+                            states,
+                            &mut out,
+                            id,
+                            Alarm::Counter(counter),
+                            i64::from(value),
+                            false,
+                            || format!("{name} {}", counter.label()),
+                        );
                     }
                 }
                 out
@@ -279,9 +339,9 @@ impl egui::Widget for AlertLine<'_> {
             },
             ui.visuals(),
         );
-        let acks_id = egui::Id::new(("alert_acks", self.system.system_id));
-        let acks: Acks = ui.data(|d| d.get_temp(acks_id).unwrap_or_default());
-        let tokens = self.tokens(&acks);
+        let states_id = egui::Id::new(("alert_acks", self.system.system_id));
+        let mut states: AlarmStates = ui.data(|d| d.get_temp(states_id).unwrap_or_default());
+        let tokens = self.tokens(&mut states);
 
         let lit = blink_on(ui.input(|i| i.time));
 
@@ -308,7 +368,7 @@ impl egui::Widget for AlertLine<'_> {
                         .fill(fill)
                         .inner_margin(egui::Margin::symmetric(3, 0))
                         .show(ui, |ui| {
-                            let Some((key, value)) = token.ack else {
+                            let Some(key) = token.ack else {
                                 small_text(ui, &token.text, ink);
                                 return;
                             };
@@ -327,15 +387,14 @@ impl egui::Widget for AlertLine<'_> {
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .clicked();
                             if clicked {
-                                ui.data_mut(|d| {
-                                    d.get_temp_mut_or_default::<Acks>(acks_id)
-                                        .insert(key, value);
-                                });
+                                states.entry(key).or_default().pending = false;
                             }
                         });
                 }
             })
             .response;
+
+        ui.data_mut(|d| d.insert_temp(states_id, states));
 
         // The event-driven repaint only fires on traffic; keep the blink animating even on a quiet
         // link.

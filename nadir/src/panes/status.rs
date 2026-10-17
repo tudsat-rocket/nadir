@@ -61,7 +61,7 @@ impl PaneUi for StatusPane {
         // Arm controls and cautions live on a subdued two-row strip across the top, "at eye level"
         // with the vitals columns. The arm buttons split across the rows so each pairs an arm
         // control with an alert tier: red flight-critical alarms (NACKs, RF uplink/downlink loss,
-        // lost components, rising error counters) beside ARM, amber cautions beside DISARM. The
+        // lost components, changed error counters) beside ARM, amber cautions beside DISARM. The
         // mode grid (which shows the current mode via its highlighted button) sits below so the
         // mode buttons don't ride the window edge.
         let row_gap = 4.0;
