@@ -37,6 +37,7 @@ const FIT_MAX_ZOOM: f64 = 17.0;
 const FIT_MIN_ZOOM: f64 = 3.0;
 /// Room around the fitted points, so markers and their labels clear the overlays.
 const FIT_PADDING: f32 = 80.0;
+const FIT_VEHICLE_PADDING: f32 = 150.0;
 
 #[derive(Clone, Copy)]
 struct PathPoint {
@@ -537,26 +538,44 @@ impl MapPane {
             .flatten()
     }
 
-    /// The center and zoom that show all `points` inside `rect`.
-    fn fit_view(points: &[Position], rect: Rect) -> Option<(Position, f64)> {
-        let first = mercator(*points.first()?);
-        let (min, max) = points.iter().skip(1).fold((first, first), |(min, max), p| {
-            let p = mercator(*p);
-            (
-                (min.0.min(p.0), min.1.min(p.1)),
-                (max.0.max(p.0), max.1.max(p.1)),
-            )
-        });
+    /// The center and zoom that show all `points` inside `rect`, each its padding clear of the edges.
+    fn fit_view(points: &[(Position, f32)], rect: Rect) -> Option<(Position, f64)> {
+        points.first()?;
+        let points: Vec<_> = points
+            .iter()
+            .map(|(p, pad)| (mercator(*p), f64::from(*pad)))
+            .collect();
+        let size = (f64::from(rect.width()), f64::from(rect.height()));
 
         // Normalized mercator coordinates span 256 px at zoom 0.
-        let span = ((max.0 - min.0) * 256.0, (max.1 - min.1) * 256.0);
-        let room = rect.shrink(FIT_PADDING).size().max(Vec2::splat(1.0));
-        let zoom = (f64::from(room.x) / span.0)
-            .min(f64::from(room.y) / span.1)
-            .log2()
-            .clamp(FIT_MIN_ZOOM, FIT_MAX_ZOOM);
+        let mut scale = f64::INFINITY;
+        for (a, pad_a) in &points {
+            for (b, pad_b) in &points {
+                let room = (
+                    (size.0 - pad_a - pad_b).max(1.0),
+                    (size.1 - pad_a - pad_b).max(1.0),
+                );
+                scale = scale
+                    .min(room.0 / ((b.0 - a.0).abs() * 256.0))
+                    .min(room.1 / ((b.1 - a.1).abs() * 256.0));
+            }
+        }
+        let zoom = scale.log2().clamp(FIT_MIN_ZOOM, FIT_MAX_ZOOM);
 
-        let (x, y) = (f64::midpoint(min.0, max.0), f64::midpoint(min.1, max.1));
+        let world = 256.0 * zoom.exp2();
+        let center = |axis: fn(&(f64, f64)) -> f64| {
+            let (min, max) = points.iter().fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(min, max), (p, pad)| {
+                    (
+                        min.min(axis(p) * world - pad),
+                        max.max(axis(p) * world + pad),
+                    )
+                },
+            );
+            f64::midpoint(min, max) / world
+        };
+        let (x, y) = (center(|p| p.0), center(|p| p.1));
         let lat = (std::f64::consts::PI * (1.0 - 2.0 * y))
             .sinh()
             .atan()
@@ -843,11 +862,10 @@ impl PaneUi for MapPane {
             .collect();
 
         if self.fit {
-            let points: Vec<Position> = vehicles
+            let points: Vec<(Position, f32)> = vehicles
                 .values()
-                .map(|v| v.position)
-                .chain(homes.iter().copied())
-                .chain(gcs_position)
+                .map(|v| (v.position, FIT_VEHICLE_PADDING))
+                .chain(homes.iter().chain(&gcs_position).map(|p| (*p, FIT_PADDING)))
                 .collect();
             if let Some((center, zoom)) = Self::fit_view(&points, rect) {
                 self.memory.center_at(center);
@@ -1224,29 +1242,37 @@ mod tests {
     fn a_single_point_fits_at_the_closest_zoom() {
         let p = Position::new(8.59, 49.86);
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(800.0));
-        let (center, zoom) = MapPane::fit_view(&[p], rect).unwrap();
+        let (center, zoom) = MapPane::fit_view(&[(p, FIT_VEHICLE_PADDING)], rect).unwrap();
 
         assert_eq!(zoom, FIT_MAX_ZOOM);
         assert!((center.x() - p.x()).abs() < 1e-9 && (center.y() - p.y()).abs() < 1e-9);
     }
 
     #[test]
-    fn two_points_fit_inside_the_padded_rect() {
-        let (a, b) = (Position::new(8.50, 49.80), Position::new(8.70, 49.90));
+    fn points_fit_with_their_padding_clear_of_the_edges() {
+        let points = [
+            (Position::new(8.50, 49.80), FIT_PADDING),
+            (Position::new(8.70, 49.90), FIT_VEHICLE_PADDING),
+        ];
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0));
-        let (center, zoom) = MapPane::fit_view(&[a, b], rect).unwrap();
+        let (center, zoom) = MapPane::fit_view(&points, rect).unwrap();
 
-        let world = 256.0 * 2f64.powf(zoom);
-        let (ma, mb) = (mercator(a), mercator(b));
-        let width = (mb.0 - ma.0).abs() * world;
-        let height = (mb.1 - ma.1).abs() * world;
-        let room = rect.shrink(FIT_PADDING).size();
+        let world = 256.0 * zoom.exp2();
+        let c = mercator(center);
+        let (mut slack_x, mut slack_y) = (f64::INFINITY, f64::INFINITY);
+        for (p, pad) in points {
+            let m = mercator(p);
+            let x = (m.0 - c.0) * world + f64::from(rect.width()) / 2.0;
+            let y = (m.1 - c.1) * world + f64::from(rect.height()) / 2.0;
+            let pad = f64::from(pad);
+            slack_x = slack_x.min(x - pad).min(f64::from(rect.width()) - pad - x);
+            slack_y = slack_y.min(y - pad).min(f64::from(rect.height()) - pad - y);
+        }
 
-        assert!(width <= f64::from(room.x) + 1e-6 && height <= f64::from(room.y) + 1e-6);
+        assert!(slack_x > -1e-6 && slack_y > -1e-6, "{slack_x} {slack_y}");
         assert!(
-            (width - f64::from(room.x)).abs() < 1e-6 || (height - f64::from(room.y)).abs() < 1e-6,
+            slack_x.abs() < 1e-6 || slack_y.abs() < 1e-6,
             "neither side is filled at zoom {zoom}"
         );
-        assert!(center.y() > 49.80 && center.y() < 49.90);
     }
 }
