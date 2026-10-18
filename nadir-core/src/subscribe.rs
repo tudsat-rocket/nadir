@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 
+use crate::mav::SystemId;
 use crate::publish::SessionAddr;
 use crate::source::{INGEST_BATCH, Origin, Source, StreamProgress};
 use crate::tlog;
@@ -43,6 +44,17 @@ impl SessionSummary {
 
     pub fn live(&self) -> bool {
         self.idle < LIVE_WITHIN
+    }
+
+    /// Station, system and start time, if the id was made by [`SessionAddr::new`].
+    pub fn parts(&self) -> Option<(&str, SystemId, DateTime<Utc>)> {
+        let mut parts = self.id.rsplitn(3, '-');
+        let started =
+            NaiveDateTime::parse_from_str(parts.next()?, SessionAddr::STARTED_FORMAT).ok()?;
+        let system_id = SystemId::from_str_radix(parts.next()?, 16).ok()?;
+        let station = parts.next()?;
+
+        Some((station, system_id, started.and_utc()))
     }
 }
 
@@ -240,5 +252,22 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn an_id_splits_into_station_system_and_start() {
+        let summary = |id: &str| SessionSummary {
+            id: id.to_owned(),
+            bytes: 0,
+            idle: Duration::ZERO,
+        };
+
+        let made = summary(&SessionAddr::new(String::new(), "pad 2/north", 0x2a).id);
+        let (station, system_id, started) = made.parts().unwrap();
+        assert_eq!((station, system_id), ("pad-2-north", 0x2a));
+        assert!((Utc::now() - started).num_seconds() < 5);
+
+        assert_eq!(summary("handmade").parts(), None);
+        assert_eq!(summary("a-zz-20261011T120000").parts(), None);
     }
 }

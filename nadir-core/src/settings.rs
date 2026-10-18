@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::LinkId;
+use crate::mav::SystemId;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -18,6 +19,7 @@ pub struct Settings {
     pub layouts: Vec<SavedLayout>,
     pub plot_line_width: f32,
     pub pulse_durations: [f32; 3],
+    pub pressure_trims: PressureTrims,
 }
 
 impl Default for Settings {
@@ -33,6 +35,7 @@ impl Default for Settings {
             layouts: Vec::new(),
             plot_line_width: 1.0,
             pulse_durations: [0.2, 1.0, 5.0],
+            pressure_trims: PressureTrims::default(),
         }
     }
 }
@@ -54,6 +57,42 @@ impl Default for SharingSettings {
             server: None,
             station: "nadir".to_owned(),
             share_by_default: false,
+        }
+    }
+}
+
+/// A display-only offset added to one `PRESSURE_VESSEL` sensor, never sent to the vehicle.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PressureTrim {
+    pub system: SystemId,
+    pub vessel: u8,
+    /// 1 or 2, for `pressure1` or `pressure2`.
+    pub sensor: u8,
+    pub bar: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PressureTrims(Vec<PressureTrim>);
+
+impl PressureTrims {
+    pub fn get(&self, system: SystemId, vessel: u8, sensor: u8) -> f32 {
+        self.0
+            .iter()
+            .find(|t| (t.system, t.vessel, t.sensor) == (system, vessel, sensor))
+            .map_or(0.0, |t| t.bar)
+    }
+
+    pub fn set(&mut self, system: SystemId, vessel: u8, sensor: u8, bar: f32) {
+        self.0
+            .retain(|t| (t.system, t.vessel, t.sensor) != (system, vessel, sensor));
+        if bar != 0.0 {
+            self.0.push(PressureTrim {
+                system,
+                vessel,
+                sensor,
+                bar,
+            });
         }
     }
 }
@@ -382,6 +421,20 @@ mod tests {
         let text = toml::to_string_pretty(&settings).unwrap();
         let read: Settings = toml::from_str(&text).unwrap();
         assert_eq!(read, settings, "{text}");
+    }
+
+    #[test]
+    fn pressure_trims_round_trip_and_clear_at_zero() {
+        let mut settings = Settings::default();
+        settings.pressure_trims.set(1, 1, 2, -0.25);
+        settings.pressure_trims.set(1, 3, 1, 0.5);
+        settings.pressure_trims.set(1, 3, 1, 0.0);
+
+        let text = toml::to_string_pretty(&settings).unwrap();
+        let read: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(read, settings, "{text}");
+        assert_eq!(read.pressure_trims.get(1, 1, 2), -0.25);
+        assert_eq!(read.pressure_trims.0.len(), 1);
     }
 
     #[test]

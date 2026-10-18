@@ -351,6 +351,7 @@ impl PaneUi for PlotPane {
                 unit: af.unit.clone(),
                 color: None,
                 scale: None,
+                offset: None,
                 sentinel: None,
             })
             .collect::<Vec<_>>();

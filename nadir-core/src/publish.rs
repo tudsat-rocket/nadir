@@ -29,6 +29,8 @@ pub struct SessionAddr {
 }
 
 impl SessionAddr {
+    pub(crate) const STARTED_FORMAT: &str = "%Y%m%dT%H%M%S";
+
     /// A new session for `system_id`, named so that a list of them reads well.
     pub fn new(server: String, station: &str, system_id: SystemId) -> Self {
         let station: String = station
@@ -36,7 +38,7 @@ impl SessionAddr {
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
             .take(32)
             .collect();
-        let started = Utc::now().format("%Y%m%dT%H%M%S");
+        let started = Utc::now().format(Self::STARTED_FORMAT);
 
         Self {
             server,

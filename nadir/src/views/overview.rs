@@ -11,6 +11,7 @@ use nadir_core::{Link, LinkId, Origin, Source, tlog};
 
 use eframe::egui;
 
+use crate::sessions::Sessions;
 use crate::views::SourceId;
 use crate::widgets::{Readout, column_header};
 
@@ -19,6 +20,13 @@ const RECENT_LIMIT: usize = 10;
 /// The session's own recording is created lazily, on the first frame received, so the listing taken
 /// when the view was built does not have it yet.
 const RESCAN_INTERVAL: Duration = Duration::from_secs(2);
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub enum OverviewAction {
+    OpenLog(PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
+    JoinSession(nadir_core::SessionAddr),
+}
 
 pub struct Overview {
     recent: Vec<tlog::LogFile>,
@@ -38,13 +46,15 @@ impl Overview {
         self.scanned_at = Instant::now();
     }
 
-    /// Returns the log the user picked. `App` owns the sources, so the view reports rather than acts.
+    /// `App` owns the sources, so the view reports rather than acts.
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
         links: &[Link],
         logs: &BTreeMap<SourceId, Source>,
-    ) -> Option<PathBuf> {
+        sessions: &Sessions,
+    ) -> Option<OverviewAction> {
         if self.scanned_at.elapsed() >= RESCAN_INTERVAL {
             self.refresh();
         }
@@ -56,7 +66,17 @@ impl Overview {
             ui.indent("overview", |ui| {
                 self.links(ui, links);
                 ui.add_space(15.0);
-                picked = self.recent_logs(ui, logs);
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    column_header(ui, "📡 SHARED SESSIONS");
+                    picked = sessions.ui(ui).map(OverviewAction::JoinSession);
+                    ui.add_space(15.0);
+                }
+
+                if let Some(path) = self.recent_logs(ui, logs) {
+                    picked = Some(OverviewAction::OpenLog(path));
+                }
             });
         });
 

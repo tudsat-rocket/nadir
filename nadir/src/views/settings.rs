@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use nadir_core::settings::{
-    GeoPosition, Layout, LayoutNode, LayoutRef, MapboxStyle, SavedLayout, Theme,
+    GeoPosition, Layout, LayoutNode, LayoutRef, MapboxStyle, PressureTrims, SavedLayout, Theme,
 };
 use nadir_core::{LinkId, Settings};
 
@@ -155,6 +155,16 @@ impl SettingsView {
         {
             Some(saved) => saved.root = root,
             None => self.settings.layouts.push(SavedLayout { name, root }),
+        }
+    }
+
+    /// Saved at once, around any unsaved edits on this screen rather than with them.
+    pub fn store_pressure_trims(&mut self, trims: PressureTrims) {
+        self.settings.pressure_trims = trims.clone();
+        self.saved.pressure_trims = trims;
+        self.status = Some(self.saved.save().map_err(|e| e.to_string()));
+        if let Some(Err(e)) = &self.status {
+            tracing::error!("Pressure trims not saved: {e}");
         }
     }
 

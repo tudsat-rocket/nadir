@@ -2,6 +2,7 @@ use egui::{Align, Layout};
 use egui_tiles::SimplificationOptions;
 use mavspec::rust::dialects::common::messages::{LocalPositionNed, VfrHud};
 
+use nadir_core::settings::PressureTrims;
 use nadir_core::{Source, System};
 
 mod cameras;
@@ -91,6 +92,9 @@ pub struct TreeBehavior<'a> {
     pub position_source: &'a mut PositionSource,
     pub pulse_durations: [f32; 3],
     pub map: nadir_core::settings::MapSettings,
+    pub pressure_trims: &'a mut PressureTrims,
+    /// Set once a trim edit is finished, rather than on every frame of a drag.
+    pub persist_trims: bool,
 }
 
 // Links, Horizon and Status are not Pane variants: they live in the fixed status bar (see app.rs)

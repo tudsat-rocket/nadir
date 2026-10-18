@@ -55,6 +55,7 @@ impl SensorsPane {
                     unit: Some(unit.to_owned()),
                     color: None,
                     scale: Some(scale),
+                    offset: None,
                     sentinel: None,
                 });
             }
@@ -132,6 +133,7 @@ impl PaneUi for SensorsPane {
                 unit: Some("hPa".to_owned()),
                 color: None,
                 scale: None,
+                offset: None,
                 sentinel: None,
             },
             PlotLine {
@@ -144,6 +146,7 @@ impl PaneUi for SensorsPane {
                 unit: Some("hPa".to_owned()),
                 color: None,
                 scale: None,
+                offset: None,
                 sentinel: None,
             },
             PlotLine {
@@ -156,6 +159,7 @@ impl PaneUi for SensorsPane {
                 unit: Some("hPa".to_owned()),
                 color: None,
                 scale: None,
+                offset: None,
                 sentinel: None,
             },
         ];

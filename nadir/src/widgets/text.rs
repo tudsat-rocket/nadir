@@ -19,3 +19,12 @@ pub(crate) fn column_header(ui: &mut egui::Ui, title: &str) {
             .wrap_mode(egui::TextWrapMode::Truncate),
     );
 }
+
+pub(crate) fn ago(elapsed: std::time::Duration) -> String {
+    match elapsed.as_secs() {
+        s if s < 120 => format!("{s} s"),
+        s if s < 2 * 3600 => format!("{} min", s / 60),
+        s if s < 2 * 86400 => format!("{} h", s / 3600),
+        s => format!("{} d", s / 86400),
+    }
+}
