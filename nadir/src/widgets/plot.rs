@@ -76,6 +76,8 @@ pub struct PlotLine {
     pub unit: Option<String>,
     pub color: Option<Color32>,
     pub scale: Option<f64>,
+    /// Added after `scale`, in the plotted unit.
+    pub offset: Option<f64>,
     // Raw stored value to treat as "no reading" and drop from the plot,
     // e.g. a firmware sentinel like u16::MAX. Compared before `scale`.
     pub sentinel: Option<f64>,
@@ -312,9 +314,15 @@ impl egui::Widget for Plot<'_> {
                 // Scaling commutes with the extremes the query picked, so it can be applied after
                 // the decimation rather than before it.
                 let scale = line.scale.unwrap_or(1.0);
+                let offset = line.offset.unwrap_or(0.0);
                 let plot_data: Vec<_> = timeseries
                     .into_iter()
-                    .map(|(t, v)| [(t - self.source.plot_origin).as_seconds_f64(), v * scale])
+                    .map(|(t, v)| {
+                        [
+                            (t - self.source.plot_origin).as_seconds_f64(),
+                            v * scale + offset,
+                        ]
+                    })
                     .collect();
 
                 let mut l = egui_plot::Line::new(name, plot_data).width(line_width);

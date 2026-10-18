@@ -1,3 +1,4 @@
+use nadir_core::settings::PressureTrims;
 use nadir_core::{MessageInstance, System};
 
 use egui::collapsing_header::CollapsingState;
@@ -220,7 +221,7 @@ impl PropulsionPane {
         system: &System,
         square: Rect,
         valve_blink: [bool; VALVE_COUNT],
-        pulse_durations: [f32; 3],
+        behavior: &mut TreeBehavior,
     ) {
         let n = square.width();
 
@@ -241,14 +242,15 @@ impl PropulsionPane {
             // TODO: extend support
             match (heartbeat.autopilot, heartbeat.type_) {
                 (_, MavType::Rocket) => {
-                    rocket::draw_hybrid(
+                    behavior.persist_trims |= rocket::draw_hybrid(
                         ui,
                         system,
                         square,
                         &mut self.valve_mode,
                         &mut self.pulse,
-                        pulse_durations,
+                        behavior.pulse_durations,
                         valve_blink,
+                        behavior.pressure_trims,
                     );
                     Hazard::tick(ui, square, system);
                 }
@@ -300,15 +302,16 @@ fn valve_state_lines(system_id: u8) -> Vec<PlotLine> {
             unit: None,
             color: Some(valve.color),
             scale: None,
+            offset: None,
             sentinel: None,
         })
         .collect()
 }
 
 /// Colours are left undarkened: `Plot` runs every line through `readable` itself.
-fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
+fn pressure_lines(system_id: u8, trims: &PressureTrims) -> Vec<PlotLine> {
     [
-        (0, "Pressurant", rocket::N2_COLOR),
+        (0_u8, "Pressurant", rocket::N2_COLOR),
         (1, "Oxidizer", rocket::N2O_COLOR),
         (2, "Combustion", rocket::CC_COLOR),
         (3, "Reg. Pressurant", rocket::NODE_COLOR),
@@ -322,7 +325,7 @@ fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
         message_name: "PRESSURE_VESSEL".to_owned(),
         instance: Some(MessageInstance {
             field: "id".to_owned(),
-            value: id,
+            value: i64::from(id),
         }),
         field_name: "pressure1".to_owned(),
         alias: Some(alias.to_owned()),
@@ -330,6 +333,7 @@ fn pressure_lines(system_id: u8) -> Vec<PlotLine> {
         color: Some(color),
         // PRESSURE_VESSEL.pressure1 is in kPa; the diagram and rendering use bar.
         scale: Some(0.01),
+        offset: Some(f64::from(trims.get(system_id, id, 1))),
         // Firmware reports an unavailable sensor as u16::MAX.
         sentinel: Some(f64::from(u16::MAX)),
     })
@@ -380,7 +384,7 @@ impl PaneUi for PropulsionPane {
                 let blink = self.update_valve_blink(&system, now);
                 let cursor = ui.cursor().min;
                 let square = Rect::from_min_size(cursor, Vec2::new(w, h));
-                self.draw_frame(ui, &system, square, blink, behavior.pulse_durations);
+                self.draw_frame(ui, &system, square, blink, behavior);
                 if alone {
                     return;
                 }
@@ -470,7 +474,7 @@ impl PaneUi for PropulsionPane {
                             }
                         });
 
-                    let p_lines = pressure_lines(system_id);
+                    let p_lines = pressure_lines(system_id, behavior.pressure_trims);
                     let mut pressure_plot = Plot::new(
                         &p_lines,
                         &behavior.source,
@@ -494,13 +498,7 @@ impl PaneUi for PropulsionPane {
                 Vec2::new(n, n),
             );
             ui.vertical_centered(|ui| {
-                self.draw_frame(
-                    ui,
-                    &system,
-                    square,
-                    [false; VALVE_COUNT],
-                    behavior.pulse_durations,
-                );
+                self.draw_frame(ui, &system, square, [false; VALVE_COUNT], behavior);
             });
         }
     }

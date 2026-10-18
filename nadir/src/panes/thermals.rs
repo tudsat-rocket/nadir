@@ -147,6 +147,7 @@ impl PaneUi for ThermalsPane {
                                 unit: Some("\u{00b0}C".to_owned()),
                                 color: None,
                                 scale: Some(sensor.scale),
+                                offset: None,
                                 sentinel: sensor.sentinel,
                             })
                     })

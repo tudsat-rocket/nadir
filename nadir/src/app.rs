@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use egui::{Key, Margin, Modifiers};
 use egui_tiles::{Container, Grid, GridLayout, Linear, LinearDir, Tabs, Tile, TileId, Tiles};
 use nadir_core::mav::{Event, V2};
-use nadir_core::settings::{GeoPosition, Layout, LayoutNode, LayoutRef, SavedLayout};
+use nadir_core::settings::{
+    GeoPosition, Layout, LayoutNode, LayoutRef, PressureTrims, SavedLayout,
+};
 use rapid_dialect::Rapid;
 use rapid_dialect::rapid::enums::{MavCmd, MavResult};
 
@@ -38,6 +40,8 @@ pub struct App {
     settings: SettingsView,
     shared_plot_state: SharedPlotState,
     position_source: PositionSource,
+    /// Edited live by the panes, and saved through `settings` once an edit is finished.
+    pressure_trims: PressureTrims,
     active_view: View,
     never_connected: bool,
     /// A joined session to switch to once its first system arrives.
@@ -148,6 +152,7 @@ impl App {
             settings: SettingsView::new(&settings),
             shared_plot_state: SharedPlotState::new(),
             position_source: PositionSource::default(),
+            pressure_trims: settings.pressure_trims.clone(),
             active_view: View::Overview,
             never_connected: true,
             focus_on_arrival: None,
@@ -470,6 +475,8 @@ impl eframe::App for App {
                 .pulse_durations
                 .map(|secs| secs.clamp(0.0, MAX_PULSE_DURATION_SECS)),
             map: settings.map.clone(),
+            pressure_trims: &mut self.pressure_trims,
+            persist_trims: false,
         };
 
         if let View::System { system_id, .. } = self.active_view
@@ -542,6 +549,11 @@ impl eframe::App for App {
                     self.tiles_tree.ui(&mut behavior, ui);
                 }
             });
+
+        if behavior.persist_trims {
+            self.settings
+                .store_pressure_trims(self.pressure_trims.clone());
+        }
 
         match layout_action {
             Some(LayoutAction::Restore(layout)) => self.restore_layout(&layout),

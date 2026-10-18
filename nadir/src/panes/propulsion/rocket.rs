@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 
 use nadir_core::System;
+use nadir_core::settings::PressureTrims;
 
 use egui::epaint::{PathShape, PathStroke};
 use egui::{
-    Align2, Area, Button, Color32, CornerRadius, FontId, Id, Order, Pos2, Rangef, Rect, RichText,
-    Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Align2, Area, Button, Color32, CornerRadius, DragValue, FontId, Grid, Id, Order, Pos2, Rangef,
+    Rect, RichText, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use rapid_dialect::rapid::enums::{PressureVesselFlag, ValveFlag, ValveId};
 use rapid_dialect::rapid::messages::{PressureVessel, Valve};
@@ -190,13 +191,93 @@ fn vessel_warn(v: Option<&PressureVessel>) -> bool {
     v.is_some_and(|v| v.flags.contains(PressureVesselFlag::OVERPRESSURE))
 }
 
+fn raw_pressure_bar(v: &PressureVessel, sensor: u8) -> Option<f32> {
+    let raw = if sensor == 1 {
+        v.pressure1
+    } else {
+        v.pressure2
+    };
+    (raw != u16::MAX).then(|| f32::from(raw) / 100.0)
+}
+
+/// Marks a readout whose values are offset by a trim, so it is not taken for the raw reading.
+fn trim_marker(trims: &PressureTrims, system: &System, vessel: u8) -> &'static str {
+    if [1, 2]
+        .into_iter()
+        .any(|sensor| trims.get(system.system_id, vessel, sensor) != 0.0)
+    {
+        "*"
+    } else {
+        ""
+    }
+}
+
+/// Right-click menu on a vessel's readout. Returns whether a finished edit should be saved.
+fn pressure_trim_menu(
+    response: &egui::Response,
+    system: &System,
+    vessel: Option<&PressureVessel>,
+    trims: &mut PressureTrims,
+) -> bool {
+    let Some(vessel) = vessel else {
+        return false;
+    };
+    let mut persist = false;
+    response.context_menu(|ui| {
+        Grid::new("pressure_trims").show(ui, |ui| {
+            ui.strong(format!("P{}", vessel.id));
+            ui.strong("Raw");
+            ui.strong("Trim");
+            ui.end_row();
+            for sensor in [1, 2] {
+                let raw = raw_pressure_bar(vessel, sensor);
+                let mut trim = trims.get(system.system_id, vessel.id, sensor);
+                if raw.is_none() && trim == 0.0 {
+                    continue;
+                }
+                ui.label(format!("Sensor {sensor}"));
+                ui.monospace(raw.map_or("--".to_owned(), |raw| format!("{raw:.2} bar")));
+                let drag = ui.add(
+                    DragValue::new(&mut trim)
+                        .speed(0.01)
+                        .fixed_decimals(2)
+                        .suffix(" bar"),
+                );
+                if drag.changed() {
+                    trims.set(system.system_id, vessel.id, sensor, trim);
+                }
+                persist |= drag.drag_stopped() || drag.lost_focus();
+                for target in [0.0, 1.0] {
+                    let button = ui.add_enabled(
+                        raw.is_some(),
+                        Button::new(format!("Trim to {target:.0} bar")),
+                    );
+                    if let Some(raw) = raw
+                        && button.clicked()
+                    {
+                        trims.set(system.system_id, vessel.id, sensor, target - raw);
+                        persist = true;
+                    }
+                }
+                if ui.add_enabled(trim != 0.0, Button::new("Clear")).clicked() {
+                    trims.set(system.system_id, vessel.id, sensor, 0.0);
+                    persist = true;
+                }
+                ui.end_row();
+            }
+        });
+    });
+    persist
+}
+
 // An external/offboard (ground support) vessel, as flagged by the firmware.
 fn is_external(v: Option<&PressureVessel>) -> bool {
     v.is_some_and(|v| v.flags.contains(PressureVesselFlag::EXTERNAL))
 }
 
+/// Returns whether a pressure trim edit was finished and should be saved.
 // N2 and N2O are the fluids' actual names.
-#[allow(clippy::similar_names)]
+#[allow(clippy::similar_names, clippy::too_many_arguments)]
 pub fn draw_hybrid(
     ui: &mut egui::Ui,
     system: &System,
@@ -205,7 +286,8 @@ pub fn draw_hybrid(
     pulse: &mut usize,
     pulse_durations: [f32; 3],
     blink: [bool; super::VALVE_COUNT],
-) {
+    trims: &mut PressureTrims,
+) -> bool {
     let pulse_secs = pulse_durations[*pulse];
     let visuals = ui.visuals().clone();
     let n2_color = readable(N2_COLOR, &visuals);
@@ -334,16 +416,15 @@ pub fn draw_hybrid(
     let ext_pressurant = system.last_instance_message::<PressureVessel>(4).ok();
     let ext_oxidizer = system.last_instance_message::<PressureVessel>(5).ok();
 
-    let pressure_bar = |p: u16| (p != u16::MAX).then(|| f32::from(p) / 100.0);
+    let pressure_bar = |v: Option<&PressureVessel>, sensor: u8| {
+        let v = v?;
+        Some(raw_pressure_bar(v, sensor)? + trims.get(system.system_id, v.id, sensor))
+    };
 
-    let reg_pressure1_bar = regulated.as_ref().and_then(|p| pressure_bar(p.pressure1));
-    let reg_pressure2_bar = regulated.as_ref().and_then(|p| pressure_bar(p.pressure2));
-    let ext_pressurant_bar = ext_pressurant
-        .as_ref()
-        .and_then(|p| pressure_bar(p.pressure1));
-    let ext_oxidizer_bar = ext_oxidizer
-        .as_ref()
-        .and_then(|p| pressure_bar(p.pressure1));
+    let reg_pressure1_bar = pressure_bar(regulated.as_ref(), 1);
+    let reg_pressure2_bar = pressure_bar(regulated.as_ref(), 2);
+    let ext_pressurant_bar = pressure_bar(ext_pressurant.as_ref(), 1);
+    let ext_oxidizer_bar = pressure_bar(ext_oxidizer.as_ref(), 1);
     let ext_oxidizer_level = ext_oxidizer
         .as_ref()
         .and_then(|p| (p.level != u16::MAX).then(|| f32::from(p.level) / 10000.0));
@@ -354,10 +435,10 @@ pub fn draw_hybrid(
         is_external(ext_pressurant.as_ref()) && ext_pressurant_bar.is_some();
     let ext_oxidizer_available = is_external(ext_oxidizer.as_ref()) && ext_oxidizer_bar.is_some();
 
-    let n2_pressure_bar = pressurant.as_ref().and_then(|p| pressure_bar(p.pressure1));
-    let n2o_pressure1_bar = oxidizer.as_ref().and_then(|p| pressure_bar(p.pressure1));
-    let n2o_pressure2_bar = oxidizer.as_ref().and_then(|p| pressure_bar(p.pressure2));
-    let cc_pressure_bar = chamber.as_ref().and_then(|p| pressure_bar(p.pressure1));
+    let n2_pressure_bar = pressure_bar(pressurant.as_ref(), 1);
+    let n2o_pressure1_bar = pressure_bar(oxidizer.as_ref(), 1);
+    let n2o_pressure2_bar = pressure_bar(oxidizer.as_ref(), 2);
+    let cc_pressure_bar = pressure_bar(chamber.as_ref(), 1);
 
     let n2o_temp1 = oxidizer
         .as_ref()
@@ -399,7 +480,7 @@ pub fn draw_hybrid(
     // Warn on an overpressure flag or a missing reading.
     let readout = |id: u8, color: Color32, sections: Vec<MeasurementSection>, warn: bool| {
         MeasurementIndicator {
-            label: Some((format!("P{id}"), color)),
+            label: Some((format!("P{id}{}", trim_marker(trims, system, id)), color)),
             blink: warn || sections.iter().flat_map(|s| &s.values).any(Option::is_none),
             sections,
             scale: k,
@@ -409,6 +490,7 @@ pub fn draw_hybrid(
     let pressure_readouts = vec![
         (
             top_tank_rect.center().y,
+            pressurant.as_ref(),
             readout(
                 0,
                 n2_color,
@@ -418,6 +500,7 @@ pub fn draw_hybrid(
         ),
         (
             junction_cy,
+            regulated.as_ref(),
             readout(
                 3,
                 node_color,
@@ -427,6 +510,7 @@ pub fn draw_hybrid(
         ),
         (
             tank_rect.center().y,
+            oxidizer.as_ref(),
             readout(
                 1,
                 n2o_color,
@@ -436,6 +520,7 @@ pub fn draw_hybrid(
         ),
         (
             cc_cy,
+            chamber.as_ref(),
             readout(
                 2,
                 cc_color,
@@ -446,7 +531,7 @@ pub fn draw_hybrid(
     ];
     let pressure_readouts: Vec<_> = pressure_readouts
         .into_iter()
-        .map(|(cy, indicator)| (cy, indicator.intrinsic_size(ui.ctx()), indicator))
+        .map(|(cy, vessel, indicator)| (cy, vessel, indicator.intrinsic_size(ui.ctx()), indicator))
         .collect();
 
     let stroke_col = schematic_line(&visuals);
@@ -721,7 +806,7 @@ pub fn draw_hybrid(
     let pressure_cx = if detailed {
         let widest = pressure_readouts
             .iter()
-            .map(|(_, size, _)| size.x)
+            .map(|(_, _, size, _)| size.x)
             .fold(0.0, f32::max);
         let plant_left = boxed.map_or(tank_left, |b| b.left().min(tank_left));
         f32::max(
@@ -731,10 +816,12 @@ pub fn draw_hybrid(
     } else {
         pressure_cx
     };
-    for (cy, size, indicator) in pressure_readouts {
+    let mut persist_trims = false;
+    for (cy, vessel, size, indicator) in pressure_readouts {
         let rect = Rect::from_center_size(pos2(pressure_cx, cy), size);
         obstacles.borrow_mut().push(rect);
-        ui.place(rect, indicator);
+        let response = ui.place(rect, indicator).interact(Sense::click());
+        persist_trims |= pressure_trim_menu(&response, system, vessel, trims);
     }
     draw_valve(
         &painter,
@@ -1099,34 +1186,35 @@ pub fn draw_hybrid(
         hatch_stride,
     );
 
-    for (id, rect, color, pressure, warn) in [
+    for (id, vessel, rect, color, pressure) in [
         (
             4,
+            ext_pressurant.as_ref(),
             ext_press_rect,
             ext_n2_color,
             ext_pressurant_bar,
-            vessel_warn(ext_pressurant.as_ref()),
         ),
         (
             5,
+            ext_oxidizer.as_ref(),
             ext_ox_rect,
             ext_n2o_color,
             ext_oxidizer_bar,
-            vessel_warn(ext_oxidizer.as_ref()),
         ),
     ] {
         let indicator = MeasurementIndicator {
-            label: Some((format!("P{id}"), color)),
+            label: Some((format!("P{id}{}", trim_marker(trims, system, id)), color)),
             sections: vec![bar(vec![pressure], color)],
             // External vessels legitimately read unavailable when disconnected, so
             // a missing value is not a fault; only a real overpressure warns.
-            blink: warn,
+            blink: vessel_warn(vessel),
             scale: k,
         };
         let size = indicator.intrinsic_size(ui.ctx());
         let rect = Rect::from_center_size(rect.center(), size);
         obstacles.borrow_mut().push(rect);
-        ui.place(rect, indicator);
+        let response = ui.place(rect, indicator).interact(Sense::click());
+        persist_trims |= pressure_trim_menu(&response, system, vessel, trims);
     }
 
     for (rect, fill_cy, fill_id, vent_id, available) in [
@@ -1363,6 +1451,8 @@ pub fn draw_hybrid(
     painter.add(Shape::Path(PathShape::closed_line(chamber_path, stroke)));
 
     draw_valve_mode_toggle(ui, strip, mode, pulse, pulse_durations, k);
+
+    persist_trims
 }
 
 // Bottom-left selector that switches what a click on a valve does, bottom-right

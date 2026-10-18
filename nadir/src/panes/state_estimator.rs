@@ -16,6 +16,7 @@ fn ned_vz(system_id: u8) -> PlotLine {
         unit: Some("m/s".to_owned()),
         color: Some(Color32::from_rgb(0xd7, 0x99, 0x21)),
         scale: Some(-1.0),
+        offset: None,
         sentinel: None,
     }
 }
@@ -32,6 +33,7 @@ fn altitude_lines(source: PositionSource, system_id: u8) -> Vec<PlotLine> {
             unit: Some("m".to_owned()),
             color: Some(Color32::from_rgb(0x45, 0x85, 0x88)),
             scale: Some(-1.0),
+            offset: None,
             sentinel: None,
         }],
         PositionSource::VfrHud => vec![PlotLine {
@@ -44,6 +46,7 @@ fn altitude_lines(source: PositionSource, system_id: u8) -> Vec<PlotLine> {
             unit: Some("m".to_owned()),
             color: Some(Color32::from_rgb(0x45, 0x85, 0x88)),
             scale: None,
+            offset: None,
             sentinel: None,
         }],
     }
@@ -62,6 +65,7 @@ fn velocity_lines(source: PositionSource, system_id: u8) -> Vec<PlotLine> {
             unit: Some("m/s".to_owned()),
             color: Some(Color32::from_rgb(0xd7, 0x99, 0x21)),
             scale: None,
+            offset: None,
             sentinel: None,
         }],
     }
