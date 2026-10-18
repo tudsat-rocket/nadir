@@ -3,6 +3,7 @@ use std::f32;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use tokio::sync::{Notify, broadcast, mpsc};
@@ -27,6 +28,7 @@ use crate::protocols::logs::{FlightLogUiState, LogDlCommand};
 use crate::protocols::params::{ParamEncoding, ParamId, ParamMetadata, ParamProgress, ParamVal};
 use crate::source::Origin;
 use crate::stats::ChannelStats;
+use crate::time::Instant;
 use crate::{GROUND_STATION_COMPONENT_ID, GROUND_STATION_SYSTEM_ID};
 
 pub struct SystemConnection {
@@ -35,6 +37,11 @@ pub struct SystemConnection {
     pub callback: Option<Callback<V2>>,
     pub endpoint: Arc<Mutex<Endpoint<V2>>>,
     pub channels: HashMap<ChannelId, (ChannelInfo, ChannelStats)>,
+    /// When the last frame from this system arrived over any channel.
+    pub last_received: Option<Instant>,
+    /// The last `LINK_NODE_STATUS` received-message count, and when a report last showed our
+    /// uplink getting through: the vehicle's only word on whether it still reaches it.
+    pub uplink_heard: Option<(u32, Instant)>,
 }
 
 #[derive(Clone)]
@@ -99,6 +106,8 @@ impl System {
                 callback,
                 endpoint,
                 channels: HashMap::new(),
+                last_received: None,
+                uplink_heard: None,
             })),
             muted: Arc::new(AtomicBool::new(muted)),
             hot: Arc::new(AtomicBool::new(false)),
@@ -289,6 +298,7 @@ impl System {
             callback,
             endpoint,
             channels,
+            ..
         } = &mut *connection;
 
         // No channel to answer on, which is what keeps a replay off a real link.
@@ -528,6 +538,23 @@ impl System {
         frame: &Frame<V2>,
         callback: Option<&Callback<V2>>,
     ) {
+        // Recordings have no callback, and their counters say nothing about a link we have now.
+        if let Common::LinkNodeStatus(lns) = &message
+            && callback.is_some()
+        {
+            let mut conninfo = self.conn.lock().unwrap();
+            // Zenith reports both figures over a sliding window, so a steady link holds the count
+            // still and only the rate tells; a node counting since boot, as the spec has it, gives
+            // itself away by the count going up.
+            let counted_up = conninfo
+                .uplink_heard
+                .is_some_and(|(count, _)| lns.messages_received > count);
+            if lns.rx_rate > 0 || counted_up {
+                conninfo.uplink_heard = Some((lns.messages_received, Instant::now()));
+            } else if let Some((count, _)) = &mut conninfo.uplink_heard {
+                *count = lns.messages_received;
+            }
+        }
         let _ = self.message_sender.send(message);
         self.notify_of_frame(frame, callback);
     }
@@ -556,12 +583,27 @@ impl System {
         let mut conninfo = self.conn.lock().unwrap();
 
         conninfo.callback = Some(callback.clone());
+        conninfo.last_received = Some(Instant::now());
         let (_channel_info, channel_stats) = conninfo
             .channels
             .entry(callback.channel_id())
             .or_insert_with(|| (callback.info().clone(), ChannelStats::default()));
 
         channel_stats.push_received(frame.sequence(), frame.body_length());
+    }
+
+    /// How long since the last frame from this system arrived; `None` if none ever arrived live.
+    pub fn downlink_silence(&self) -> Option<Duration> {
+        let conninfo = self.conn.lock().unwrap();
+        conninfo.last_received.map(|t| t.elapsed())
+    }
+
+    /// How long since the vehicle last reported receiving anything from us, going by its
+    /// `LINK_NODE_STATUS` counter; `None` if it never reported one live. Only as fine-grained as
+    /// that message's rate.
+    pub fn uplink_silence(&self) -> Option<Duration> {
+        let conninfo = self.conn.lock().unwrap();
+        conninfo.uplink_heard.map(|(_, t)| t.elapsed())
     }
 
     pub fn channels(&self) -> Vec<(ChannelInfo, ChannelStats)> {

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use nadir_core::System;
 use nadir_core::mav::ChannelDetails;
 
@@ -8,7 +10,7 @@ use mavspec::rust::dialects::common::messages::{LinkNodeStatus, RadioStatus};
 use crate::{
     colors::{COLOR_INDICATOR_GOOD, COLOR_INDICATOR_LIMITS, COLOR_INDICATOR_WARNING, readable},
     panes::PaneUi,
-    widgets::Readout,
+    widgets::{Readout, link_silence, silence_text},
 };
 
 /// The figures the compact summary shows in place of the link diagram.
@@ -19,6 +21,8 @@ struct LinkSummary {
     down_data: f32,
     uplink_quality: Option<f32>,
     downlink_quality: Option<f32>,
+    uplink_silence: Option<Duration>,
+    downlink_silence: Option<Duration>,
     radio_status: Option<RadioStatus>,
 }
 
@@ -174,17 +178,29 @@ impl LinksPane {
 
                 // Same up/down glyph pair the sidebar uses for its data rates; B612 has no
                 // triangles, so anything else here renders as tofu.
-                for (arrow, lq, packets, data) in [
-                    ("⏫", links.uplink_quality, links.up_packets, links.up_data),
+                for (arrow, lq, silence, packets, data) in [
+                    (
+                        "⏫",
+                        links.uplink_quality,
+                        links.uplink_silence,
+                        links.up_packets,
+                        links.up_data,
+                    ),
                     (
                         "⏬",
                         links.downlink_quality,
+                        links.downlink_silence,
                         links.down_packets,
                         links.down_data,
                     ),
                 ] {
                     ui.weak(arrow);
-                    self.draw_link_quality(ui, lq);
+                    ui.horizontal(|ui| {
+                        self.draw_link_quality(ui, lq);
+                        if let Some(silence) = silence {
+                            ui.label(silence_text(ui, silence));
+                        }
+                    });
                     ui.add(Self::rate(ui, packets, 1, 5));
                     if with_data_rate {
                         ui.add(Self::rate(ui, data / 1024.0, 2, 5));
@@ -287,9 +303,18 @@ impl PaneUi for LinksPane {
 
         let radio_status = system.last_message::<RadioStatus>().ok();
 
-        let local_uplink_quality = system.last_message::<LinkNodeStatus>().ok().map(|lns| {
-            (lns.messages_received as f32) / ((lns.messages_received + lns.messages_lost) as f32)
-        });
+        let (downlink_silence, uplink_silence) = link_silence(ui, &system);
+
+        // The last report outlives the link that carried it; once the vehicle has gone quiet about
+        // our uplink, its old figure says nothing about the link now.
+        let local_uplink_quality = system
+            .last_message::<LinkNodeStatus>()
+            .ok()
+            .filter(|_| uplink_silence.is_none())
+            .map(|lns| {
+                (lns.messages_received as f32)
+                    / ((lns.messages_received + lns.messages_lost) as f32)
+            });
         let local_downlink_quality = Some(1.0 - down_packet_loss);
 
         let remote_uplink_quality = radio_status
@@ -309,6 +334,8 @@ impl PaneUi for LinksPane {
                     down_data,
                     uplink_quality: local_uplink_quality,
                     downlink_quality: local_downlink_quality,
+                    uplink_silence,
+                    downlink_silence,
                     radio_status,
                 },
             );
@@ -380,11 +407,29 @@ impl PaneUi for LinksPane {
         let local_center = rect.left_center().lerp(local_link_target, 0.5);
         let s = Vec2::new(90.0, 20.0);
 
-        for (sign, lq) in [(-1.0, local_uplink_quality), (1.0, local_downlink_quality)] {
+        for (sign, lq, silence) in [
+            (-1.0, local_uplink_quality, uplink_silence),
+            (1.0, local_downlink_quality, downlink_silence),
+        ] {
             ui.place(
                 Rect::from_center_size(local_center + Vec2::new(0.0, off_quality * sign), s),
                 |ui: &mut egui::Ui| self.draw_link_quality(ui, lq),
             );
+            // Beside the percentage rather than with it, so it stays centred on the link line.
+            // Left-aligned from a fixed start, since the timer's width changes as it counts.
+            if let Some(silence) = silence {
+                let row =
+                    Rect::from_center_size(local_center + Vec2::new(0.0, off_quality * sign), s);
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(Rect::from_min_max(
+                            Pos2::new(local_center.x + 28.0, row.top()),
+                            Pos2::new(local_center.x + 28.0 + s.x, row.bottom()),
+                        ))
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| ui.label(silence_text(ui, silence)),
+                );
+            }
         }
 
         for (sign, pkts) in [(-1.0, up_packets), (1.0, down_packets)] {

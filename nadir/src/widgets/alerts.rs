@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use chrono::TimeDelta;
 use nadir_core::System;
@@ -99,7 +100,13 @@ pub(crate) fn link_quality(system: &System) -> (Option<f32>, Option<f32>) {
         downlink.push(1.0 - loss / down_packets);
     }
 
-    if let Ok(lns) = system.last_message::<LinkNodeStatus>() {
+    // A stale report outlives the link that carried it, see [`link_silence`].
+    let uplink_silent = system
+        .uplink_silence()
+        .is_some_and(|d| d >= UPLINK_SILENT_AFTER);
+    if let Ok(lns) = system.last_message::<LinkNodeStatus>()
+        && !uplink_silent
+    {
         let total = lns.messages_received as f32 + lns.messages_lost as f32;
         if total > 0.0 {
             uplink.push(lns.messages_received as f32 / total);
@@ -115,6 +122,49 @@ pub(crate) fn link_quality(system: &System) -> (Option<f32>, Option<f32>) {
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     };
     (worst(downlink), worst(uplink))
+}
+
+/// Gaps shorter than these are ordinary packet spacing, not a silent link. The downlink one matches
+/// the 1 s window the packet rates are taken over; the uplink one has to outlast the interval
+/// `LINK_NODE_STATUS` arrives at (1 s from zenith, 2 s as requested), since that is the only news
+/// of the uplink there is.
+const DOWNLINK_SILENT_AFTER: Duration = Duration::from_secs(1);
+const UPLINK_SILENT_AFTER: Duration = Duration::from_secs(3);
+
+/// How long the downlink and uplink have each been silent, once that is longer than ordinary packet
+/// spacing; `None` while the link is fine or there is no live link to time.
+pub(crate) fn link_silence(ui: &egui::Ui, system: &System) -> (Option<Duration>, Option<Duration>) {
+    let downlink = system.downlink_silence();
+    let uplink = system.uplink_silence();
+
+    // Nothing else repaints a link that went quiet, so keep the timers ticking (and appearing) on
+    // their own.
+    if downlink.is_some() || uplink.is_some() {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
+
+    (
+        downlink.filter(|d| *d >= DOWNLINK_SILENT_AFTER),
+        uplink.filter(|d| *d >= UPLINK_SILENT_AFTER),
+    )
+}
+
+/// A link silence as a short counting-up timer, e.g. "4.2s" or "3m07s".
+pub(crate) fn format_silence(silence: Duration) -> String {
+    let secs = silence.as_secs_f32();
+    if secs < 60.0 {
+        format!("{secs:.1}s")
+    } else {
+        let secs = silence.as_secs();
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    }
+}
+
+/// [`format_silence`], in red.
+pub(crate) fn silence_text(ui: &egui::Ui, silence: Duration) -> RichText {
+    RichText::new(format_silence(silence))
+        .monospace()
+        .color(readable(COLOR_INDICATOR_LIMITS, ui.visuals()))
 }
 
 /// Which severity an [`AlertLine`] renders. The two tiers stack as separate rows in the status

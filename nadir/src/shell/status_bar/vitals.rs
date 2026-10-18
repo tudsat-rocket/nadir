@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use nadir_core::{System, mav_type_icon};
 
 use eframe::egui;
@@ -16,7 +18,7 @@ use crate::colors::{
 use crate::panes::LogsPane;
 use crate::widgets::{
     ArmedBadge, AutopilotLogo, BatteryReading, Camera, Readout, STALE_AFTER, TEXT_SIZE,
-    column_header, link_quality, small_text, soc_color,
+    column_header, format_silence, link_quality, link_silence, small_text, soc_color,
 };
 
 /// Same dim-to-strong ramp as the battery indicator widget: current only lights up as it climbs, so
@@ -285,6 +287,15 @@ impl Vitals<'_> {
         // On narrow windows the Links pane is dropped from the status bar entirely, and these two
         // numbers are all that is left of it.
         let (downlink, uplink) = link_quality(system);
+        let (downlink_silence, uplink_silence) = link_silence(ui, system);
+        let link_silence_segments = |silence: Option<Duration>| {
+            silence.into_iter().flat_map(|silence| {
+                [
+                    Segment::Gap(4.0),
+                    Segment::Text(format_silence(silence), limits),
+                ]
+            })
+        };
         let link_quality_segment = |lq: Option<f32>| match lq {
             Some(lq) => {
                 let color = if lq > 0.9 {
@@ -298,11 +309,11 @@ impl Vitals<'_> {
             }
             None => Segment::Text("--".into(), nodata),
         };
-        let link_cell = vec![
-            link_quality_segment(downlink),
-            Segment::Icon("⬆"),
-            link_quality_segment(uplink),
-        ];
+        let link_cell = std::iter::once(link_quality_segment(downlink))
+            .chain(link_silence_segments(downlink_silence))
+            .chain([Segment::Icon("⬆"), link_quality_segment(uplink)])
+            .chain(link_silence_segments(uplink_silence))
+            .collect();
 
         let mut camera_cell = Vec::new();
         for (i, camera) in Camera::all(system).into_iter().enumerate() {
