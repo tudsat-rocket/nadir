@@ -27,6 +27,7 @@ const TIMESTAMP_LEN: usize = 8;
 const HEADER_LEN: usize = 10;
 const CHECKSUM_LEN: usize = 2;
 const SIGNATURE_LEN: usize = 13;
+const MAGIC_V1: u8 = 0xfe;
 const MAGIC_V2: u8 = 0xfd;
 const INCOMPAT_SIGNED: u8 = 0x01;
 
@@ -236,6 +237,8 @@ pub enum ReadError {
     Desynchronised(u64),
     #[error("Malformed frame in the telemetry log: {0:?}")]
     Frame(FrameError),
+    #[error("Malformed MAVLink 1 frame in the telemetry log: {0}")]
+    V1(mavlink_tlog::FrameError),
 }
 
 /// Splits a byte stream into records, however the bytes happen to be chopped up.
@@ -444,8 +447,11 @@ fn timestamp_of(record: &[u8]) -> Option<DateTime<Utc>> {
 fn record_len(record: &[u8]) -> Option<usize> {
     let header = record.get(TIMESTAMP_LEN..TIMESTAMP_LEN + HEADER_LEN)?;
 
-    // A V1 record is skipped like garbage: the ground station is V2 throughout, so there is nothing
-    // to hand one to.
+    // A V1 record (SiK radios, older autopilots) is upgraded to V2 by `decode`.
+    if header[0] == MAGIC_V1 {
+        return Some(TIMESTAMP_LEN + 6 + header[1] as usize + CHECKSUM_LEN);
+    }
+
     if header[0] != MAGIC_V2 {
         return None;
     }
@@ -463,7 +469,12 @@ fn record_len(record: &[u8]) -> Option<usize> {
 /// measured by [`record_len`].
 fn decode(record: &[u8]) -> Result<Record, ReadError> {
     let received_at = timestamp_of(record).ok_or(ReadError::Truncated)?;
-    let frame_bytes = record.get(TIMESTAMP_LEN..).ok_or(ReadError::Truncated)?;
+    let mut frame_bytes = record.get(TIMESTAMP_LEN..).ok_or(ReadError::Truncated)?;
+
+    let mut upgraded = [0u8; 280];
+    if frame_bytes.first() == Some(&MAGIC_V1) {
+        frame_bytes = upgrade_v1(frame_bytes, &mut upgraded)?;
+    }
 
     // `deserialize` is marked unsafe to flag building frames out of arbitrary bytes rather than
     // because it can misbehave; mavio's own docs note the implementation is entirely safe Rust. Its
@@ -472,6 +483,25 @@ fn decode(record: &[u8]) -> Result<Record, ReadError> {
     let frame = unsafe { Frame::<V2>::deserialize(frame_bytes) }.map_err(ReadError::Frame)?;
 
     Ok(Record { received_at, frame })
+}
+
+/// Checks a `MAVLink` 1 frame against its message's CRC and re-encodes it as the V2 frame the rest of
+/// the ground station expects.
+fn upgrade_v1<'a>(frame: &[u8], out: &'a mut [u8; 280]) -> Result<&'a [u8], ReadError> {
+    use mavlink_tlog::{CrcPolicy, FrameRef, Header, Version};
+
+    let v1 = FrameRef::parse(frame, CrcPolicy::Strict).map_err(ReadError::V1)?;
+    let header = Header {
+        seq: v1.seq(),
+        sys_id: v1.sys_id(),
+        comp_id: v1.comp_id(),
+        msg_id: v1.msg_id(),
+    };
+    let len = mavlink_tlog::encode(Version::V2, header, v1.payload(), None, out).ok_or(
+        ReadError::V1(mavlink_tlog::FrameError::UnknownMessage(v1.msg_id())),
+    )?;
+
+    Ok(&out[..len])
 }
 
 /// A telemetry log on disk.
@@ -691,6 +721,62 @@ mod tests {
         assert!(reader.next().is_some_and(|r| r.is_ok()));
         assert!(matches!(reader.next(), Some(Err(ReadError::Truncated))));
         assert!(reader.next().is_none());
+    }
+
+    #[test]
+    fn a_mavlink1_record_reads_as_its_v2_equivalent() {
+        use mavlink_tlog::{Header, Version};
+
+        let header = Header {
+            seq: 9,
+            sys_id: 0x2a,
+            comp_id: 0x07,
+            msg_id: 0,
+        };
+        let payload = [0, 0, 0, 0, 2, 3, 0x51, 4, 3];
+        let mut v1 = [0u8; 32];
+        let len = mavlink_tlog::encode(Version::V1, header, &payload, None, &mut v1).unwrap();
+
+        let micros = stamp();
+        let mut log = micros.to_be_bytes().to_vec();
+        log.extend_from_slice(&v1[..len]);
+        log.extend_from_slice(&encode(stamp(), &frame()).unwrap());
+
+        let read: Vec<Record> = Reader::new(log.as_slice()).map(Result::unwrap).collect();
+
+        assert_eq!(read.len(), 2);
+        let frame = &read[0].frame;
+        assert_eq!(read[0].received_at.timestamp_micros(), micros as i64);
+        assert_eq!(frame.sequence(), 9);
+        assert_eq!(frame.system_id(), 0x2a);
+        assert_eq!(frame.component_id(), 0x07);
+        assert_eq!(frame.message_id(), 0);
+        assert!(matches!(
+            Heartbeat::try_from(frame.payload()),
+            Ok(Heartbeat {
+                mavlink_version: 3,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_mavlink1_record_with_a_bad_checksum_is_skipped() {
+        use mavlink_tlog::{Header, Version};
+
+        let mut v1 = [0u8; 32];
+        let len =
+            mavlink_tlog::encode(Version::V1, Header::default(), &[0; 9], None, &mut v1).unwrap();
+        v1[len - 1] ^= 0xff;
+
+        let mut log = stamp().to_be_bytes().to_vec();
+        log.extend_from_slice(&v1[..len]);
+        log.extend_from_slice(&encode(stamp(), &frame()).unwrap());
+
+        let read: Vec<_> = Reader::new(log.as_slice()).collect();
+
+        assert_eq!(read.len(), 1);
+        assert!(read[0].as_ref().is_ok_and(|r| r.frame.message_id() == 0));
     }
 
     #[test]

@@ -17,6 +17,7 @@ toml = { workspace = true }
 
 rapid-dialect = { workspace = true }
 siphasher = "1.0.3"
+mavlink-tlog = "0.1.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = { workspace = true }
